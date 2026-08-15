@@ -1,0 +1,7 @@
+# Default review routing — @konih owns all paths until additional maintainers join.
+* @konih
+
+# Protected contracts (GOVERNANCE.md) — explicit even while ownership is uniform.
+/packages/tms-contract/ @konih
+/docs/adr/ @konih
+/.github/ @konih
