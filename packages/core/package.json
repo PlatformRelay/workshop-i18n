@@ -1,0 +1,23 @@
+{
+  "name": "@workshop-i18n/core",
+  "version": "0.1.0",
+  "description": "Domain model: content identities, translation-unit states, staleness and release policy - pure, no I/O",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PlatformRelay/workshop-i18n.git",
+    "directory": "packages/core"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

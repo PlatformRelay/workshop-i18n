@@ -1,0 +1,23 @@
+{
+  "name": "@workshop-i18n/tms-contract",
+  "version": "0.1.0",
+  "description": "TMS port interface and fake-backed conformance kit for future provider adapters",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PlatformRelay/workshop-i18n.git",
+    "directory": "packages/tms-contract"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "@workshop-i18n/catalog-po",
+  "version": "0.1.0",
+  "description": "gettext PO catalog read/write: msgctxt identities, fuzzy tracking, source-hash provenance",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PlatformRelay/workshop-i18n.git",
+    "directory": "packages/catalog-po"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

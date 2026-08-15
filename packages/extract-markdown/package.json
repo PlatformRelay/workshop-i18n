@@ -1,0 +1,23 @@
+{
+  "name": "@workshop-i18n/extract-markdown",
+  "version": "0.1.0",
+  "description": "Translatable-prose extraction for lab Markdown files",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PlatformRelay/workshop-i18n.git",
+    "directory": "packages/extract-markdown"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

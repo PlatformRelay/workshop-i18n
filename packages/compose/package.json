@@ -1,0 +1,23 @@
+{
+  "name": "@workshop-i18n/compose",
+  "version": "0.1.0",
+  "description": "Locale tree composition: generated decks, governed slide overrides, fence-identity and protected-term gates",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PlatformRelay/workshop-i18n.git",
+    "directory": "packages/compose"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "@workshop-i18n/extract-slidev",
+  "version": "0.1.0",
+  "description": "Lossless Slidev deck extraction and reinsertion built on @slidev/parser and mdast",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PlatformRelay/workshop-i18n.git",
+    "directory": "packages/extract-slidev"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
