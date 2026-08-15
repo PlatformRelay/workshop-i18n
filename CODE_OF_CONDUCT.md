@@ -51,8 +51,8 @@ individual is officially representing the project in public spaces.
 Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to
 the project maintainers via the contact details on the
 [PlatformRelay GitHub organization page](https://github.com/PlatformRelay), or by
-opening a [GitHub Discussion](https://github.com/PlatformRelay/Kubernetes-Workshop/discussions)
-marked private/moderated if you'd rather not make the report public. All complaints
+email to the security contact listed in [SECURITY.md](SECURITY.md)
+if you'd rather not make the report public. All complaints
 will be reviewed and investigated promptly and fairly.
 
 ## Attribution
