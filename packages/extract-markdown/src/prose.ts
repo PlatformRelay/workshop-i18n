@@ -45,7 +45,7 @@
  * is reported as a coverage gap rather than silently dropped.
  */
 
-import type { Node, Nodes, Parent, RootContent } from 'mdast'
+import type { Definition, Node, Nodes, Parent, RootContent } from 'mdast'
 import { fromMarkdown } from 'mdast-util-from-markdown'
 import { gfmTableFromMarkdown } from 'mdast-util-gfm-table'
 import { gfmTable } from 'micromark-extension-gfm-table'
@@ -301,10 +301,40 @@ class ProseLocator {
     )
   }
 
+  /**
+   * Report a link reference definition whose *title* carries prose.
+   *
+   * The label and the target are skeleton, but a title renders — as a tooltip — and is
+   * not extracted. Locating it would mean re-parsing the three title syntaxes (`"…"`,
+   * `'…'`, `(…)`) out of the raw line for a construct neither consumer's labs currently
+   * use, so it is reported rather than guessed at. An untitled definition carries no
+   * prose at all and stays silent.
+   */
+  private reportDefinitionTitle(node: Definition): void {
+    const title = node.title
+    const start = node.position?.start?.offset
+    const end = node.position?.end?.offset
+    if (typeof title !== 'string' || title.trim() === '') return
+    if (start === undefined || end === undefined) return
+    this.diagnostics.push(
+      diagnostic(
+        this.file,
+        'prose-in-link-definition',
+        'warning',
+        `the title ${JSON.stringify(title)} on this link reference definition renders but is not extracted; move it into the link text to have it translated`,
+        this.base + start,
+        this.base + end,
+      ),
+    )
+  }
+
   /** Walk the blocks of one container, minting keys from `cursor`. */
   walk(nodes: readonly RootContent[], cursor: KeyCursor, depth: number): void {
     for (const node of nodes) {
       switch (node.type) {
+        case 'definition':
+          this.reportDefinitionTitle(node)
+          break
         case 'heading':
           this.emit(node, cursor.openHeading(node.depth), depth)
           break

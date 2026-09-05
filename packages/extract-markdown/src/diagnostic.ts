@@ -3,9 +3,18 @@
  *
  * A locator that silently skips content it does not understand produces a lab that
  * ships half-translated with a green build, which is the failure mode spec 001 names
- * ("never a silent mangle"). Every construct this package declines to handle therefore
- * leaves a diagnostic behind, carrying the offset *and* the line/column so a CLI can
- * point a human at the line.
+ * ("never a silent mangle"). So every construct that leaves **prose behind in English**
+ * reports itself, carrying the offset *and* the line/column so a CLI can point a human
+ * at the line.
+ *
+ * The converse is deliberately *not* true, and the distinction is worth stating because
+ * the two look alike from inside the walk. A paragraph holding only
+ * `![](./diagram.png)`, or a heading that is nothing but an inline-code
+ * `kubectl get pods`, is skipped **silently** — not because it is unsupported, but
+ * because there is nothing in it a translator could act on, and spec 001 FR-005 requires
+ * those bytes identical in every locale regardless. Reporting them would bury the real
+ * gaps under hundreds of findings that need no decision. A diagnostic here means "prose
+ * you wanted translated is not going to be", never merely "a span was skipped".
  *
  * Severity splits the two kinds: `error` means the file cannot be extracted correctly as
  * written and extraction fails closed on it; `warning` means extraction is lossless but
@@ -29,6 +38,8 @@ export type DiagnosticCode =
   | 'unsafe-unit-key'
   /** Prose inside a raw HTML block, which stays protected skeleton. */
   | 'prose-in-html-block'
+  /** A link reference definition carries a title, which renders but is not extracted. */
+  | 'prose-in-link-definition'
 
 /** One finding, located in the source. */
 export interface Diagnostic {

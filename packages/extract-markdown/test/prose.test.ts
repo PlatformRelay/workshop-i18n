@@ -181,6 +181,39 @@ describe('locateProse', () => {
     expect(located.diagnostics).toEqual([])
   })
 
+  describe('link reference definitions', () => {
+    it('reports a definition title, which renders but is not extracted', () => {
+      const source = '[docs]: https://kubernetes.io/docs/ "Kubernetes documentation"\n'
+      const located = locateProse(source, { start: 0, end: source.length, root: 'body' })
+      expect(located.spans).toEqual([])
+      expect(located.diagnostics.map((item) => item.code)).toEqual(['prose-in-link-definition'])
+      expect(located.diagnostics[0]?.severity).toBe('warning')
+      expect(located.diagnostics[0]?.message).toContain('Kubernetes documentation')
+    })
+
+    it('stays quiet about an untitled definition, which carries no prose', () => {
+      const source = '[docs]: https://kubernetes.io/docs/\n'
+      expect(
+        locateProse(source, { start: 0, end: source.length, root: 'body' }).diagnostics,
+      ).toEqual([])
+    })
+
+    it('never emits the label or the target as translatable text', () => {
+      const source = 'See [the docs][docs].\n\n[docs]: https://kubernetes.io/docs/\n'
+      expect(texts(source)).toEqual(['See [the docs][docs].'])
+    })
+  })
+
+  it('skips an image-only paragraph and an inline-code-only heading without a diagnostic', () => {
+    // Silence here is the stated policy, not an oversight: neither span holds anything a
+    // translator could act on, and a finding per image would bury the real gaps under
+    // hundreds that need no decision.
+    const source = '## `kubectl get pods`\n\n![](./diagram.png)\n'
+    const located = locateProse(source, { start: 0, end: source.length, root: 'body' })
+    expect(located.spans).toEqual([])
+    expect(located.diagnostics).toEqual([])
+  })
+
   it('pays back the byte-order mark the parser silently drops', () => {
     const source = '﻿# CRLF and BOM\n\nThis file starts with a mark.\n'
     for (const span of locate(source)) {
