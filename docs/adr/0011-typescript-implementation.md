@@ -77,7 +77,15 @@ already on a weaker basis and was wrong twice over:
   indented fence as frontmatter the scanner never opened. Where the two Slidev layers disagree,
   only the boundary is compared, and the exemption asserts the ```yaml form is why.
 
-  That second layer is not a curiosity: three defects lived in it. `RE_FRONTMATTER` is lazy and
+  Both directions of that disagreement are now refused rather than merely bounded. As well
+  as `matter()` finding a block in a ```yaml fence, `RE_FRONTMATTER` can find one on a
+  slide the scanner opened *no* block for: when `slice()` emits nothing and the next line
+  is blank, Slidev leaves `start` on the separator, so the slide's raw begins `---` and the
+  regex closes on any later dash run — one hidden inside a speaker note or a fence, where
+  the scanner could not see it. Measured: the renderer showed `-->` and nothing else, the
+  entire slide gone, with no diagnostic. That is `phantom-frontmatter`.
+
+  That second layer is not a curiosity: four defects lived in it. `RE_FRONTMATTER` is lazy and
   its close is not line-anchored, so the first `---` *anywhere* after the opener ends the block —
   an em dash typed as `---` in a `story` value truncates the frontmatter and renders `slideId:`
   to the audience. And `RE_YAML_CODEBLOCK` makes a leading ```yaml fence a legitimate frontmatter
@@ -89,6 +97,10 @@ already on a weaker basis and was wrong twice over:
 - It does **not** cover `@slidev/parser/fs`, which resolves `src:` includes. A deck that composes
   slides from other files renders content this package never sees unless those files are declared
   surfaces of their own.
+- It covers slide *boundaries and frontmatter*, and nothing below them. The prose locator — mdast
+  against Slidev's markdown-it — has no differential at all, and is the largest untested contract
+  in the package: a msgid may carry `<span class="kw-kicker">…</span>` or `{{ .Values.x }}`, and a
+  translation dropping either composes cleanly with no guard and no report.
 
 The comparison also runs over **composed output**, not only over extraction input: composing every
 unit with hostile translator text must leave Slidev's view of the deck — slide count, frontmatter
