@@ -319,7 +319,25 @@ export interface Policy {
  *
  * The thresholds are copied and the result is frozen, so a policy cannot be weakened
  * later through the object the caller still holds.
+ *
+ * `maxRequired` must be a plain object. `Object.entries` of a number, a boolean or an
+ * array yields no entries, so a non-object would have produced a policy with no
+ * ceilings at all — a gate that passes everything while carrying whatever name it was
+ * given.
  */
+/** A value `Object.entries` can meaningfully enumerate as a threshold map. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Render a rejected value for a message without invoking its own stringification. */
+function describe(value: unknown): string {
+  if (typeof value === 'string') return JSON.stringify(value)
+  if (value === null) return 'null'
+  if (Array.isArray(value)) return 'an array'
+  return typeof value
+}
+
 /** Policies this module built, and therefore already validated and froze. */
 const VALIDATED_POLICIES = new WeakSet<Policy>()
 
@@ -328,6 +346,15 @@ export function definePolicy(
   maxRequired: StateThresholds,
   options?: { readonly gateOptionalUnits?: boolean },
 ): Policy {
+  if (typeof name !== 'string' || name === '') {
+    throw new Error(`invalid policy: name must be a non-empty string, got ${describe(name)}`)
+  }
+  if (!isPlainObject(maxRequired)) {
+    throw new Error(
+      `policy ${JSON.stringify(name)}: maxRequired must be an object of state ceilings, ` +
+        `got ${describe(maxRequired)}`,
+    )
+  }
   const thresholds: Record<string, number> = {}
   for (const [key, limit] of Object.entries(maxRequired)) {
     if (!isUnitState(key)) {
@@ -407,11 +434,22 @@ export function resolvePolicy(policy: Policy | PolicyName): Policy {
     }
     return POLICIES[policy]
   }
-  if (VALIDATED_POLICIES.has(policy)) return policy
-  if (typeof policy?.name !== 'string') {
-    throw new Error(`invalid policy: name must be a string, got ${typeof policy?.name}`)
+  if (!isPlainObject(policy)) {
+    throw new Error(
+      `invalid policy: must be a policy object or a policy name, got ${describe(policy)}`,
+    )
   }
-  return definePolicy(policy.name, policy.maxRequired ?? {}, {
+  if (VALIDATED_POLICIES.has(policy as Policy)) return policy
+  // `maxRequired` is required, never defaulted to `{}`: an absent ceiling map from a
+  // `--policy-file` is a policy that gates nothing, and defaulting it would hand that
+  // back wearing the name `release`. Absent means malformed, not permissive.
+  if (!isPlainObject(policy.maxRequired)) {
+    throw new Error(
+      `invalid policy ${describe(policy.name)}: maxRequired must be an object of state ` +
+        `ceilings, got ${describe(policy.maxRequired)}`,
+    )
+  }
+  return definePolicy(policy.name as string, policy.maxRequired as StateThresholds, {
     gateOptionalUnits: policy.gateOptionalUnits === true,
   })
 }

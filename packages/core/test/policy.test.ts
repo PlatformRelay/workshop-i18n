@@ -273,6 +273,35 @@ describe('policy resolution', () => {
     expect(() => evaluatePolicy([], fromJson as unknown as Policy)).toThrow(/fuzzzy/)
   })
 
+  it('refuses a policy object with no ceilings rather than trusting its name', () => {
+    const draft = unit('slides:a:body/1', 'de', 's', 'needs-review')
+    const gap = unit('slides:a:body/2', 'de', 's', 'missing')
+    for (const forged of [
+      { name: 'release' },
+      { name: 'release', maxRequired: 42 },
+      { name: 'release', maxRequired: null },
+      { name: 'release', maxRequired: [] },
+      { name: 'release', maxRequired: 'release' },
+      { name: 'release', maxRequired: true },
+    ]) {
+      expect(() => evaluatePolicy([draft, gap], forged as unknown as Policy)).toThrow(/maxRequired/)
+      expect(() => resolvePolicy(forged as unknown as Policy)).toThrow(/maxRequired/)
+    }
+  })
+
+  it('refuses a policy that is not an object at all', () => {
+    for (const forged of [null, true, [], 42]) {
+      expect(() => resolvePolicy(forged as unknown as Policy)).toThrow(/policy/)
+    }
+  })
+
+  it('refuses an empty policy name — status --json must not report a nameless gate', () => {
+    expect(() => definePolicy('', { fuzzy: 0 })).toThrow(/name/)
+    expect(() =>
+      resolvePolicy({ name: '', maxRequired: {}, gateOptionalUnits: false } as Policy),
+    ).toThrow(/name/)
+  })
+
   it('normalises and freezes a hand-built policy object', () => {
     const fromJson = { name: 'raw', maxRequired: { fuzzy: 1 }, gateOptionalUnits: false }
     const resolved = resolvePolicy(fromJson as Policy)
