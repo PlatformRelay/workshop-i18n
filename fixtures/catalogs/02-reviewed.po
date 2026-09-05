@@ -1,0 +1,29 @@
+msgid ""
+msgstr ""
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: workshop-i18n\n"
+
+#. workshop-i18n-source: sections/03-pods.md
+#. workshop-i18n-hash: sha256:f3f9df29a26f57fd
+msgctxt "slides:s01:body/1"
+msgid "A Pod is a group of containers."
+msgstr "Ein Pod ist eine Gruppe von Containern."
+
+#. workshop-i18n-source: sections/03-pods.md
+#. workshop-i18n-hash: sha256:d6aa7c07d3f5c307
+msgctxt "slides:s01:body/2"
+msgid ""
+"Pods are **ephemeral**.\n"
+"Run `kubectl get pods`."
+msgstr ""
+"Pods sind **kurzlebig**.\n"
+"Führe `kubectl get pods` aus."
+
+#. workshop-i18n-source: sections/03-pods.md
+#. workshop-i18n-hash: sha256:acdaf0d29ab188a1
+msgctxt "slides:s02:body/1"
+msgid "A Service gives Pods a stable address."
+msgstr "Ein Service gibt Pods eine stabile Adresse."

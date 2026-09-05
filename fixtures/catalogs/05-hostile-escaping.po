@@ -1,0 +1,60 @@
+msgid ""
+msgstr ""
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: workshop-i18n\n"
+
+#. workshop-i18n-source: fixtures/hostile.md
+#. workshop-i18n-hash: sha256:5d09ca955faa123a
+msgctxt "slides:hostile:backslash/1"
+msgid "Windows path: C:\\srv\\data\\"
+msgstr ""
+
+#. workshop-i18n-source: fixtures/hostile.md
+#. workshop-i18n-hash: sha256:3cf7720ed52649cd
+msgctxt "slides:hostile:controls/1"
+msgid "tab\there, nul\000here, del\177here"
+msgstr ""
+
+#. workshop-i18n-source: fixtures/hostile.md
+#. workshop-i18n-hash: sha256:e3b0c44298fc1c14
+msgctxt "slides:hostile:empty/1"
+msgid ""
+msgstr ""
+
+#. workshop-i18n-source: fixtures/hostile.md
+#. workshop-i18n-hash: sha256:1ee8ecdd7c7f72d3
+msgctxt "slides:hostile:long/1"
+msgid "lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet lorem ipsum dolor sit amet end"
+msgstr ""
+
+#. workshop-i18n-source: fixtures/hostile.md
+#. workshop-i18n-hash: sha256:b6285c57e8797db5
+msgctxt "slides:hostile:newlines/1"
+msgid ""
+"one\n"
+"two\n"
+"three\n"
+msgstr ""
+
+#. workshop-i18n-source: fixtures/hostile.md
+#. workshop-i18n-hash: sha256:485656b0ee45ef6d
+msgctxt "slides:hostile:posyntax/1"
+msgid ""
+"msgid \"not really\"\n"
+"#~ msgstr \"nor this\""
+msgstr ""
+
+#. workshop-i18n-source: fixtures/hostile.md
+#. workshop-i18n-hash: sha256:6d44082ce03358e3
+msgctxt "slides:hostile:quotes/1"
+msgid "He said \"hello\" — loudly."
+msgstr ""
+
+#. workshop-i18n-source: fixtures/hostile.md
+#. workshop-i18n-hash: sha256:6333e1dc7b3e95ba
+msgctxt "slides:hostile:unicode/1"
+msgid "Grüße, 日本語, Ελληνικά, עברית, 🎉"
+msgstr ""

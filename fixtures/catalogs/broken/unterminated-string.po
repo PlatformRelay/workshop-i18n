@@ -1,0 +1,6 @@
+msgid ""
+msgstr "Language: de\n"
+
+msgctxt "slides:s01:body/1"
+msgid "the quote never closes
+msgstr ""

@@ -1,0 +1,10 @@
+msgid ""
+msgstr "Language: de\n"
+
+msgctxt "slides:s01:body/1"
+msgid "First copy."
+msgstr ""
+
+msgctxt "slides:s01:body/1"
+msgid "Second copy after a bad merge."
+msgstr ""

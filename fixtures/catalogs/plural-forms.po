@@ -1,0 +1,16 @@
+msgid ""
+msgstr ""
+"Language: de\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Plural-Forms: nplurals=2; plural=n != 1;\n"
+
+#. a plural entry the codec preserves but the unit model does not translate
+msgctxt "slides:s09:count/1"
+msgid "one Pod is running"
+msgid_plural "%d Pods are running"
+msgstr[0] "ein Pod läuft"
+msgstr[1] "%d Pods laufen"
+
+#~ msgctxt "slides:s09:gone/1"
+#~ msgid "A removed line."
+#~ msgstr "Eine entfernte Zeile."

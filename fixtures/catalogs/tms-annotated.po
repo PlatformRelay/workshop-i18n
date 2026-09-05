@@ -1,0 +1,26 @@
+msgid ""
+msgstr ""
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: Weblate 5.4\n"
+"X-Weblate-Project: kubernetes-workshop\n"
+"Plural-Forms: nplurals=2; plural=n != 1;\n"
+
+# Reviewed by A. Translator on the 2026-08 pass.
+#. workshop-i18n-source: sections/03-pods.md
+#. workshop-i18n-hash: sha256:f3f9df29a26f57fd
+#: legacy/slides/03-pods.md:41
+#% a comment class this tool does not model
+#, c-format, python-brace-format
+msgctxt "slides:s01:body/1"
+msgid "A Pod is a group of containers."
+msgstr "Ein Pod ist eine Gruppe von Containern."
+
+#. workshop-i18n-source: sections/03-pods.md
+#. workshop-i18n-hash: sha256:acdaf0d29ab188a1
+#, needs-review
+msgctxt "slides:s02:body/1"
+msgid "A Service gives Pods a stable address."
+msgstr "Ein Service gibt Pods eine stabile Adresse."
