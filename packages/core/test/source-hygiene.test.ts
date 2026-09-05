@@ -8,14 +8,21 @@ import { describe, expect, it } from 'vitest'
  * degrades to "Binary files differ" and the review UI renders nothing. A file nobody
  * can read a diff of is a file nobody reviews, which matters most in exactly the
  * modules that encode constitution V. One such byte shipped in `policy.ts`, so this
- * pins the property instead of relying on noticing it again.
+ * pins the property for `src/` and `test/` instead of relying on noticing it again.
+ *
+ * Hostile bytes belong in tests as escape sequences (`'a\\u0000b'`), which this allows:
+ * it is the raw byte in the file that breaks review, not the value under test.
  */
-const SOURCE_DIRECTORY = fileURLToPath(new URL('../src', import.meta.url))
+const DIRECTORIES = ['../src', '../test'].map((relative) =>
+  fileURLToPath(new URL(relative, import.meta.url)),
+)
 
 function sourceFiles(): readonly string[] {
-  return readdirSync(SOURCE_DIRECTORY)
-    .filter((name) => name.endsWith('.ts'))
-    .map((name) => join(SOURCE_DIRECTORY, name))
+  return DIRECTORIES.flatMap((directory) =>
+    readdirSync(directory)
+      .filter((name) => name.endsWith('.ts'))
+      .map((name) => join(directory, name)),
+  )
 }
 
 describe('source hygiene', () => {
@@ -23,7 +30,7 @@ describe('source hygiene', () => {
     expect(sourceFiles().length).toBeGreaterThan(3)
   })
 
-  it('keeps every source file free of raw control bytes, so git can diff it as text', () => {
+  it('keeps every source and test file free of raw control bytes, so git diffs them as text', () => {
     const offenders: string[] = []
     for (const file of sourceFiles()) {
       const bytes = readFileSync(file)
