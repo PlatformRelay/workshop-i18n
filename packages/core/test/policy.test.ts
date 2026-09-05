@@ -10,6 +10,7 @@ import {
   type PolicyName,
   parseUnitId,
   resolvePolicy,
+  type StateThresholds,
   tallyUnitStates,
   type UnitState,
   type UnitStatus,
@@ -209,6 +210,19 @@ describe('policy resolution', () => {
     expect(resolvePolicy(POLICIES.release)).toBe(POLICIES.release)
   })
 
+  it('cannot be weakened at runtime — the built-in policies are deep-frozen', () => {
+    expect(Object.isFrozen(POLICIES)).toBe(true)
+    expect(Object.isFrozen(POLICIES.release)).toBe(true)
+    expect(Object.isFrozen(POLICIES.release.maxRequired)).toBe(true)
+    expect(() => {
+      ;(POLICIES.release.maxRequired as Record<UnitState, number>)['needs-review'] = 999
+    }).toThrow(TypeError)
+    expect(POLICIES.release.maxRequired['needs-review']).toBe(0)
+    expect(
+      evaluatePolicy([unit('slides:a:body/1', 'de', 's', 'needs-review')], 'release').satisfied,
+    ).toBe(false)
+  })
+
   it('leaves the exit-code decision to the caller', () => {
     expect(evaluatePolicy(mixed, 'release')).not.toHaveProperty('exitCode')
   })
@@ -239,6 +253,21 @@ describe('definePolicy', () => {
     const strict = definePolicy('strict', { missing: 0 }, { gateOptionalUnits: true })
     const units = [unit('slides:a:note/1', 'de', 's', 'missing', false)]
     expect(evaluatePolicy(units, strict).satisfied).toBe(false)
+  })
+
+  it('rejects an unknown state key, so a misspelled gate cannot pass for a gate', () => {
+    const typo = { needsReview: 0 } as unknown as StateThresholds
+    expect(() => definePolicy('typo', typo)).toThrow(/needsReview/)
+    expect(() => definePolicy('typo', typo)).toThrow(/needs-review/)
+  })
+
+  it('copies the thresholds it was given and freezes what it returns', () => {
+    const thresholds = { fuzzy: 1 }
+    const policy = definePolicy('snapshot', thresholds)
+    thresholds.fuzzy = 99
+    expect(policy.maxRequired.fuzzy).toBe(1)
+    expect(Object.isFrozen(policy)).toBe(true)
+    expect(Object.isFrozen(policy.maxRequired)).toBe(true)
   })
 
   it('rejects a negative or non-integer threshold', () => {
