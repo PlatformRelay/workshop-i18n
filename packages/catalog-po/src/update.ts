@@ -217,16 +217,32 @@ export function updateCatalog(options: UpdateCatalogOptions): UpdateResult {
 }
 
 /**
- * May a draft be written over this entry? True only for `missing` (nothing there) and
- * `needs-review` (an earlier draft, which is machine work, not human work).
+ * May a draft be written over this entry? True when no human wrote what is there:
+ *
+ * - `missing` — nothing is there;
+ * - `needs-review` — an earlier draft, which is machine work;
+ * - `fuzzy` **while still carrying {@link NEEDS_REVIEW_FLAG}** — a machine draft whose
+ *   English moved under it, which is still machine work.
+ *
+ * That last case is why this reads flags rather than the collapsed {@link CatalogEntry.state}.
+ * `fuzzy` takes precedence in the state mapping, so a seeded unit whose source later
+ * changed reports `fuzzy` and the state alone can no longer tell whether a human ever
+ * touched it. The catalog still knows — `needs-review` is right there on the entry — and
+ * discarding that would make a machine-seeded unit permanently un-re-seedable while
+ * telling the operator, falsely, that it was protecting human work.
+ *
+ * A `fuzzy` entry *without* that marker is a human's translation waiting to be
+ * revalidated against a moved source, and stays protected: on spec 004 FR-001's plain
+ * reading it is a human-touched entry.
  *
  * A bulk seeding pass filters on this; {@link applyDraftTranslation} enforces it. Both
  * exist because spec 004 FR-001 requires seeding to never overwrite a human-touched
- * entry, and a predicate that callers can ask *before* acting is friendlier than a
- * thrown error they have to catch per unit.
+ * entry, and a predicate callers can ask *before* acting is friendlier than a thrown
+ * error they must catch per unit.
  */
 export function isDraftable(entry: CatalogEntry): boolean {
-  return entry.state === 'missing' || entry.state === 'needs-review'
+  if (entry.state === 'missing' || entry.state === 'needs-review') return true
+  return entry.state === 'fuzzy' && entry.po.flags.includes(NEEDS_REVIEW_FLAG)
 }
 
 /**
@@ -253,7 +269,8 @@ export function isDraftable(entry: CatalogEntry): boolean {
  * *ship*, but the human's work would still be gone.
  *
  * A stale `fuzzy` marker is only ever cleared on an entry that had no human translation
- * under it; the entry stays gated by {@link NEEDS_REVIEW_FLAG} either way.
+ * under it — either nothing was there, or what was there was an earlier draft. The entry
+ * stays gated by {@link NEEDS_REVIEW_FLAG} either way.
  *
  * @throws {CatalogError} when the catalog has no live entry for `id`; when the entry
  *   holds human work ({@link isDraftable} is false); or when the draft is empty — an
@@ -278,10 +295,14 @@ export function applyDraftTranslation(catalog: Catalog, id: UnitId, translation:
   }
 
   if (!isDraftable(entry)) {
+    // Only reachable for `reviewed`, and for `fuzzy` with no draft marker — both of
+    // which are human work. The message may never call a machine draft human-authored,
+    // so it says which marker it looked for and did not find.
     throw new CatalogError(
       undefined,
       `refusing to overwrite the human-authored translation of unit id ${JSON.stringify(key)} ` +
-        `(state ${JSON.stringify(entry.state)}) with a draft`,
+        `(state ${JSON.stringify(entry.state)}) with a draft: it carries no ` +
+        `${JSON.stringify(NEEDS_REVIEW_FLAG)} flag, so it is not a machine draft`,
     )
   }
 

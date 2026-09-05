@@ -10,6 +10,7 @@ import {
   applyDraftTranslation,
   catalogStatuses,
   isDraftable,
+  NEEDS_REVIEW_FLAG,
   parseCatalog,
   serializeCatalog,
   updateCatalog,
@@ -303,6 +304,47 @@ describe('drafted translations (FR-007, constitution V)', () => {
     const twice = applyDraftTranslation(once, parseUnitId('slides:s01:body/1'), 'Zweite Fassung.')
     expect(twice.entries[0]?.translation).toBe('Zweite Fassung.')
     expect(twice.entries[0]?.state).toBe('needs-review')
+  })
+
+  /**
+   * The seed lane's re-run path (spec 004 US-1 scenario 3). A machine draft whose English
+   * later moved carries BOTH `needs-review` and `fuzzy`; collapsing those into one
+   * `UnitState` reports `fuzzy` and loses the fact that no human ever touched it. The
+   * catalog still carries the proof — `needs-review` is right there on the entry — so
+   * the flags, not the collapsed state, decide whether re-drafting is destructive.
+   */
+  it('re-drafts a machine draft whose English moved under it', () => {
+    const fresh = updateCatalog({ identity: IDENTITY, units: BASE }).catalog
+    const seeded = applyDraftTranslation(fresh, parseUnitId('slides:s01:body/1'), 'MASCHINE v1')
+    expect(seeded.entries[0]?.state).toBe('needs-review')
+
+    const edited = BASE.map((u, index) =>
+      index === 0 ? unit('slides:s01:body/1', 'A Pod is a group of one or more containers.') : u,
+    )
+    const stale = updateCatalog({ identity: IDENTITY, units: edited, previous: seeded }).catalog
+    const entry = stale.entries[0]
+    expect(entry?.state).toBe('fuzzy')
+    expect(entry?.po.flags).toContain(NEEDS_REVIEW_FLAG)
+    expect(entry?.translation).toBe('MASCHINE v1')
+
+    // No human work is present, so this must not be refused as human-authored.
+    expect(entry === undefined ? false : isDraftable(entry)).toBe(true)
+    const reseeded = applyDraftTranslation(stale, parseUnitId('slides:s01:body/1'), 'MASCHINE v2')
+    expect(reseeded.entries[0]?.translation).toBe('MASCHINE v2')
+    expect(reseeded.entries[0]?.state).toBe('needs-review')
+    expect(reseeded.entries[0]?.po.flags).not.toContain('fuzzy')
+  })
+
+  it('still refuses a fuzzy entry that carries no draft marker, and says why truthfully', () => {
+    const previous = reviewedCatalog()
+    const edited = BASE.map((u, index) =>
+      index === 0 ? unit('slides:s01:body/1', 'A Pod holds containers.') : u,
+    )
+    const stale = updateCatalog({ identity: IDENTITY, units: edited, previous }).catalog
+    expect(stale.entries[0]?.po.flags).not.toContain(NEEDS_REVIEW_FLAG)
+    expect(() =>
+      applyDraftTranslation(stale, parseUnitId('slides:s01:body/1'), 'MASCHINE'),
+    ).toThrow(/human-authored/)
   })
 
   it('exposes the predicate a bulk seeding pass filters on', () => {
