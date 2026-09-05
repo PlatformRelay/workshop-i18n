@@ -102,6 +102,32 @@ describe('validateUnitId', () => {
     }
   })
 
+  it('reports a hostile surface as an issue, and never runs its toString', () => {
+    const hostile: unknown[] = [
+      42,
+      null,
+      undefined,
+      Object.create(null),
+      Symbol('surface'),
+      10n,
+      {
+        toString() {
+          throw new Error('boom')
+        },
+      },
+      {
+        get [Symbol.toPrimitive]() {
+          throw new Error('boom')
+        },
+      },
+    ]
+    for (const surface of hostile) {
+      const id = { surface, containerId: 'ok', unitKey: 'body/1' } as unknown as UnitId
+      expect(validateUnitId(id)[0]).toMatchObject({ field: 'surface', reason: 'unknown-surface' })
+      expect(() => assertSafeUnitId(id)).toThrow(UnitIdError)
+    }
+  })
+
   it('reports a non-string unit key the same way', () => {
     const id = { surface: 'labs', containerId: 'lab-01', unitKey: 7 } as unknown as UnitId
     expect(validateUnitId(id)[0]).toMatchObject({ field: 'unitKey', reason: 'not-a-string' })

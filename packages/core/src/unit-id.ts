@@ -180,13 +180,12 @@ export function isSafeUnitKey(value: string): boolean {
 export function validateUnitId(id: UnitId): readonly UnitIdIssue[] {
   const issues: UnitIdIssue[] = []
   if (!isSurface(id.surface)) {
+    // The raw value, never `String(value)`: stringifying here would run a
+    // content-supplied `toString` inside the validator — arbitrary execution in the
+    // module SECURITY.md designates as the hostile-input boundary. `describeValue`
+    // renders it without asking the value how it would like to be printed.
     issues.push(
-      issue(
-        'surface',
-        'unknown-surface',
-        String(id.surface),
-        `must be one of ${SURFACES.join(', ')}`,
-      ),
+      issue('surface', 'unknown-surface', id.surface, `must be one of ${SURFACES.join(', ')}`),
     )
   }
   const container = checkContainerId(id.containerId)
