@@ -5,6 +5,7 @@ import {
   type CatalogIdentity,
   DuplicateCatalogEntryError,
   parseCatalog,
+  readCatalog,
   serializeCatalog,
   UnsupportedPoError,
 } from '../src/index.js'
@@ -163,6 +164,28 @@ describe('parseCatalog — untrusted input', () => {
       '',
     ].join('\n')
     expect(read(text).entries[0]?.recordedHash).toBeUndefined()
+  })
+
+  it('refuses a headerless catalog rather than inventing a header for it', () => {
+    // Both entry points into this layer agree: an empty file is a catalog that does not
+    // exist yet, a file with entries and no header is a broken one.
+    const headerless = {
+      entries: [
+        {
+          comments: [],
+          flags: [],
+          msgctxt: 'slides:s01:body/1',
+          msgid: 'A',
+          msgstr: [''],
+          obsolete: false,
+          line: 3,
+        },
+      ],
+    }
+    expect(() => readCatalog(headerless, { identity: IDENTITY, fileName: FILE })).toThrow(
+      /entries but no header entry/,
+    )
+    expect(readCatalog({ entries: [] }, { identity: IDENTITY, fileName: FILE }).entries).toEqual([])
   })
 
   it('refuses a second header entry rather than dropping its fields', () => {

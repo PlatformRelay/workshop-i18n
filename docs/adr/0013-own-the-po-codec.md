@@ -56,3 +56,27 @@ implemented here rather than in a wrapper.
   of being asserted about a dependency's formatting.
 - If the scope ever grows past what this justifies, the codec is a package boundary and can be
   swapped behind its interface.
+
+### Normalizations the canonical form applies
+
+Owning the write side means owning a canonical spelling, so reading and re-writing a catalog
+produced by other tools changes bytes that carry no meaning. All of these are deterministic and
+idempotent — they happen once, on adoption, not on every run:
+
+- **Line wrapping is re-flowed.** GNU wraps string values at a column; we break only after
+  embedded newlines (equivalent to `msgcat --no-wrap`). Adopting a catalog written by GNU tools
+  or by a TMS therefore produces one large diff the first time and none afterwards. Column
+  wrapping is rejected precisely because it makes the bytes depend on a width constant and
+  re-flows a whole entry when one word changes, which is the opposite of FR-005.
+- **A UTF-8 BOM is dropped and CRLF line endings become LF.** Catalogs are UTF-8 (ADR 0004) and
+  git-native; a BOM and CRLF are both read without complaint and neither is re-emitted.
+- **Comment and flag order is canonicalised.** Comments keep the order they were read in, but the
+  groups are emitted in gettext's order — comments, then `#,` flags, then `#|` previous-source —
+  and duplicate flags collapse. No comment class or flag is dropped, including ones we do not
+  interpret.
+
+One asymmetry is worth naming: we keep `#.` and `#:` comments on obsolete (`#~`) entries, because
+they record what a preserved translation was made against. GNU's own writer skips them for
+obsolete entries, so a `msgcat` round trip through another tool will drop them. Nothing depends on
+their retention — the update algorithm rebuilds provenance from the English source when a unit
+returns — so this is a graceful loss, not a correctness one.

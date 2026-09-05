@@ -140,7 +140,21 @@ function finishEntry(builder: Builder, fileName: string): PoEntry | undefined {
 
   const msgid = decode(builder, 'msgid', fileName)
   if (msgid === undefined) {
-    throw new PoSyntaxError(at, 'entry has no msgid')
+    // Say what the author actually did, not which field the parser wanted next.
+    if (builder.slots.size === 0) {
+      throw new PoSyntaxError(
+        at,
+        'comment block is not followed by an entry — a catalog cannot end with, or ' +
+          'contain, comments that belong to no msgid',
+      )
+    }
+    const context = decode(builder, 'msgctxt', fileName)
+    throw new PoSyntaxError(
+      at,
+      context === undefined
+        ? 'entry is missing its msgid'
+        : `entry ${JSON.stringify(context)} has a msgctxt but no msgid`,
+    )
   }
 
   const msgidPlural = decode(builder, 'msgid_plural', fileName)
@@ -174,7 +188,9 @@ function finishEntry(builder: Builder, fileName: string): PoEntry | undefined {
   }
 
   if (singular === undefined && indexed.length === 0) {
-    throw new PoSyntaxError(at, 'entry has no msgstr')
+    const context = decode(builder, 'msgctxt', fileName)
+    const which = context === undefined ? `msgid ${JSON.stringify(msgid)}` : JSON.stringify(context)
+    throw new PoSyntaxError(at, `entry ${which} is truncated: it has a msgid but no msgstr line`)
   }
 
   const previous: PoPrevious = {
