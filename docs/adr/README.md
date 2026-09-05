@@ -21,6 +21,8 @@ records that decision and its reversal trigger.
 | [0009](0009-human-approval-fail-closed.md) | Human approval through existing review mechanisms; strict compose fails closed | proposed |
 | [0010](0010-story-driven-tests.md) | Every supported story is covered at multiple test layers against golden corpora | proposed |
 | [0011](0011-typescript-implementation.md) | Implement in TypeScript on the Slidev/unified ecosystem | proposed |
+| [0012](0012-offset-splice-skeleton.md) | The skeleton is the source file with holes, not a re-serialized AST | proposed |
+| [0013](0013-own-the-po-codec.md) | Own the PO codec rather than depend on `gettext-parser` | proposed |
 
 **Parked** (from the origin pack, resurrected only if ADR 0003's service trigger fires):
 inbox/outbox idempotent event processing; sandboxed multi-tenant rendering. Until then, "no code
