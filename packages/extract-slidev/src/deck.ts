@@ -143,6 +143,35 @@ function scanLines(source: string): readonly Line[] {
 
 /** Slidev's `RE_LEADING_BACKTICKS`: the fence level includes its own indentation. */
 const LEADING_BACKTICKS = /^\s*`+/
+
+/**
+ * True when Slidev would break a slide at this line.
+ *
+ * Slidev's test is `rawLine.trimEnd().startsWith("---")`. Both halves matter and both are
+ * wider than they look: `trimEnd` removes every Unicode space, so `---` followed by a
+ * no-break space is a separator, and `startsWith` allows anything after the dashes, so
+ * `--- x` and `-----x` are separators too.
+ *
+ * Exported because composition has to reject exactly this set in a translation. Two
+ * definitions of "is a separator" in one package is how a translated deck ends up split
+ * differently from the English one, so there is only ever this one.
+ */
+export function isSlideSeparatorLine(line: string): boolean {
+  return line.trimEnd().startsWith('---')
+}
+
+/**
+ * True when Slidev would open a fenced block at this line.
+ *
+ * `line.trimStart().startsWith("```")` — **any** indentation, not CommonMark's three
+ * spaces. A fence Slidev opens and this package does not is a fence the renderer skips
+ * to the next matching run through, swallowing whole slides on the way.
+ *
+ * Exported for the same reason as {@link isSlideSeparatorLine}.
+ */
+export function isFenceOpenerLine(line: string): boolean {
+  return line.trimEnd().trimStart().startsWith('```')
+}
 /** A tilde run, tracked for diagnostics only — Slidev does not treat these as fences. */
 const LEADING_TILDES = /^\s*~{3,}/
 /** What an author almost certainly meant when they wrote a separator. */
@@ -202,9 +231,13 @@ export function parseSlidevDeck(source: string): SlidevDeck {
   // Diagnostics only: never consulted when deciding where a slide breaks.
   let tildeFence: number | undefined
 
-  /** Slidev's `slice(end)`: emit the pending slide, unless it is empty. */
-  const emit = (endLine: number): void => {
-    if (startLine === endLine) return
+  /**
+   * Slidev's `slice(end)`: emit the pending slide, unless it is empty. Returns whether it
+   * advanced, because Slidev's `slice` leaves `start` alone when it emits nothing — and
+   * then the separator line belongs to the *next* slide's content rather than opening it.
+   */
+  const emit = (endLine: number): boolean => {
+    if (startLine === endLine) return false
     const separator = openSeparator
     const close = frontmatterClose
     slides.push({
@@ -226,12 +259,14 @@ export function parseSlidevDeck(source: string): SlidevDeck {
             },
       bodyStart: lineStart(contentLine),
       bodyEnd: lineStart(endLine),
-      isHeadmatter: slides.length === 0 && separator === 0,
+      // Headmatter is the file's leading frontmatter *block*; a `----` opens none.
+      isHeadmatter: slides.length === 0 && separator === 0 && close !== undefined,
     })
     startLine = endLine + 1
     contentLine = endLine + 1
     openSeparator = undefined
     frontmatterClose = undefined
+    return true
   }
 
   for (let index = 0; index < lines.length; index += 1) {
@@ -244,7 +279,7 @@ export function parseSlidevDeck(source: string): SlidevDeck {
       continue
     }
 
-    if (trimmed.startsWith('---')) {
+    if (isSlideSeparatorLine(trimmed)) {
       if (tildeFence !== undefined) {
         diagnostics.push(
           diagnostic(
@@ -269,8 +304,9 @@ export function parseSlidevDeck(source: string): SlidevDeck {
           ),
         )
       }
-      emit(index)
-      openSeparator = index
+      // When `emit` emitted nothing, Slidev leaves `start` on this line, so the separator
+      // is the next slide's first line of *content* and not its opening delimiter.
+      openSeparator = emit(index) ? index : undefined
       const next = lines[index + 1]
       // Slidev's `line[3] !== "-"`: a longer dash run splits but opens no block.
       if (trimmed[3] !== '-' && next !== undefined && next.text.trim() !== '') {
@@ -308,6 +344,8 @@ export function parseSlidevDeck(source: string): SlidevDeck {
         } else {
           frontmatterClose = close
         }
+        // Slidev's `start = i`: a block always makes the separator the slide's opener.
+        openSeparator = index
         startLine = index
         contentLine = close + 1
         index = close
@@ -315,7 +353,7 @@ export function parseSlidevDeck(source: string): SlidevDeck {
       continue
     }
 
-    if (trimmed.trimStart().startsWith('```')) {
+    if (isFenceOpenerLine(trimmed)) {
       const level = LEADING_BACKTICKS.exec(trimmed)?.[0] ?? '```'
       let close = index + 1
       for (; close < lines.length; close += 1) {

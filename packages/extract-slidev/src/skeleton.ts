@@ -28,13 +28,19 @@
  *
  * ## Replacements are validated, not trusted
  *
- * A translation is data from a TMS, so it is hostile input. A markdown hole whose
- * replacement contains a line `---` would split the slide in two; one containing a
- * fence opener would swallow the rest of the file; one containing `<!--` would comment
- * out the skeleton that follows it, and inside a speaker note a `-->` would close the
- * comment early. The bytes would survive all four — the damage is at render time — so
- * composition fails closed on them (constitution III/V) rather than emitting them and
- * hoping a later gate notices.
+ * A translation is data from a TMS, so it is hostile input, and every hazard here is a
+ * *render-time* one: the bytes survive, and the deck the audience sees is wrong. A line
+ * Slidev reads as a separator splits the slide in two; a fence opener makes the renderer
+ * skip to the next matching run, swallowing whole slides; `<!--` comments out the
+ * skeleton after it, and inside a speaker note a `-->` closes the comment early; and a
+ * `---` inside a frontmatter value truncates the block, putting `slideId:` on screen as
+ * prose. Composition fails closed on all of them (constitution III/V) rather than
+ * emitting them and hoping a later gate notices.
+ *
+ * The line predicates come from `deck.ts` — the transcription of Slidev's own scanner —
+ * rather than being restated here. They were restated once, in CommonMark's spelling,
+ * and the two definitions disagreed about indented fences and about `--- x`; every such
+ * disagreement is a translated deck that splits differently from the English one.
  */
 
 import {
@@ -44,6 +50,7 @@ import {
   type TranslationUnit,
   type UnitId,
 } from '@workshop-i18n/core'
+import { isFenceOpenerLine, isSlideSeparatorLine } from './deck.js'
 
 /** Where a markdown hole sits, which decides what a replacement may not contain. */
 export type HoleContext = 'body' | 'note'
@@ -214,8 +221,13 @@ function encodeReplacement(hole: Hole, raw: string, text: string): string {
   return splitLines(text).join(lineBreakOf(raw) + prefix)
 }
 
-const SLIDE_SEPARATOR = /^-{3,}[ \t]*$/
-const FENCE_OPENER = /^ {0,3}(?:`{3,}|~{3,})/
+/**
+ * A tilde run. Slidev's *scanner* does not know tildes exist, but the markdown renderer
+ * behind it does, so a translation that opens one still turns the rest of the slide into
+ * a code block on screen. The scanner's rules come from `deck.ts`; this one is the
+ * renderer's.
+ */
+const TILDE_FENCE_OPENER = /^\s*~{3,}/
 /**
  * True when `text` carries a control character. Tab, line feed and carriage return are
  * the only ones prose needs; anything else in a translation would end up in a generated
@@ -230,7 +242,19 @@ function hasControlCharacter(text: string): boolean {
   return false
 }
 
-function rejectReplacement(hole: Hole, replacement: string): CompositionIssue | undefined {
+/**
+ * Reject a replacement that would change the deck's structure rather than its words.
+ *
+ * `atLineStart` says whether the hole begins at column 0. A hole spliced mid-line — a
+ * heading after its `# `, a list item after its bullet — cannot make its *first* line a
+ * separator or a fence, so checking it there would reject `# --- x` for no reason. Every
+ * continuation line does start at column 0 once the container prefix is applied.
+ */
+function rejectReplacement(
+  hole: Hole,
+  replacement: string,
+  atLineStart: boolean,
+): CompositionIssue | undefined {
   const id = formatUnitId(hole.id)
   const reject = (reason: ReplacementRejection, detail: string): CompositionIssue => ({
     id,
@@ -240,7 +264,18 @@ function rejectReplacement(hole: Hole, replacement: string): CompositionIssue | 
   if (hasControlCharacter(replacement)) {
     return reject('control-byte', 'translation contains a control character')
   }
-  if (hole.encoding.kind === 'yaml-scalar') return undefined
+  if (hole.encoding.kind === 'yaml-scalar') {
+    // Slidev's frontmatter regex is lazy and its close is not line-anchored, so the first
+    // `---` anywhere after the opener ends the block — including one inside a quoted
+    // value, where re-quoting cannot help. Everything after it, `slideId:` included, is
+    // then rendered to the audience as slide prose.
+    return replacement.includes('---')
+      ? reject(
+          'slide-separator',
+          'translation contains "---", which truncates the frontmatter block and renders the rest of it as slide text',
+        )
+      : undefined
+  }
   if (/<!--|-->/.test(replacement)) {
     return reject(
       'comment-terminator',
@@ -249,11 +284,12 @@ function rejectReplacement(hole: Hole, replacement: string): CompositionIssue | 
         : 'translation contains "<!--" or "-->", which would open or close an HTML comment and hide the skeleton after it',
     )
   }
-  for (const line of splitLines(replacement)) {
-    if (SLIDE_SEPARATOR.test(line)) {
+  for (const [index, line] of splitLines(replacement).entries()) {
+    if (index === 0 && !atLineStart) continue
+    if (isSlideSeparatorLine(line)) {
       return reject('slide-separator', 'translation contains a line Slidev reads as a slide break')
     }
-    if (FENCE_OPENER.test(line)) {
+    if (isFenceOpenerLine(line) || TILDE_FENCE_OPENER.test(line)) {
       return reject('fence-opener', 'translation contains a line that opens a fenced code block')
     }
   }
@@ -278,7 +314,8 @@ export function composeSkeleton(skeleton: Skeleton, translations: TranslationLoo
     const translation = lookup(translations, formatUnitId(hole.id))
     if (translation === undefined || translation === hole.source) continue
     const replacement = encodeReplacement(hole, source.slice(hole.start, hole.end), translation)
-    const issue = rejectReplacement(hole, replacement)
+    const atLineStart = hole.start === 0 || source.charAt(hole.start - 1) === '\n'
+    const issue = rejectReplacement(hole, replacement, atLineStart)
     if (issue) {
       issues.push(issue)
       continue

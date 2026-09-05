@@ -269,6 +269,24 @@ describe('parseSlidevDeck follows Slidev through the shapes fixtures do not cont
     expect(parseSlidevDeck('# One\n\n---').slides).toHaveLength(1)
   })
 
+  it('treats a separator that opens nothing as the slide content it is', () => {
+    // A file that is only `---` renders as a slide whose content is `---`. Recording it
+    // as an opening delimiter instead left `init-ids` inserting at the end of the file,
+    // welding `---slideId: …` together and losing the id on every re-run.
+    const deck = parseSlidevDeck('---')
+    expect(deck.slides).toHaveLength(1)
+    expect(deck.slides[0]?.separator).toBeUndefined()
+    expect(deck.slides[0]?.frontmatter).toBeUndefined()
+    expect(deck.slides[0]?.start).toBe(0)
+    expect(deck.slides[0]?.bodyStart).toBe(0)
+  })
+
+  it('does not call a leading four-dash separator the deck headmatter', () => {
+    // `----` opens no block, so there is no headmatter to speak of.
+    const deck = parseSlidevDeck('----\nlayout: x\n---\n\nbody\n')
+    expect(deck.slides[0]?.isHeadmatter).toBe(false)
+  })
+
   it('keeps the empty slide a trailing separator plus newline does produce', () => {
     expect(parseSlidevDeck('# One\n\n---\n').slides).toHaveLength(2)
   })

@@ -160,6 +160,54 @@ describe('composeSkeleton refuses a replacement that would break out of its hole
     }
   })
 
+  it('rejects a fence indented past what CommonMark allows, because Slidev has no limit', () => {
+    // Slidev opens a fence on `line.trimStart().startsWith("```")` — any indentation at
+    // all. A four-space-indented fence is code to CommonMark and a fence to the renderer,
+    // which then skips from here to the next line starting with the same run and eats
+    // whole slides on the way.
+    for (const indent of ['    ', '\t', '        ']) {
+      expect(() =>
+        composeSkeleton(skeleton, {
+          'slides:s1:body/p-1': `eins\n${indent}\u0060\u0060\u0060yaml`,
+        }),
+      ).toThrow(CompositionError)
+    }
+  })
+
+  it('rejects a fence a container prefix would indent into one', () => {
+    // The prefix is applied before the check, so a bare fence inside a nested list item
+    // arrives at the renderer four spaces deep.
+    const nested = createSkeleton('- a\n  - b\n', [
+      hole('slides:s1:body/l-1/li-2/p-1', 8, 9, 'b', markdown('    ')),
+    ])
+    expect(() => composeSkeleton(nested, { 'slides:s1:body/l-1/li-2/p-1': 'x\n```' })).toThrow(
+      CompositionError,
+    )
+  })
+
+  it('rejects a tilde fence, which the markdown renderer opens even though the scanner does not', () => {
+    expect(() => composeSkeleton(skeleton, { 'slides:s1:body/p-1': 'eins\n~~~yaml' })).toThrow(
+      CompositionError,
+    )
+  })
+
+  it('rejects every line Slidev reads as a separator, not only an exact one', () => {
+    // Slidev's test is `rawLine.trimEnd().startsWith("---")`, and `trimEnd` removes every
+    // Unicode space — including the no-break space a European TMS emits.
+    for (const line of ['---', '--- x', '-----x', '---\u00a0', '---\u2003', '----']) {
+      expect(() =>
+        composeSkeleton(skeleton, { 'slides:s1:body/p-1': `eins\n${line}\nzwei` }),
+      ).toThrow(CompositionError)
+    }
+  })
+
+  it('allows a dash run that is not at the start of its line', () => {
+    const inline = createSkeleton('# Heading\n', [
+      hole('slides:s1:body/h1-1/title', 2, 9, 'Heading'),
+    ])
+    expect(composeSkeleton(inline, { 'slides:s1:body/h1-1/title': '--- x' })).toBe('# --- x\n')
+  })
+
   it('rejects a body translation that opens an HTML comment', () => {
     // Bytes would survive, but the renderer would swallow the skeleton after the hole.
     expect(() => composeSkeleton(skeleton, { 'slides:s1:body/p-1': 'eins <!-- zwei' })).toThrow(
@@ -187,6 +235,16 @@ describe('composeSkeleton re-encodes a YAML scalar', () => {
 
   it('copies the original scalar bytes when nothing is translated', () => {
     expect(composeSkeleton(skeleton, {})).toBe(source)
+  })
+
+  it('rejects a dash run in a frontmatter value, which truncates the block', () => {
+    // Slidev's frontmatter regex is lazy and unanchored at the close: the *first* `---`
+    // anywhere after the opener ends the block, so an em dash typed as `---` inside a
+    // value makes the renderer show the rest of the frontmatter, `slideId:` included, as
+    // slide prose.
+    expect(() => composeSkeleton(skeleton, { 'slides:s1:fm/kicker': 'Erste --- Zweite' })).toThrow(
+      CompositionError,
+    )
   })
 
   it('emits a double-quoted scalar so hostile translations cannot restructure the YAML', () => {
