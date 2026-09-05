@@ -56,7 +56,13 @@ export {
   SOURCE_HASH_PREFIX,
   sourceHash,
 } from './source-hash.js'
-export { isUnitState, type TranslationUnit, UNIT_STATES, type UnitState } from './unit.js'
+export {
+  createTranslationUnit,
+  isUnitState,
+  type TranslationUnit,
+  UNIT_STATES,
+  type UnitState,
+} from './unit.js'
 export {
   assertSafeUnitId,
   compareUnitIds,

@@ -1,6 +1,7 @@
 /** The translatable unit and its per-locale lifecycle. */
 
-import type { UnitId } from './unit-id.js'
+import { sourceHash } from './source-hash.js'
+import { assertSafeUnitId, type UnitId } from './unit-id.js'
 
 /** Lifecycle of a translation for one unit in one locale (gettext-aligned). */
 export type UnitState =
@@ -29,4 +30,17 @@ export interface TranslationUnit {
   readonly source: string
   /** Hash of the source at extraction time — staleness anchor. */
   readonly sourceHash: string
+}
+
+/**
+ * Build a unit from an identity and its source text, anchoring it on
+ * {@link sourceHash}. Every extractor goes through here so the anchor is computed one
+ * way, and so a hostile identity is rejected at the boundary where content enters the
+ * tool rather than at the boundary where it leaves.
+ *
+ * @throws {import('./unit-id.js').UnitIdError} when the identity is unsafe.
+ */
+export function createTranslationUnit(id: UnitId, source: string): TranslationUnit {
+  assertSafeUnitId(id)
+  return { id, source, sourceHash: sourceHash(source) }
 }
