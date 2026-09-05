@@ -68,6 +68,8 @@ export type HoleEncoding =
       /** Exact prefix carried by every continuation line of the original span. */
       readonly continuationPrefix: string
       readonly context: HoleContext
+      /** True for a GFM table cell, where a bare `|` would add a column. */
+      readonly cell: boolean
     }
   | { readonly kind: 'yaml-scalar' }
 
@@ -105,6 +107,8 @@ export type ReplacementRejection =
   | 'fence-opener'
   | 'comment-terminator'
   | 'control-byte'
+  | 'indented-code'
+  | 'table-column'
 
 /** One refused replacement. */
 export interface CompositionIssue {
@@ -326,14 +330,34 @@ function rejectReplacement(
   const composed = context.prefix + replacement + context.suffix
   const current = context.prefix + context.original + context.suffix
   for (const token of ['<!--', '-->']) {
-    if (countOccurrences(composed, token) > countOccurrences(current, token)) {
+    // Not `>`: **removing** a delimiter is exactly as fatal as adding one. A unit spans a
+    // whole paragraph, inline comments included, so a translator can simply not carry a
+    // `-->` across — and the comment then stays open and swallows every slide after it.
+    const before = countOccurrences(current, token)
+    const after = countOccurrences(composed, token)
+    if (after !== before) {
+      const verb = after > before ? 'introduces' : 'drops'
       return reject(
         'comment-terminator',
         hole.encoding.context === 'note'
-          ? `translation introduces "${token}", which would break out of the speaker-note comment — remove it from the translation`
-          : `translation introduces "${token}", which would open or close an HTML comment and hide the skeleton after it — remove it from the translation`,
+          ? `translation ${verb} "${token}", which would break the speaker-note comment open — keep exactly the delimiters the English has`
+          : `translation ${verb} "${token}", which would leave an HTML comment open or closed over the wrong text — keep exactly the delimiters the English has`,
       )
     }
+  }
+  // Unescaped pipes only: `\|` is how a cell carries a literal one, and translators need it.
+  const barePipes = (text: string): number => countOccurrences(text.replace(/\\\|/g, ''), '|')
+  if (hole.encoding.cell && barePipes(replacement) > barePipes(hole.source)) {
+    return reject(
+      'table-column',
+      'translation adds a "|" inside a table cell, which adds a column to that row — escape it as "\\|"',
+    )
+  }
+  if (context.prefix === '' && /^(?: {4,}|\t)/.test(splitLines(replacement)[0] ?? '')) {
+    return reject(
+      'indented-code',
+      'translation starts its line with a tab or four spaces, which CommonMark renders as a code block — remove the leading indentation',
+    )
   }
   for (const line of splitLines(composed)) {
     if (isSlideSeparatorLine(line)) {

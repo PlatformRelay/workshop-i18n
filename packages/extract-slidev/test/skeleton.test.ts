@@ -11,7 +11,10 @@ import {
 } from '../src/skeleton.js'
 
 const markdown = (continuationPrefix = '', context: 'body' | 'note' = 'body') =>
-  ({ kind: 'markdown', continuationPrefix, context }) as const
+  ({ kind: 'markdown', continuationPrefix, context, cell: false }) as const
+
+const tableCell = () =>
+  ({ kind: 'markdown', continuationPrefix: '', context: 'body', cell: true }) as const
 
 function hole(
   id: string,
@@ -245,6 +248,39 @@ describe('composeSkeleton refuses a replacement that would break out of its hole
     )
   })
 
+  it('rejects a translation that drops a comment delimiter the source had', () => {
+    // The msgid spans the whole paragraph, inline comment included, so a translator can
+    // simply not carry the `-->` across. Removing one is exactly as fatal as adding one:
+    // the comment stays open and swallows every slide after it.
+    const source = 'Intro <!-- aside --> continues.\n'
+    const inline = createSkeleton(source, [
+      hole('slides:s1:body/p-1', 0, 31, 'Intro <!-- aside --> continues.'),
+    ])
+    expect(() =>
+      composeSkeleton(inline, { 'slides:s1:body/p-1': 'Einleitung <!-- Notiz fortgesetzt.' }),
+    ).toThrow(CompositionError)
+  })
+
+  it('rejects a translation that drops the opener but keeps the terminator', () => {
+    const source = 'Intro <!-- aside --> continues.\n'
+    const inline = createSkeleton(source, [
+      hole('slides:s1:body/p-1', 0, 31, 'Intro <!-- aside --> continues.'),
+    ])
+    expect(() =>
+      composeSkeleton(inline, { 'slides:s1:body/p-1': 'Einleitung Notiz --> fortgesetzt.' }),
+    ).toThrow(CompositionError)
+  })
+
+  it('allows a translation that carries every delimiter across unchanged', () => {
+    const source = 'Intro <!-- aside --> continues.\n'
+    const inline = createSkeleton(source, [
+      hole('slides:s1:body/p-1', 0, 31, 'Intro <!-- aside --> continues.'),
+    ])
+    expect(
+      composeSkeleton(inline, { 'slides:s1:body/p-1': 'Einleitung <!-- Notiz --> weiter.' }),
+    ).toBe('Einleitung <!-- Notiz --> weiter.\n')
+  })
+
   it('still allows a hole whose line already contains a comment delimiter', () => {
     // A one-line speaker note is wrapped in delimiters the translator did not add.
     const source = '<!-- Speaker: eine Zeile. -->\n'
@@ -253,6 +289,39 @@ describe('composeSkeleton refuses a replacement that would break out of its hole
     ])
     expect(composeSkeleton(inline, { 'slides:s1:note/p-1': 'Sprecher: kurz.' })).toBe(
       '<!-- Sprecher: kurz. -->\n',
+    )
+  })
+
+  it('rejects a translation that turns its own line into an indented code block', () => {
+    // A hole that begins a line at column 0 starts a block, so four spaces in front of the
+    // translation makes CommonMark render the unit as code. The blast radius is the unit
+    // rather than the deck, but it is still a silent change of what the audience reads.
+    for (const indent of ['    ', '\t', '        ']) {
+      expect(() =>
+        composeSkeleton(skeleton, { 'slides:s1:body/p-1': `${indent}eingerückt` }),
+      ).toThrow(CompositionError)
+    }
+  })
+
+  it('allows indentation on a hole that does not begin its line', () => {
+    const inline = createSkeleton('# Heading\n', [
+      hole('slides:s1:body/h1-1/title', 2, 9, 'Heading'),
+    ])
+    expect(composeSkeleton(inline, { 'slides:s1:body/h1-1/title': '    Titel' })).toBe(
+      '#     Titel\n',
+    )
+  })
+
+  it('rejects a bare pipe added inside a table cell, which adds a column', () => {
+    const source = '| Verb | Effect |\n| --- | --- |\n'
+    const table = createSkeleton(source, [
+      { ...hole('slides:s1:body/t-1/r-1/c-1', 2, 6, 'Verb'), encoding: tableCell() },
+    ])
+    expect(() => composeSkeleton(table, { 'slides:s1:body/t-1/r-1/c-1': 'Verb | Zusatz' })).toThrow(
+      CompositionError,
+    )
+    expect(composeSkeleton(table, { 'slides:s1:body/t-1/r-1/c-1': 'Verb \\| Zusatz' })).toContain(
+      'Verb \\| Zusatz',
     )
   })
 

@@ -302,7 +302,7 @@ export function parseSlidevDeck(source: string): SlidevDeck {
           source,
           'phantom-frontmatter',
           'error',
-          'this slide begins with "---" without opening a frontmatter block, and contains a later "---" that Slidev\'s frontmatter regex closes on — the renderer would swallow everything between them; put a blank line after the leading "---", or remove the later one',
+          'this slide begins with "---" without opening a frontmatter block, and contains a later "---" that Slidev\'s frontmatter regex closes on — the renderer would swallow everything between them; remove the later "---" (a blank line after the leading one is what stops the block opening, so adding one does not help)',
           rawStart,
           lineStart(endLine),
         ),

@@ -129,7 +129,7 @@ function proseHoles(
       span.start,
       span.end,
       span.text,
-      { kind: 'markdown', continuationPrefix: span.continuationPrefix, context },
+      { kind: 'markdown', continuationPrefix: span.continuationPrefix, context, cell: span.cell },
     )
     if (hole !== undefined) holes.push(hole)
   }

@@ -57,6 +57,8 @@ export interface ProseSpan {
   readonly text: string
   /** Prefix every continuation line of the span carries (`> `, list indentation). */
   readonly continuationPrefix: string
+  /** True for a GFM table cell, where a bare `|` in a translation adds a column. */
+  readonly cell: boolean
 }
 
 /** Located prose plus whatever the locator declined to handle. */
@@ -213,7 +215,7 @@ class ProseLocator {
   ) {}
 
   /** Record one leaf's inline content as a span, unless it holds nothing to translate. */
-  private emit(node: Parent, unitKey: string, depth: number): void {
+  private emit(node: Parent, unitKey: string, depth: number, cell = false): void {
     const range = inlineRange(node)
     if (range === undefined) return
     const raw = this.fragment.slice(range.start, range.end)
@@ -225,6 +227,7 @@ class ProseLocator {
       end: this.base + range.end,
       text: stripContinuationPrefix(raw, prefix),
       continuationPrefix: prefix,
+      cell,
     })
   }
 
@@ -272,7 +275,7 @@ class ProseLocator {
           const path = cursor.next('t')
           for (const [rowIndex, row] of node.children.entries()) {
             for (const [cellIndex, cell] of row.children.entries()) {
-              this.emit(cell, `${path}/r-${rowIndex + 1}/c-${cellIndex + 1}`, depth + 1)
+              this.emit(cell, `${path}/r-${rowIndex + 1}/c-${cellIndex + 1}`, depth + 1, true)
             }
           }
           break

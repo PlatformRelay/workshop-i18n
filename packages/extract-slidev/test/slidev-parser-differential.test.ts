@@ -213,6 +213,23 @@ function representativeHoles(skeleton: Skeleton, source: string): readonly Hole[
   return [...byBucket.values()]
 }
 
+/**
+ * A marker translation that keeps whatever comment delimiters the English unit carried.
+ *
+ * A unit spans a whole paragraph, so an inline `<!-- aside -->` is part of the msgid.
+ * Dropping a delimiter is refused — correctly, since the comment would swallow the slides
+ * after it — so a sweep that replaces a unit wholesale has to carry them across, exactly
+ * as a translator must.
+ */
+function markerFor(source: string, index: number): string {
+  const count = (token: string): number => source.split(token).length - 1
+  return [
+    `de-${index}`,
+    ...Array.from({ length: count('<!--') }, () => '<!--'),
+    ...Array.from({ length: count('-->') }, () => '-->'),
+  ].join(' ')
+}
+
 /** What Slidev sees: the slides, their frontmatter keys, and their identities. */
 function structureOf(parse: ParseSync, source: string): unknown {
   return parse(source, 'structure.md').slides.map((slide) => ({
@@ -337,7 +354,7 @@ describe.skipIf(parseSync === undefined)('slide splitting agrees with @slidev/pa
       const translations = Object.fromEntries(
         extraction.units.map((unit, index) => [
           formatUnitId(unit.id),
-          `de-${index} — Ü "3" ✓ 🧑‍🚀 <b>x</b>: y`,
+          `${markerFor(unit.source, index)} — Ü "3" ✓ 🧑‍🚀 <b>x</b>: y`,
         ]),
       )
       expect(structureOf(parse, composeSkeleton(extraction.skeleton, translations))).toEqual(
