@@ -173,6 +173,81 @@ describe('composeSkeleton', () => {
     expect(composeSkeleton(skel, { 'labs:day-1-05-pod:body/p-1': 'a\nb' })).toBe('a\r\nb\r\n')
   })
 
+  it('wraps a single-line span in a CRLF file with CRLF, not LF', () => {
+    // Most spans are one line, so they carry no break of their own — and a translation
+    // is routinely longer than its English and wraps. Asking only the span would mix
+    // line endings into the file, and disagree with the break init-ids inserts.
+    const crlf = 'Eine einzige Zeile.\r\n\r\nUnd noch eine.\r\n'
+    const skel = createSkeleton(crlf, [
+      {
+        id: id('body/p-1'),
+        start: 0,
+        end: 19,
+        source: 'Eine einzige Zeile.',
+        encoding: { kind: 'markdown', continuationPrefix: '' },
+      },
+    ])
+    const composed = composeSkeleton(skel, { 'labs:day-1-05-pod:body/p-1': 'erste\nzweite' })
+    expect(composed).toBe('erste\r\nzweite\r\n\r\nUnd noch eine.\r\n')
+    expect(composed).not.toMatch(/[^\r]\n/)
+  })
+
+  describe('footnote definitions', () => {
+    // The parser scopes a footnote definition as a paragraph, so its `[^label]:` marker
+    // sits inside the unit a translator is handed. Renaming it is good prose and silently
+    // orphans every reference to it, so the marker has to survive the translation.
+    const source = 'A claim.[^cve]\n\n[^cve]: The footnote body.\n'
+    const start = source.indexOf('[^cve]: ')
+    const skeleton = createSkeleton(source, [
+      {
+        id: id('body/p-2'),
+        start,
+        end: start + '[^cve]: The footnote body.'.length,
+        source: '[^cve]: The footnote body.',
+        encoding: { kind: 'markdown', continuationPrefix: '' },
+      },
+    ])
+
+    it('accepts a translation that keeps the label', () => {
+      expect(
+        composeSkeleton(skeleton, { 'labs:day-1-05-pod:body/p-2': '[^cve]: Der Fußnotentext.' }),
+      ).toBe('A claim.[^cve]\n\n[^cve]: Der Fußnotentext.\n')
+    })
+
+    it.each([
+      ['renames the label', '[^quelle]: Der Fußnotentext.'],
+      ['drops the label', 'Der Fußnotentext.'],
+      ['turns it into a link definition', '[cve]: Der Fußnotentext.'],
+    ])('refuses a translation that %s', (_label, translation) => {
+      let caught: unknown
+      try {
+        composeSkeleton(skeleton, { 'labs:day-1-05-pod:body/p-2': translation })
+      } catch (error) {
+        caught = error
+      }
+      expect(caught).toBeInstanceOf(CompositionError)
+      expect((caught as CompositionError).issues.map((issue) => issue.reason)).toEqual([
+        'footnote-label',
+      ])
+      expect((caught as CompositionError).issues[0]?.message).toContain('[^cve]:')
+    })
+
+    it('leaves an ordinary paragraph that merely mentions a footnote alone', () => {
+      const plain = createSkeleton(source, [
+        {
+          id: id('body/p-1'),
+          start: 0,
+          end: 14,
+          source: 'A claim.[^cve]',
+          encoding: { kind: 'markdown', continuationPrefix: '' },
+        },
+      ])
+      expect(composeSkeleton(plain, { 'labs:day-1-05-pod:body/p-1': 'Eine Behauptung.' })).toBe(
+        'Eine Behauptung.\n\n[^cve]: The footnote body.\n',
+      )
+    })
+  })
+
   describe('html-inline holes', () => {
     const html = '<details><summary>Solution</summary>\n'
     const skel = createSkeleton(html, [

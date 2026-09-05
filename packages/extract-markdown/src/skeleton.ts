@@ -93,6 +93,7 @@ export class SkeletonError extends Error {
 /** Why one replacement was refused. */
 export type ReplacementRejection =
   | 'thematic-break'
+  | 'footnote-label'
   | 'setext-underline'
   | 'fence-opener'
   | 'comment-terminator'
@@ -169,9 +170,19 @@ function lookup(translations: TranslationLookup, id: string): string | undefined
   return Object.hasOwn(translations, id) ? (translations as Record<string, string>)[id] : undefined
 }
 
-/** The line break the original span uses, so a translation is re-emitted the same way. */
-function lineBreakOf(raw: string): string {
-  return raw.includes('\r\n') ? '\r\n' : '\n'
+/**
+ * The line break a translation for this span should be re-emitted with.
+ *
+ * The span itself is the best evidence, but a *single-line* span carries none — and most
+ * spans are single-line, while a translation is very often longer than its English and
+ * wraps. Asking only the span there would emit LF into a CRLF file, so the file is the
+ * fallback. `init-ids` already derives its insertion's break from the file this way; the
+ * two must not disagree, or one composed lab ends up with mixed endings.
+ */
+function lineBreakOf(raw: string, file: string): string {
+  if (raw.includes('\r\n')) return '\r\n'
+  if (raw.includes('\n')) return '\n'
+  return file.includes('\r\n') ? '\r\n' : '\n'
 }
 
 /**
@@ -198,10 +209,10 @@ export function stripContinuationPrefix(raw: string, prefix: string): string {
     .join('\n')
 }
 
-function encodeReplacement(hole: Hole, raw: string, text: string): string {
+function encodeReplacement(hole: Hole, raw: string, file: string, text: string): string {
   if (hole.encoding.kind === 'html-inline') return text
   const prefix = hole.encoding.continuationPrefix
-  return splitLines(text).join(lineBreakOf(raw) + prefix)
+  return splitLines(text).join(lineBreakOf(raw, file) + prefix)
 }
 
 /** `---`, `***`, `___` runs: a thematic break, or a setext H2 under a paragraph. */
@@ -211,6 +222,16 @@ const SETEXT_UNDERLINE = /^ {0,3}=+[ \t]*$/
 const FENCE_OPENER = /^ {0,3}(?:`{3,}|~{3,})/
 /** Anything that would close the `<details>`/`<summary>` a spoiler label sits inside. */
 const TAG_ESCAPE = /<\/?\s*(?:summary|details)\b/i
+/**
+ * The `[^label]:` a footnote definition opens with.
+ *
+ * The label is machinery that happens to sit *inside* a unit: the parser scopes a
+ * footnote definition as a paragraph, so the whole line — marker included — is what a
+ * translator is handed. A translation that renames `[^cve]` to `[^quelle]` is perfectly
+ * good prose and silently orphans every reference to it, so the marker has to survive
+ * even though the sentence after it does not.
+ */
+const FOOTNOTE_LABEL = /^ {0,3}\[\^([^\]\s]+)\]:/
 
 /**
  * True when `text` carries a control character. Tab, line feed and carriage return are
@@ -251,6 +272,13 @@ function rejectReplacement(hole: Hole, replacement: string): CompositionIssue | 
     }
     return undefined
   }
+  const label = FOOTNOTE_LABEL.exec(hole.source)?.[1]
+  if (label !== undefined && FOOTNOTE_LABEL.exec(replacement)?.[1] !== label) {
+    return reject(
+      'footnote-label',
+      `translation must keep the footnote label "[^${label}]:" it opens with; renaming or dropping it orphans every reference to the footnote`,
+    )
+  }
   for (const line of splitLines(replacement)) {
     if (THEMATIC_BREAK.test(line)) {
       return reject(
@@ -288,7 +316,12 @@ export function composeSkeleton(skeleton: Skeleton, translations: TranslationLoo
   for (const [index, hole] of holes.entries()) {
     const translation = lookup(translations, formatUnitId(hole.id))
     if (translation === undefined || translation === hole.source) continue
-    const replacement = encodeReplacement(hole, source.slice(hole.start, hole.end), translation)
+    const replacement = encodeReplacement(
+      hole,
+      source.slice(hole.start, hole.end),
+      source,
+      translation,
+    )
     const issue = rejectReplacement(hole, replacement)
     if (issue) {
       issues.push(issue)

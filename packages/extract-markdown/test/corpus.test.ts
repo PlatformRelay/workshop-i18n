@@ -46,7 +46,11 @@ function load(directory: string): readonly Fixture[] {
 }
 
 /** Every fixture that must round-trip. */
-const CORPUS: readonly Fixture[] = [...load('corpus-k8s-labs'), ...load('adversarial-labs')]
+const CORPUS: readonly Fixture[] = [
+  ...load('corpus-k8s-labs'),
+  ...load('corpus-opentofu-labs'),
+  ...load('adversarial-labs'),
+]
 
 /** Fixtures that must be refused, and the diagnostic each must raise. */
 const REJECTED: readonly (readonly [string, DiagnosticCode])[] = [
@@ -92,16 +96,21 @@ function fenceBlocks(text: string): readonly string[] {
 }
 
 /**
- * Lines that carry protected machinery: HTML tags, link definitions, and heredoc
- * delimiters. A `<summary>` label is prose that *lives* on such a line, so it is blanked
- * before the comparison — otherwise this would assert that translating a spoiler label
- * does not translate it.
+ * Lines that carry protected machinery: HTML tags, link reference definitions, and
+ * heredoc delimiters.
+ *
+ * Two exclusions, both because the line carries prose as well as machinery. A
+ * `<summary>` label is prose living on a tag line, so it is blanked before comparing —
+ * otherwise this would assert that translating a spoiler label does not translate it.
+ * And a *footnote* definition (`[^cve]: …`) only looks like a link definition: the
+ * parser scopes it as a paragraph, so its body is a unit, and only its `[^cve]:` label
+ * is machinery — which `composeSkeleton` guards separately.
  */
 function machineryLines(text: string): readonly string[] {
   return text
     .replace(/(<summary(?:\s[^>\n]*)?>)([^\n]*?)(<\/summary\s*>)/g, '$1$3')
     .split(/\r?\n/)
-    .filter((line) => /^\s*(?:<\/?[a-zA-Z]|\[[^\]]+\]:|EOF\b)/.test(line))
+    .filter((line) => /^\s*(?:<\/?[a-zA-Z]|\[[^^\]][^\]]*\]:|EOF\b)/.test(line))
 }
 
 /** Section chunks, each starting at its own `##` heading, so they can be moved around. */
@@ -125,6 +134,20 @@ function sectionChunks(text: string): readonly string[] {
 
 function idsOf(text: string): readonly string[] {
   return extractLabFile(text).units.map((unit) => formatUnitId(unit.id))
+}
+
+/**
+ * A stand-in translation for one unit: different from the English in every case, but
+ * still keeping the machinery `composeSkeleton` requires a translator to keep.
+ *
+ * Today that is the `[^label]:` a footnote definition opens with. The parser scopes such
+ * a definition as a paragraph, so the label ends up inside the unit even though renaming
+ * it would orphan every reference — composition refuses that, and a stand-in translation
+ * that ignored the rule would only prove the refusal fires, not that the property holds.
+ */
+function translationFor(unit: { source: string }, index: number): string {
+  const label = /^ {0,3}\[\^([^\]\s]+)\]:/.exec(unit.source)?.[1]
+  return label === undefined ? `uebersetzt ${index}` : `[^${label}]: uebersetzt ${index}`
 }
 
 describe.each(CORPUS.map((fixture) => [fixture.name, fixture] as const))(
@@ -193,7 +216,7 @@ describe.each(CORPUS.map((fixture) => [fixture.name, fixture] as const))(
     // Group 2 — fence identity and protected skeleton.
     it('keeps every fenced block and machinery line byte-identical when everything is translated', () => {
       const translations = Object.fromEntries(
-        extraction.units.map((unit, index) => [formatUnitId(unit.id), `uebersetzt ${index}`]),
+        extraction.units.map((unit, index) => [formatUnitId(unit.id), translationFor(unit, index)]),
       )
       const translated = composeSkeleton(extraction.skeleton, translations)
       expect(fenceBlocks(translated)).toEqual(fenceBlocks(adopted))
@@ -295,13 +318,28 @@ function undoInsertion(plan: LabIdPlan): string {
 describe('the hostile corpus describes the corpus it claims to test', () => {
   const all = CORPUS.map((fixture) => fixture.source).join('\n')
 
+  it('carries both consumer corpora, which ADR 0001/0010 require before a release', () => {
+    // Not a count: a named check, so dropping one workshop's labs fails loudly instead
+    // of quietly shrinking the number the assertion below happens to accept.
+    const treeOf = (fixture: Fixture): string => fixture.name.split('/')[0] ?? ''
+    const trees = new Set(CORPUS.map(treeOf))
+    expect([...trees].sort()).toEqual([
+      'adversarial-labs',
+      'corpus-k8s-labs',
+      'corpus-opentofu-labs',
+    ])
+    for (const tree of trees) {
+      expect(CORPUS.filter((fixture) => treeOf(fixture) === tree).length).toBeGreaterThan(5)
+    }
+  })
+
   it('is large enough to be worth running', () => {
-    expect(CORPUS.length).toBeGreaterThanOrEqual(18)
+    expect(CORPUS.length).toBeGreaterThanOrEqual(26)
     const units = CORPUS.reduce(
       (total, fixture) => total + extractLabFile(adopt(fixture)).units.length,
       0,
     )
-    expect(units).toBeGreaterThan(900)
+    expect(units).toBeGreaterThan(1800)
   })
 
   it.each([
@@ -322,7 +360,13 @@ describe('the hostile corpus describes the corpus it claims to test', () => {
     ['an ordered list', /^\d+\. /m],
     ['a nested blockquote inside a list item', /^ {2}> /m],
     ['a four-space indented code block', /^ {4}\S/m],
-    ['a footnote reference', /\[\^/],
+    // Anchored on a real footnote, not on /\[\^/: that matched `[^"]` inside a `grep -o`
+    // in a fenced shell command, so this row certified a construct the corpus did not
+    // contain — a false green for exactly the thing composeSkeleton now guards.
+    ['a footnote reference', /\[\^[\w-]+\](?!:)/],
+    ['a footnote definition', /^\[\^[\w-]+\]: /m],
+    ['a link reference definition with a title', /^\[[\w-]+\]: \S+ "/m],
+    ['a reference-style image', /!\[[^\]]+\]\[[\w-]+\]/],
     ['a long kubectl one-liner', /kubectl [^\n]{120,}/],
     ['an astral emoji', /[\u{1f300}-\u{1faff}]/u],
     ['a circled numeral', /[①-⑳]/],
