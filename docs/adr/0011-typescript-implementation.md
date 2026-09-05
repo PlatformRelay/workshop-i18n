@@ -70,15 +70,33 @@ already on a weaker basis and was wrong twice over:
   written by reading `dist/core.mjs` rather than by observing behaviour. Fixtures are real content
   and therefore accidental about which branches they reach; two divergences (HTML-comment state,
   the `line[3] !== "-"` guard) lived for two review rounds in shapes no fixture contained.
-- It does **not** cover Slidev's second parser layer. `parseSlide` re-reads each slice with a
-  gray-matter regex and can disagree with Slidev's own scanner — reading `k: v` out of an indented
-  fence as frontmatter the scanner never opened. Only the scanner decides slide boundaries, so
-  that is the contract compared; where the two Slidev layers disagree, only the boundary is.
+- It compares **slide boundaries**, which is what Slidev's scanner decides and what identities
+  are attached to. Slidev's *second* layer, `matter()`, re-reads each slice with two hand-rolled
+  regexes — `RE_FRONTMATTER = /^---.*\r?\n([\s\S]*?)---/` and `RE_YAML_CODEBLOCK =
+  /^\s*```ya?ml([\s\S]*?)```/` — and can disagree with the scanner, reading `k: v` out of an
+  indented fence as frontmatter the scanner never opened. Where the two Slidev layers disagree,
+  only the boundary is compared, and the exemption asserts the ```yaml form is why.
+
+  That second layer is not a curiosity: three defects lived in it. `RE_FRONTMATTER` is lazy and
+  its close is not line-anchored, so the first `---` *anywhere* after the opener ends the block —
+  an em dash typed as `---` in a `story` value truncates the frontmatter and renders `slideId:`
+  to the audience. And `RE_YAML_CODEBLOCK` makes a leading ```yaml fence a legitimate frontmatter
+  form, which `init-ids` would have silently demoted to content. Both are now refused at the door.
+  An earlier version of this amendment attributed the layer to gray-matter; Slidev 52.19.0 does
+  not depend on gray-matter at all, and that mistake is what kept the layer out of scope.
 - It does **not** run in CI today: the parser is resolved from an environment variable that CI does
   not set, so the comparison is developer-local unless a workflow provides it.
 - It does **not** cover `@slidev/parser/fs`, which resolves `src:` includes. A deck that composes
   slides from other files renders content this package never sees unless those files are declared
   surfaces of their own.
+
+The comparison also runs over **composed output**, not only over extraction input: composing every
+unit with hostile translator text must leave Slidev's view of the deck — slide count, frontmatter
+keys, identities — unchanged, or composition must refuse. Checking only the input side is what let
+`skeleton.ts` keep CommonMark's fence and separator rules while `deck.ts` used Slidev's; the two
+disagreed about indented fences and about `--- x`, and each disagreement was a translated deck
+that splits differently from the English one. There is now one definition of each predicate,
+exported from the transcription and used by composition.
 
 With those bounds stated, the scan agrees with `@slidev/parser` 52.19.0 on 29 real consumer pages
 / 290 slides and on every scanner shape, with zero disagreements.

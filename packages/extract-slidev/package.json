@@ -1,7 +1,7 @@
 {
   "name": "@workshop-i18n/extract-slidev",
   "version": "0.1.0",
-  "description": "Lossless Slidev deck extraction and reinsertion built on @slidev/parser and mdast",
+  "description": "Lossless Slidev deck extraction and reinsertion: offset-splice skeleton, stable slide identities",
   "license": "MIT",
   "type": "module",
   "main": "dist/index.js",
