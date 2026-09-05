@@ -17,8 +17,9 @@ import { describe, expect, it } from 'vitest'
 import { parseSlidevDeck } from '../src/deck.js'
 import type { DiagnosticCode } from '../src/diagnostic.js'
 import { extractSlidevFile, locateSlidevFile, SlidevExtractionError } from '../src/extract.js'
+import { locateFrontmatter } from '../src/frontmatter.js'
 import { planSlideIds, type SlideIdPlan } from '../src/init-ids.js'
-import { composeSkeleton } from '../src/skeleton.js'
+import { CompositionError, composeSkeleton } from '../src/skeleton.js'
 import { decodeSource } from '../src/source.js'
 
 const FIXTURE_ROOT = fileURLToPath(new URL('../../../fixtures/', import.meta.url))
@@ -133,6 +134,39 @@ function withoutInsertions(plan: SlideIdPlan): string {
   return text
 }
 
+/**
+ * Translator text that would restructure a deck if composition let it through. Each must
+ * either be refused or leave the deck's shape identical; silently reshaping it is the
+ * failure. Kept in step with the list in `slidev-parser-differential.test.ts`.
+ */
+const HOSTILE_TRANSLATIONS: readonly string[] = [
+  'eins\n---\nzwei',
+  'eins\n--- und mehr\nzwei',
+  'eins\n-----x\nzwei',
+  'eins\n---\u00a0\nzwei',
+  'eins\n    \u0060\u0060\u0060yaml\nzwei',
+  'eins\n\t\u0060\u0060\u0060yaml\nzwei',
+  'eins\n\u0060\u0060\u0060\nzwei',
+  'eins\n~~~yaml\nzwei',
+  'Erste --- Zweite',
+  'eins <!-- zwei',
+  'eins --> zwei',
+]
+
+/** The deck's shape: how many slides, and which identity each one declares. */
+function structureOf(text: string): unknown {
+  return parseSlidevDeck(text).slides.map((slide) => {
+    const block = slide.frontmatter
+    return {
+      hasFrontmatter: block !== undefined,
+      slideId:
+        block === undefined
+          ? null
+          : (locateFrontmatter(text, block, new Set<string>()).slideId ?? null),
+    }
+  })
+}
+
 function idsOf(text: string): readonly string[] {
   return extractSlidevFile(text).units.map((unit) => formatUnitId(unit.id))
 }
@@ -152,6 +186,13 @@ describe.each(CORPUS.map((fixture) => [fixture.name, fixture] as const))(
     it('adopts identities by insertion only', () => {
       const plan = planSlideIds(fixture.source, { sectionId: fixture.sectionId })
       expect(withoutInsertions(plan)).toBe(fixture.source)
+    })
+
+    it('adopts identities idempotently, however many runs (AS-2)', () => {
+      const once = planSlideIds(fixture.source, { sectionId: fixture.sectionId })
+      const twice = planSlideIds(once.text, { sectionId: fixture.sectionId })
+      expect(twice.insertions).toEqual([])
+      expect(twice.text).toBe(once.text)
     })
 
     it('reproduces the source byte-for-byte from an empty catalog (SC-002)', () => {
@@ -180,6 +221,36 @@ describe.each(CORPUS.map((fixture) => [fixture.name, fixture] as const))(
       expect(fenceBlocks(translated)).toEqual(fenceBlocks(adopted))
       expect(machineryLines(translated)).toEqual(machineryLines(adopted))
       expect(translated).not.toBe(adopted)
+    })
+
+    it('leaves the deck structure untouched when every unit is translated', () => {
+      // The render-time half of fence identity: composition may change words, never the
+      // number of slides or which identity each one carries. Asserted against this
+      // package's own parse so it runs in CI; the differential re-asserts it against
+      // Slidev when a parser is available.
+      const translations = Object.fromEntries(
+        extraction.units.map((unit, index) => [formatUnitId(unit.id), `de-${index} — Ü "3" ✓`]),
+      )
+      const composed = composeSkeleton(extraction.skeleton, translations)
+      expect(structureOf(composed)).toEqual(structureOf(adopted))
+    })
+
+    it('either refuses hostile translator text or leaves the structure untouched', () => {
+      for (const text of HOSTILE_TRANSLATIONS) {
+        const translations = Object.fromEntries(
+          extraction.units.map((unit) => [formatUnitId(unit.id), text]),
+        )
+        let composed: string
+        try {
+          composed = composeSkeleton(extraction.skeleton, translations)
+        } catch (error) {
+          expect(error).toBeInstanceOf(CompositionError)
+          continue
+        }
+        expect(structureOf(composed), `accepted ${JSON.stringify(text)}`).toEqual(
+          structureOf(adopted),
+        )
+      }
     })
 
     it('never emits a fence delimiter or a slide separator as translatable text', () => {

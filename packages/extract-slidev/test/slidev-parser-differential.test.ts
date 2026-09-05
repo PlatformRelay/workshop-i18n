@@ -34,8 +34,12 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { formatUnitId } from '@workshop-i18n/core'
 import { describe, expect, it } from 'vitest'
 import { findSpeakerNote, parseSlidevDeck } from '../src/deck.js'
+import { extractSlidevFile } from '../src/extract.js'
+import { planSlideIds } from '../src/init-ids.js'
+import { CompositionError, composeSkeleton } from '../src/skeleton.js'
 import { decodeSource } from '../src/source.js'
 
 const FIXTURE_ROOT = fileURLToPath(new URL('../../../fixtures/', import.meta.url))
@@ -167,6 +171,35 @@ const DOCUMENTED_DIVERGENCES = new Map<
 const CORPUS = [...loadFixtures('corpus-k8s'), ...loadFixtures('adversarial')]
 
 /**
+ * Translator text that would restructure a deck if composition let it through.
+ *
+ * Each one must either be refused by `composeSkeleton` or leave Slidev's view of the deck
+ * identical. Which of the two does not matter; silently changing the deck does.
+ */
+const HOSTILE_TRANSLATIONS: readonly (readonly [string, string])[] = [
+  ['a bare separator line', 'eins\n---\nzwei'],
+  ['a separator with trailing text', 'eins\n--- und mehr\nzwei'],
+  ['a longer dash run', 'eins\n-----x\nzwei'],
+  ['a separator with a no-break space', 'eins\n---\u00a0\nzwei'],
+  ['an indented fence', 'eins\n    \u0060\u0060\u0060yaml\nzwei'],
+  ['a tab-indented fence', 'eins\n\t\u0060\u0060\u0060yaml\nzwei'],
+  ['a bare fence', 'eins\n\u0060\u0060\u0060\nzwei'],
+  ['a tilde fence', 'eins\n~~~yaml\nzwei'],
+  ['an em dash typed as three hyphens', 'Erste --- Zweite'],
+  ['an HTML comment opener', 'eins <!-- zwei'],
+  ['an HTML comment terminator', 'eins --> zwei'],
+  ['a yaml code block opener', 'eins\n\u0060\u0060\u0060yaml\nlayout: cover\nzwei'],
+]
+
+/** What Slidev sees: the slides, their frontmatter keys, and their identities. */
+function structureOf(parse: ParseSync, source: string): unknown {
+  return parse(source, 'structure.md').slides.map((slide) => ({
+    keys: Object.keys(slide.frontmatter ?? {}).sort(),
+    slideId: (slide.frontmatter as { slideId?: unknown } | undefined)?.slideId ?? null,
+  }))
+}
+
+/**
  * Line endings are the one text difference that is required rather than tolerated:
  * Slidev rebuilds slide content from `split(/\r?\n/)`, so it reports LF for a CRLF file,
  * while ADR 0012 forbids this package from normalizing a single byte.
@@ -187,14 +220,19 @@ function expectAgreement(parse: ParseSync, name: string, source: string): void {
     const theirKeys = Object.keys(theirs[index]?.frontmatter ?? {}).length > 0
 
     // Slidev parses each slide twice: its scanner decides the boundaries, then
-    // `parseSlide` re-reads the slice with a gray-matter regex. On a slide whose text
-    // does not begin with a `---` line the two disagree with *each other* — gray-matter
-    // will read `k: v` out of an indented fence as frontmatter that the scanner never
-    // opened. Only the scanner decides where slides break, and that is the contract this
-    // package has to meet, so text is compared only where both Slidev layers agree.
-    const opensWithSeparator = /^---/.test(source.slice(slide.start === 0 ? 0 : slide.start - 1))
-    const secondLayerOnly = theirKeys && slide.frontmatter === undefined && !opensWithSeparator
-    if (secondLayerOnly) continue
+    // `matter()` re-reads the slice with two hand-rolled regexes. Where the scanner opened
+    // no `---` block, `matter()` still tries `RE_YAML_CODEBLOCK` and can call a leading
+    // ```yaml fence the frontmatter — so the two Slidev layers disagree with each other.
+    // Only the scanner decides where slides break, which is this package's contract, so
+    // text is compared only where both layers agree — and the exemption asserts *why* it
+    // applies rather than trusting the shape of the disagreement.
+    if (theirKeys && slide.frontmatter === undefined) {
+      expect({ where, yamlCodeblockFrontmatter: true }).toEqual({
+        where,
+        yamlCodeblockFrontmatter: /^\s*```ya?ml/.test(source.slice(slide.bodyStart, slide.end)),
+      })
+      continue
+    }
 
     const note = findSpeakerNote(source, slide.bodyStart, slide.bodyEnd)
     const body = source.slice(slide.bodyStart, note?.start ?? slide.bodyEnd)
@@ -252,6 +290,60 @@ describe.skipIf(parseSync === undefined)('slide splitting agrees with @slidev/pa
         sample.name,
         divergence === undefined ? sample.source : divergence.normalize(sample.source),
       )
+    },
+  )
+
+  it.each(CORPUS.map((sample) => [sample.name, sample] as const))(
+    '%s: translating it changes no slide, no identity and no frontmatter key',
+    (_name, sample) => {
+      // The differential ran Slidev over what goes *in* and never over what comes out,
+      // while `skeleton.ts` claimed composition fails closed on render-time hazards. Every
+      // guard that claim rests on was CommonMark's rather than Slidev's, and three of them
+      // were wrong. This is the check that decides it mechanically.
+      const divergence = DOCUMENTED_DIVERGENCES.get(sample.name)
+      const adopted = planSlideIds(
+        divergence === undefined ? sample.source : divergence.normalize(sample.source),
+        { sectionId: sample.name },
+      ).text
+      const extraction = extractSlidevFile(adopted)
+      const translations = Object.fromEntries(
+        extraction.units.map((unit, index) => [
+          formatUnitId(unit.id),
+          `de-${index} — Ü "3" ✓ 🧑‍🚀 <b>x</b>: y`,
+        ]),
+      )
+      expect(structureOf(parse, composeSkeleton(extraction.skeleton, translations))).toEqual(
+        structureOf(parse, adopted),
+      )
+    },
+  )
+
+  it.each(HOSTILE_TRANSLATIONS)(
+    'a translation containing %s is refused, or changes nothing Slidev can see',
+    (_label, text) => {
+      for (const sample of CORPUS) {
+        const divergence = DOCUMENTED_DIVERGENCES.get(sample.name)
+        const adopted = planSlideIds(
+          divergence === undefined ? sample.source : divergence.normalize(sample.source),
+          { sectionId: sample.name },
+        ).text
+        const extraction = extractSlidevFile(adopted)
+        if (extraction.units.length === 0) continue
+        const translations = Object.fromEntries(
+          extraction.units.map((unit) => [formatUnitId(unit.id), text]),
+        )
+        let composed: string
+        try {
+          composed = composeSkeleton(extraction.skeleton, translations)
+        } catch (error) {
+          expect(error).toBeInstanceOf(CompositionError)
+          continue
+        }
+        expect(
+          structureOf(parse, composed),
+          `${sample.name} accepted ${JSON.stringify(text)}`,
+        ).toEqual(structureOf(parse, adopted))
+      }
     },
   )
 
