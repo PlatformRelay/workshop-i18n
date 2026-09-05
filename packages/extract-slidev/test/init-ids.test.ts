@@ -181,10 +181,11 @@ describe('planSlideIds', () => {
     expect(plan.text).toBe(source)
   })
 
-  it('is idempotent on frontmatter that is not valid YAML but already names the slide', () => {
-    // `locateFrontmatter` returns before reading `slideId` when the YAML does not parse,
-    // so the id looked missing and a second `slideId:` line was inserted on every run —
-    // unbounded, and each run made the YAML less parseable.
+  it('refuses frontmatter that is not valid YAML rather than naming the slide again', () => {
+    // The repair is the fail-closed plan, not a better read of `slideId`: `locateFrontmatter`
+    // still returns before reading it when the YAML does not parse, so the id still looks
+    // missing — but the block's error now stops the file being written at all. Before, every
+    // run inserted another `slideId:` line, each one making the YAML less parseable.
     const source = [
       '---',
       'slideId: rej-malformed',
@@ -199,7 +200,7 @@ describe('planSlideIds', () => {
     expect(planSlideIds(once.text, { sectionId: SECTION }).text).toBe(source)
   })
 
-  it('is idempotent on a frontmatter block that is a sequence', () => {
+  it('refuses a frontmatter block that is a sequence, for the same reason', () => {
     const source = ['---', '- one', '- two', '---', '', '# X', ''].join('\n')
     const once = planSlideIds(source, { sectionId: SECTION })
     expect(planSlideIds(once.text, { sectionId: SECTION }).text).toBe(once.text)

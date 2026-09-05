@@ -153,10 +153,30 @@ const HOSTILE_TRANSLATIONS: readonly string[] = [
   'Erste --- Zweite',
   'eins <!-- zwei',
   'eins --> zwei',
+  'eins | zwei',
+  'schlicht',
   'eins\n\u0060\u0060\u0060yaml\nlayout: cover\nzwei',
   '\u0060\u0060\u0060',
   '--',
 ]
+
+/**
+ * True when replacing this hole's whole text with `payload` *must* be refused.
+ *
+ * The sweeps assert that composition either refuses or changes nothing Slidev can see,
+ * which by construction cannot host a payload whose whole point is to be refused — so the
+ * guards against dropping a comment delimiter and against adding a table column were held
+ * by one hand-written test each. This says which pairs have no second option.
+ */
+function mustBeRefused(hole: Hole, payload: string): boolean {
+  if (hole.encoding.kind !== 'markdown') return false
+  const count = (text: string, token: string): number => text.split(token).length - 1
+  for (const token of ['<!--', '-->']) {
+    if (count(payload, token) !== count(hole.source, token)) return true
+  }
+  const barePipes = (text: string): number => count(text.replace(/\\\|/g, ''), '|')
+  return hole.encoding.cell && barePipes(payload) > barePipes(hole.source)
+}
 
 /**
  * A hole's splice context, which is what decides how its first and last lines are judged.
@@ -352,6 +372,7 @@ describe.each(CORPUS.map((fixture) => [fixture.name, fixture] as const))(
             expect(error).toBeInstanceOf(CompositionError)
             continue
           }
+          expect(mustBeRefused(hole, text), `${where} was accepted`).toBe(false)
           expect(structureOf(composed), where).toEqual(baseline)
           // Checked against independent readings of Slidev's rules, so weakening the
           // package's own predicate cannot move the subject and the oracle together.
@@ -481,11 +502,16 @@ describe.each(REJECTED)('fixtures/adversarial-rejected/%s', (name, code) => {
     expect(composeSkeleton(located.skeleton, {})).toBe(source)
   })
 
-  it('reaches a fixed point under init-ids, however many runs', () => {
+  it('is adopted at most once — by refusal for the files that error', () => {
     // The idempotence property ran only over files that extract cleanly, which is exactly
     // where this class of bug cannot live: a file extraction refuses is the one whose
-    // insertions nothing was checking. `missing-slide-id.md` is *meant* to gain an id
-    // here — what must never happen is gaining another one on every run.
+    // insertions nothing was checking.
+    //
+    // Worth being precise about what this proves. Seven of these eight fixtures carry an
+    // error diagnostic, so the plan fails closed and the fixed point is reached by the file
+    // being left alone; only `missing-slide-id.md` exercises a real insertion and then
+    // declines to make a second. It is a regression guard for the unbounded-insert path
+    // rather than independent evidence that the path itself was repaired.
     const sectionId = name.replace(/\.md$/, '')
     const once = planSlideIds(source, { sectionId })
     const twice = planSlideIds(once.text, { sectionId })

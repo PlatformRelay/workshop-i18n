@@ -195,7 +195,27 @@ const HOSTILE_TRANSLATIONS: readonly (readonly [string, string])[] = [
   ['a yaml code block opener', 'eins\n\u0060\u0060\u0060yaml\nlayout: cover\nzwei'],
   ['a bare fence with nothing else', '\u0060\u0060\u0060'],
   ['a trailing double hyphen', '--'],
+  ['a bare pipe', 'eins | zwei'],
+  ['plain words that carry nothing across', 'schlicht'],
 ]
+
+/**
+ * True when replacing this hole's whole text with `payload` *must* be refused.
+ *
+ * The sweeps assert that composition either refuses or changes nothing Slidev can see,
+ * which by construction cannot host a payload whose whole point is to be refused — so the
+ * guards against dropping a comment delimiter and against adding a table column were held
+ * by one hand-written test each. This says which pairs have no second option.
+ */
+function mustBeRefused(hole: Hole, payload: string): boolean {
+  if (hole.encoding.kind !== 'markdown') return false
+  const count = (text: string, token: string): number => text.split(token).length - 1
+  for (const token of ['<!--', '-->']) {
+    if (count(payload, token) !== count(hole.source, token)) return true
+  }
+  const barePipes = (text: string): number => count(text.replace(/\\\|/g, ''), '|')
+  return hole.encoding.cell && barePipes(payload) > barePipes(hole.source)
+}
 
 /**
  * A hole's splice context — what sits before it on its line — bucketed, so the sweep
@@ -387,6 +407,7 @@ describe.skipIf(parseSync === undefined)('slide splitting agrees with @slidev/pa
             expect(error).toBeInstanceOf(CompositionError)
             continue
           }
+          expect(mustBeRefused(hole, text), `${where} was accepted`).toBe(false)
           expect(structureOf(parse, composed), where).toEqual(baseline)
         }
       }
