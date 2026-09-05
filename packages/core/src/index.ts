@@ -10,6 +10,27 @@
  */
 
 export {
+  DuplicateUnitError,
+  definePolicy,
+  emptyStateCounts,
+  evaluatePolicy,
+  isPolicyName,
+  type LocaleStateCounts,
+  POLICIES,
+  type Policy,
+  type PolicyEvaluation,
+  type PolicyName,
+  type PolicyViolation,
+  resolvePolicy,
+  type SectionStateCounts,
+  type StateCounts,
+  type StateReport,
+  type StateThresholds,
+  tallyUnitStates,
+  type UnitStatus,
+  type ViolatingUnit,
+} from './policy.js'
+export {
   isSourceHash,
   SOURCE_HASH_DIGEST_LENGTH,
   SOURCE_HASH_PREFIX,
