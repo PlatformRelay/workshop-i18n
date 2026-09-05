@@ -143,6 +143,27 @@ describe('planSlideIds', () => {
     expect(refusal?.message).toContain('four or more dashes')
   })
 
+  it('refuses a slide whose frontmatter is a yaml code block, rather than destroying it', () => {
+    // Slidev's `matter()` falls back to `RE_YAML_CODEBLOCK`, so a leading ```yaml fence
+    // *is* this slide's frontmatter. Inserting a `---` block would make the fence stop
+    // being frontmatter and start being rendered content, losing `layout` and `title`.
+    const source = ['```yaml', 'layout: cover', 'title: Kept', '```', '', '# Body', ''].join('\n')
+    const plan = planSlideIds(source, { sectionId: SECTION })
+    expect(plan.insertions).toEqual([])
+    const refusal = plan.diagnostics.find((d) => d.code === 'missing-slide-id')
+    expect(refusal?.severity).toBe('error')
+    expect(refusal?.message).toContain('yaml code block')
+  })
+
+  it('refuses a slide whose body opens with a line Slidev reads as a separator', () => {
+    // Writing a block above such a line promotes it to a slide break, which splits the
+    // slide in two and leaves the new half with no identity — so the next run inserts
+    // again, and again. Caught by idempotence rather than by inspection.
+    const plan = planSlideIds('---\n', { sectionId: SECTION })
+    expect(plan.insertions).toEqual([])
+    expect(plan.diagnostics.map((d) => d.code)).toContain('missing-slide-id')
+  })
+
   it('carries a deck diagnostic through instead of editing a file it cannot read', () => {
     const source = ['---', 'layout: cover', '', '# Never closed', ''].join('\n')
     const plan = planSlideIds(source, { sectionId: SECTION })

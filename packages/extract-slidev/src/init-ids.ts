@@ -23,7 +23,7 @@
  */
 
 import { isSafeContainerId, MAX_CONTAINER_ID_LENGTH } from '@workshop-i18n/core'
-import { parseSlidevDeck, type SlideRange } from './deck.js'
+import { isSlideSeparatorLine, parseSlidevDeck, type SlideRange } from './deck.js'
 import { type Diagnostic, diagnostic } from './diagnostic.js'
 import { locateFrontmatter, SLIDE_ID_KEY } from './frontmatter.js'
 import { locateProse } from './prose.js'
@@ -37,6 +37,9 @@ const FALLBACK_STEM = 'slide'
 
 /** Room reserved for a `-2`, `-3` … disambiguating suffix. */
 const SUFFIX_HEADROOM = 8
+
+/** Slidev's `RE_YAML_CODEBLOCK`: the frontmatter form that is a fence rather than a block. */
+const YAML_CODEBLOCK_FRONTMATTER = /^\s*```ya?ml/
 
 /** Options for {@link proposeSlideId}. */
 export interface SlideIdProposalOptions {
@@ -206,6 +209,45 @@ export function planSlideIds(source: string, options: SlideIdPlanOptions): Slide
     if (located?.slideId !== undefined) continue
     // An id that is present but unsafe is a human decision, not something to overwrite.
     if (located?.diagnostics.some((item) => item.code === 'unsafe-slide-id')) continue
+
+    // Slidev's `matter()` falls back to `RE_YAML_CODEBLOCK` when no `---` block matched,
+    // so a slide opening with a ```yaml fence already *has* frontmatter. Inserting a `---`
+    // block would win that race and demote the fence to rendered content, losing whatever
+    // `layout` and `title` it declared. Refuse; the author converts it deliberately.
+    if (block === undefined && YAML_CODEBLOCK_FRONTMATTER.test(source.slice(slide.bodyStart))) {
+      diagnostics.push(
+        diagnostic(
+          source,
+          'missing-slide-id',
+          'error',
+          'this slide declares its frontmatter as a yaml code block, which a "---" block would silently replace — convert it to a "---" block first',
+          slide.bodyStart,
+          slide.end,
+        ),
+      )
+      continue
+    }
+
+    // A block written above a body that already opens with a separator line promotes that
+    // line to a slide break: the slide splits, the new half has no identity, and the next
+    // run inserts again. Idempotence (AS-2) is the property that catches this class.
+    if (block === undefined) {
+      const body = source.slice(slide.bodyStart, slide.end)
+      const firstLine = body.slice(0, body.indexOf('\n') === -1 ? undefined : body.indexOf('\n'))
+      if (isSlideSeparatorLine(firstLine)) {
+        diagnostics.push(
+          diagnostic(
+            source,
+            'missing-slide-id',
+            'error',
+            'this slide opens with a line Slidev reads as a slide break, so a frontmatter block written above it would split the slide instead of naming it',
+            slide.bodyStart,
+            slide.end,
+          ),
+        )
+        continue
+      }
+    }
 
     // Slidev opens a frontmatter block only after a separator whose fourth character is
     // not a dash, so there is nowhere to put an id after `----`. Writing one anyway would

@@ -79,6 +79,20 @@ describe('locateFrontmatter', () => {
     expect(locate(source).fields).toEqual([])
   })
 
+  it('reports a dash run inside a value, which truncates the block for the renderer', () => {
+    // `RE_FRONTMATTER` is `/^---.*\r?\n([\s\S]*?)---/`: lazy, and its close is not
+    // line-anchored. Slidev reads `{title: "a"}` here and renders everything from the
+    // dash run onward — the `slideId:` line included — as slide prose.
+    const source = ['---', 'slideId: s01-x', 'title: "a --- b"', 'layout: cover', '---', ''].join(
+      '\n',
+    )
+    const located = locate(source)
+    expect(located.diagnostics.map((d) => d.code)).toContain('malformed-frontmatter')
+    expect(located.diagnostics.find((d) => d.code === 'malformed-frontmatter')?.severity).toBe(
+      'error',
+    )
+  })
+
   it('reports frontmatter that is not valid YAML', () => {
     const source = ['---', 'heading: "unterminated', '---', ''].join('\n')
     const located = locate(source)

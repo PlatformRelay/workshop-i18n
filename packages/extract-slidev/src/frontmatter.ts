@@ -100,6 +100,26 @@ export function locateFrontmatter(
   const diagnostics: Diagnostic[] = []
   const fields: FrontmatterField[] = []
   const yaml = file.slice(block.bodyStart, block.bodyEnd)
+
+  // Slidev reads frontmatter with `/^---.*\r?\n([\s\S]*?)---/`: lazy, and its close is not
+  // anchored to a line. The *first* `---` anywhere after the opener ends the block, so an
+  // em dash typed as `---` inside a value makes the renderer show the rest of the block —
+  // the `slideId:` line included — as slide prose, while YAML here parses it fine. Nothing
+  // downstream could detect that, so it is refused at the door.
+  const dashRun = yaml.indexOf('---')
+  if (dashRun !== -1) {
+    diagnostics.push(
+      diagnostic(
+        file,
+        'malformed-frontmatter',
+        'error',
+        'frontmatter contains "---" before its closing delimiter; Slidev ends the block there and renders everything after it as slide text',
+        block.bodyStart + dashRun,
+        block.bodyStart + dashRun + 3,
+      ),
+    )
+  }
+
   const document = parseDocument(yaml, { keepSourceTokens: false })
 
   if (document.errors.length > 0) {
