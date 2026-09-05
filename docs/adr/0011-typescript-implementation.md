@@ -97,10 +97,23 @@ already on a weaker basis and was wrong twice over:
 - It does **not** cover `@slidev/parser/fs`, which resolves `src:` includes. A deck that composes
   slides from other files renders content this package never sees unless those files are declared
   surfaces of their own.
-- It covers slide *boundaries and frontmatter*, and nothing below them. The prose locator — mdast
-  against Slidev's markdown-it — has no differential at all, and is the largest untested contract
-  in the package: a msgid may carry `<span class="kw-kicker">…</span>` or `{{ .Values.x }}`, and a
-  translation dropping either composes cleanly with no guard and no report.
+- It does **not run in CI**, and that is the most consequential gap in this list. The whole case
+  for owning the split rests on this comparison, and on a branch where it is skipped a regression
+  in `deck.ts` merges green. A scheduled job is the agreed remedy; until it runs, the evidence is
+  developer-local.
+- It covers slide *boundaries and frontmatter*, and little below them. The prose locator — mdast
+  against Slidev's markdown-it — has no differential at all. Measured over the 29 real pages:
+  145 of 1592 msgids carry an inline HTML tag, 414 carry inline code, three carry an entity and
+  one a mustache expression; stripping all of it composes cleanly on 28 of 29 pages with zero
+  refusals. Severity is moderate rather than high — dropping a `<code>` is cosmetic, and an
+  unbalanced tag fails the Vue compile loudly rather than silently — but nothing here reports it.
+  Structural markup inside a unit *is* guarded where it changes the document: an unescaped `|`
+  added to a table cell adds a column, and is refused.
+- Indentation is guarded only where it is unambiguous. A translation that starts a line at column
+  zero with a tab or four spaces becomes a CommonMark code block and is refused; the same text
+  inside a list item or a blockquote is a continuation line there, and telling those apart needs
+  container context composition does not carry. The blast radius of the unguarded case is the one
+  unit.
 
 The comparison also runs over **composed output**, not only over extraction input: composing every
 unit with hostile translator text must leave Slidev's view of the deck — slide count, frontmatter
