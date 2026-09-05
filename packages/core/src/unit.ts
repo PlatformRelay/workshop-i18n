@@ -10,13 +10,21 @@ export type UnitState =
   | 'needs-review' // drafted (e.g. seeded or machine-assisted); not yet human-accepted
   | 'reviewed' // human-accepted; shipping-grade
 
-/** Every state, in worst-to-best order — the order reports and violations use. */
-export const UNIT_STATES = [
+/**
+ * Every state, in worst-to-best order — the order reports and violations use.
+ *
+ * Frozen, not merely `as const`: `evaluatePolicy` iterates this array to find the
+ * ceilings it enforces, so a module that could splice `needs-review` out of it would
+ * flip a release verdict from fail to pass while the frozen policy still read
+ * `{'needs-review': 0}`. A readonly type stops a compile; only a freeze stops a
+ * process.
+ */
+export const UNIT_STATES = Object.freeze([
   'missing',
   'fuzzy',
   'needs-review',
   'reviewed',
-] as const satisfies readonly UnitState[]
+] as const) satisfies readonly UnitState[]
 
 /** Type guard for {@link UnitState}, for reading a state out of a catalog or JSON. */
 export function isUnitState(value: unknown): value is UnitState {

@@ -14,8 +14,13 @@
  * code that merely re-reads an id the tool itself wrote does not pay the cost twice.
  */
 
-/** Content surfaces, in the canonical order used for deterministic output. */
-export const SURFACES = ['slides', 'labs', 'quiz'] as const
+/**
+ * Content surfaces, in the canonical order used for deterministic output.
+ *
+ * Frozen for the same reason as `UNIT_STATES`: `isSurface` answers from this array, so
+ * a pushed entry would widen the constitution-II surface gate at runtime.
+ */
+export const SURFACES = Object.freeze(['slides', 'labs', 'quiz'] as const)
 
 /** Content surface a unit was extracted from. */
 export type Surface = (typeof SURFACES)[number]

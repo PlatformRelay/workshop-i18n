@@ -5,13 +5,18 @@ import {
   emptyStateCounts,
   evaluatePolicy,
   isPolicyName,
+  isSurface,
   OPTIONAL_EXEMPT_STATES,
   POLICIES,
   type PolicyName,
   parseUnitId,
+  QUIZ_SCHEMA_VARIANTS,
   resolvePolicy,
   type StateThresholds,
+  SURFACES,
+  type Surface,
   tallyUnitStates,
+  UNIT_STATES,
   type UnitState,
   type UnitStatus,
 } from '../src/index.js'
@@ -273,5 +278,31 @@ describe('definePolicy', () => {
   it('rejects a negative or non-integer threshold', () => {
     expect(() => definePolicy('bad', { fuzzy: -1 })).toThrow(/fuzzy/)
     expect(() => definePolicy('bad', { fuzzy: 1.5 })).toThrow(/fuzzy/)
+  })
+})
+
+describe('tamper resistance', () => {
+  const draft = unit('slides:s01-pods:body/1', 'de', '01-pods', 'needs-review')
+
+  it('cannot be weakened by splicing a state out of UNIT_STATES', () => {
+    expect(evaluatePolicy([draft], 'release').satisfied).toBe(false)
+    expect(Object.isFrozen(UNIT_STATES)).toBe(true)
+    expect(() => {
+      ;(UNIT_STATES as unknown as UnitState[]).splice(UNIT_STATES.indexOf('needs-review'), 1)
+    }).toThrow(TypeError)
+    expect(UNIT_STATES).toContain('needs-review')
+    expect(evaluatePolicy([draft], 'release').satisfied).toBe(false)
+  })
+
+  it('cannot have a surface pushed into SURFACES', () => {
+    expect(Object.isFrozen(SURFACES)).toBe(true)
+    expect(() => {
+      ;(SURFACES as unknown as Surface[]).push('evil' as Surface)
+    }).toThrow(TypeError)
+    expect(isSurface('evil')).toBe(false)
+  })
+
+  it('freezes the quiz schema variants the manifest validates against', () => {
+    expect(Object.isFrozen(QUIZ_SCHEMA_VARIANTS)).toBe(true)
   })
 })

@@ -27,7 +27,10 @@ export const MANIFEST_API_GROUP = 'workshop-i18n'
 export const SUPPORTED_MANIFEST_MAJOR = 1
 
 /** Quiz shapes the extractor knows (spec 001: neither variant matching is a hard error). */
-export const QUIZ_SCHEMA_VARIANTS = ['kubernetes-workshop', 'opentofu-workshop'] as const
+export const QUIZ_SCHEMA_VARIANTS = Object.freeze([
+  'kubernetes-workshop',
+  'opentofu-workshop',
+] as const)
 
 /** One of {@link QUIZ_SCHEMA_VARIANTS}. */
 export type QuizSchemaVariant = (typeof QUIZ_SCHEMA_VARIANTS)[number]
