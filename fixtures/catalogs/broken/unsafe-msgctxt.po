@@ -1,0 +1,6 @@
+msgid ""
+msgstr "Language: de\n"
+
+msgctxt "slides:../../../etc/passwd:body/1"
+msgid "A traversal attempt in the identity."
+msgstr ""

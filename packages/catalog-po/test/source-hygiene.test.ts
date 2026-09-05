@@ -9,15 +9,17 @@ import { describe, expect, it } from 'vitest'
  * review UI renders nothing. It bites harder here than anywhere else — this package's
  * whole job is escaping control characters, so its tests are full of them, and every one
  * belongs in the source as an escape sequence (`'\\u0000'`) rather than as the byte.
+ *
+ * The fixtures are covered too: a golden nobody can read a diff of is not a golden.
  */
-const DIRECTORIES = ['../src', '../test'].map((relative) =>
+const DIRECTORIES = ['../src', '../test', '../../../fixtures/catalogs'].map((relative) =>
   fileURLToPath(new URL(relative, import.meta.url)),
 )
 
 function scannedFiles(): readonly string[] {
   return DIRECTORIES.flatMap((directory) =>
     readdirSync(directory, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && entry.name.endsWith('.ts'))
+      .filter((entry) => entry.isFile() && /\.(ts|po)$/.test(entry.name))
       .map((entry) => join(directory, entry.name)),
   )
 }
@@ -27,7 +29,7 @@ describe('source hygiene', () => {
     expect(scannedFiles().length).toBeGreaterThan(8)
   })
 
-  it('keeps every source and test file free of raw control bytes', () => {
+  it('keeps every source, test and fixture file free of raw control bytes', () => {
     const offenders: string[] = []
     for (const file of scannedFiles()) {
       const bytes = readFileSync(file)
