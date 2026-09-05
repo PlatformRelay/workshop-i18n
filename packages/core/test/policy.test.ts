@@ -5,6 +5,7 @@ import {
   emptyStateCounts,
   evaluatePolicy,
   isPolicyName,
+  OPTIONAL_EXEMPT_STATES,
   POLICIES,
   type PolicyName,
   parseUnitId,
@@ -137,7 +138,7 @@ describe('release policy', () => {
     ])
   })
 
-  it('does not gate optional units, but still counts them in the report', () => {
+  it('lets an optional unit stay untranslated, but still counts it in the report', () => {
     const result = evaluatePolicy(
       [
         unit('slides:s01-pods:note/1', 'de', '01-pods', 'missing', false),
@@ -147,6 +148,28 @@ describe('release policy', () => {
     )
     expect(result.satisfied).toBe(true)
     expect(result.report.locales[0]?.counts.missing).toBe(1)
+  })
+
+  it('lets an optional unit be fuzzy — compose watermarks it as English fallback', () => {
+    const result = evaluatePolicy(
+      [unit('slides:s01-pods:note/1', 'de', '01-pods', 'fuzzy', false)],
+      'release',
+    )
+    expect(result.satisfied).toBe(true)
+  })
+
+  it('gates an optional needs-review unit — optional means English, not unreviewed', () => {
+    const result = evaluatePolicy(
+      [unit('slides:s01-pods:note/1', 'de', '01-pods', 'needs-review', false)],
+      'release',
+    )
+    expect(result.satisfied).toBe(false)
+    expect(result.violations[0]).toMatchObject({ state: 'needs-review', count: 1, limit: 0 })
+    expect(result.violations[0]?.units[0]?.id).toBe('slides:s01-pods:note/1')
+  })
+
+  it('exempts optional units only in the states composition watermarks', () => {
+    expect(OPTIONAL_EXEMPT_STATES).toEqual(['missing', 'fuzzy'])
   })
 
   it('treats a unit with no explicit `required` flag as required', () => {

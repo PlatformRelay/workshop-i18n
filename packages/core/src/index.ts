@@ -36,6 +36,7 @@ export {
   evaluatePolicy,
   isPolicyName,
   type LocaleStateCounts,
+  OPTIONAL_EXEMPT_STATES,
   POLICIES,
   type Policy,
   type PolicyEvaluation,
