@@ -55,6 +55,7 @@ export { FUZZY_FLAG, NEEDS_REVIEW_FLAG, unitStateOf } from './state.js'
 export {
   applyDraftTranslation,
   type ExtractedUnit,
+  isDraftable,
   type UpdateCatalogOptions,
   type UpdateResult,
   type UpdateSummary,
