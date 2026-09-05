@@ -18,7 +18,15 @@ importers:
         specifier: ^3.2.0
         version: 3.2.7(@types/node@26.2.0)(yaml@2.9.0)
 
-  packages/catalog-po: {}
+  packages/catalog-po:
+    dependencies:
+      '@workshop-i18n/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
 
   packages/cli:
     devDependencies:

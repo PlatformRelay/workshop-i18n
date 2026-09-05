@@ -1,8 +1,14 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "dist",
-    "rootDir": "src"
+    "noEmit": true,
+    // CI runs `install -> lint -> typecheck -> test` with no build, so the sibling's
+    // `dist/` does not exist yet. Point the published name at its sources for checking
+    // only; `tsconfig.build.json` deliberately does not inherit this, so the emitted
+    // package still resolves through `node_modules` and cannot ship a deep import.
+    "paths": {
+      "@workshop-i18n/core": ["../core/src/index.ts"]
+    }
   },
-  "include": ["src"]
+  "include": ["src", "test"]
 }
