@@ -130,6 +130,19 @@ describe('planSlideIds', () => {
     )
   })
 
+  it('refuses to write an id where Slidev would open no block, rather than writing YAML as prose', () => {
+    // Slidev opens a frontmatter block only after a separator whose fourth character is
+    // not a dash. Inserting one after `----` produces `slideId:` the renderer shows as
+    // body text, so the separator has to be corrected first.
+    const source = ['# One', '', '----', '', '# Two', ''].join('\n')
+    const plan = planSlideIds(source, { sectionId: SECTION })
+    expect(plan.insertions).toHaveLength(1)
+    expect(plan.insertions[0]?.slideIndex).toBe(0)
+    const refusal = plan.diagnostics.find((d) => d.code === 'missing-slide-id')
+    expect(refusal?.severity).toBe('error')
+    expect(refusal?.message).toContain('four or more dashes')
+  })
+
   it('carries a deck diagnostic through instead of editing a file it cannot read', () => {
     const source = ['---', 'layout: cover', '', '# Never closed', ''].join('\n')
     const plan = planSlideIds(source, { sectionId: SECTION })

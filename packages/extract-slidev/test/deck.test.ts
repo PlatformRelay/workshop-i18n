@@ -180,6 +180,100 @@ describe('parseSlidevDeck fence awareness', () => {
   })
 })
 
+/**
+ * Every expectation here is Slidev 52.19.0's measured answer, taken from its scanner
+ * (`dist/core.mjs`, the loop at the end of `parse`) rather than inferred from behaviour.
+ * `slidev-parser-differential.test.ts` re-derives them from the real parser when it is
+ * available; these pin them so the suite still defends the contract when it is not.
+ */
+describe('parseSlidevDeck follows Slidev through the shapes fixtures do not contain', () => {
+  it('carries HTML-comment state across lines, so a note may contain a separator', () => {
+    // Slidev tracks `<!--` / `-->` across the whole scan. Splitting here would mint an
+    // identity for a slide nobody renders and let init-ids write into a speaker note.
+    const source = [
+      '# Welcome',
+      '',
+      '<!--',
+      'Remember the two clusters',
+      '',
+      '---',
+      '',
+      'Then move on to the demo',
+      '-->',
+      '',
+    ].join('\n')
+    const deck = parseSlidevDeck(source)
+    expect(deck.slides).toHaveLength(1)
+    expect(deck.diagnostics).toEqual([])
+  })
+
+  it('closes a comment that opens and closes on one line', () => {
+    const source = 'a <!-- aside --> b\n\n---\n\nc\n'
+    expect(parseSlidevDeck(source).slides).toHaveLength(2)
+  })
+
+  it('reopens on a second comment after the first one closed', () => {
+    const source = '<!-- one -->\n\n<!--\n---\n-->\n\n---\n\nafter\n'
+    expect(parseSlidevDeck(source).slides).toHaveLength(2)
+  })
+
+  it('does not let a dash run of four or more open a frontmatter block', () => {
+    // Slidev guards this with `line[3] !== "-"`. Without the guard the slide body is
+    // swallowed as frontmatter and the next slide's YAML is offered up as prose.
+    const source = ['# One', '', '----', 'layout: cover', '---', '', 'body', ''].join('\n')
+    const deck = parseSlidevDeck(source)
+    expect(deck.slides).toHaveLength(3)
+    expect(deck.slides.every((slide) => slide.frontmatter === undefined)).toBe(true)
+  })
+
+  it('splits at a setext underline without swallowing what follows it', () => {
+    const source = ['Heading', '----', 'next line', '', '---', '', '# Two', ''].join('\n')
+    const deck = parseSlidevDeck(source)
+    expect(deck.slides).toHaveLength(3)
+    expect(deck.slides[1]?.frontmatter).toBeUndefined()
+  })
+
+  it('still opens a block after a separator carrying trailing text', () => {
+    // `--- x` has line[3] === " ", so Slidev does open a block here.
+    const source = ['# One', '', '--- x', 'layout: cover', '---', '', 'body', ''].join('\n')
+    const deck = parseSlidevDeck(source)
+    expect(deck.slides).toHaveLength(2)
+    expect(deck.slides[1]?.frontmatter).toBeDefined()
+  })
+
+  it('closes a fence on any line starting with the same backtick run, info string or not', () => {
+    // Slidev closes on `startsWith(level)`, so the inner ```ts closes the outer ```md.
+    const source = ['```md', '```ts', 'a', '```', '```', '', '---', '', '# After', ''].join('\n')
+    expect(parseSlidevDeck(source).slides).toHaveLength(2)
+  })
+
+  it('resumes scanning after a fence that is never closed, and warns that it did', () => {
+    const source = ['```yaml', 'kind: Pod', '', '---', '', '# After', ''].join('\n')
+    const deck = parseSlidevDeck(source)
+    expect(deck.slides).toHaveLength(2)
+    // Whether a later `---` breaks a slide now depends on whether content further down
+    // closes the fence, so slide identity becomes order-dependent. Slidev renders it, so
+    // this is not fatal, but it must not be invisible.
+    expect(deck.diagnostics.map((d) => d.code)).toEqual(['unclosed-fence'])
+    expect(deck.diagnostics[0]?.severity).toBe('warning')
+  })
+
+  it('tracks a fence at any indentation, not only up to three spaces', () => {
+    const source = ['    ```yaml', 'kind: Pod', '---', '    ```', '', '---', '', '# A', ''].join(
+      '\n',
+    )
+    expect(parseSlidevDeck(source).slides).toHaveLength(2)
+  })
+
+  it('invents no slide after a trailing separator with no newline behind it', () => {
+    expect(parseSlidevDeck('# One\n\n---').slides).toHaveLength(1)
+  })
+
+  it('keeps the empty slide a trailing separator plus newline does produce', () => {
+    expect(parseSlidevDeck('# One\n\n---\n').slides).toHaveLength(2)
+  })
+})
+
 describe('parseSlidevDeck diagnostics', () => {
   it('reports a frontmatter block that is never closed and keeps the slide usable', () => {
     const source = ['---', 'layout: cover', '', '# Never closed', ''].join('\n')

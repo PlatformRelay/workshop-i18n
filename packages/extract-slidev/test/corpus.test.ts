@@ -53,6 +53,7 @@ const CORPUS: readonly Fixture[] = [...load('corpus-k8s'), ...load('adversarial'
 const REJECTED: readonly (readonly [string, DiagnosticCode])[] = [
   ['duplicate-slide-id.md', 'duplicate-slide-id'],
   ['malformed-frontmatter.md', 'malformed-frontmatter'],
+  ['dash-run-opens-no-block.md', 'missing-slide-id'],
   ['missing-slide-id.md', 'missing-slide-id'],
   ['separator-in-tilde-fence.md', 'separator-in-tilde-fence'],
   ['unclosed-frontmatter.md', 'unclosed-frontmatter'],

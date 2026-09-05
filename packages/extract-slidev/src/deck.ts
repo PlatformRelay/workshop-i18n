@@ -1,54 +1,59 @@
 /**
  * Splitting a Slidev file into slides — a line scan, not a markdown parse.
  *
- * Slidev's own format rules are line-based and have nothing to do with CommonMark, so
- * this is the one place the package reads structure itself rather than asking a parser.
- * The rules it implements, mirroring Slidev's parser:
+ * Slidev's format rules are line-based and have nothing to do with CommonMark, so this
+ * is the one place the package reads structure itself rather than asking a parser.
  *
- * - A **separator** is a line at column 0 beginning with a run of three or more dashes.
- *   Slidev splits on `----`, on `--- anything`, and therefore on a setext level-two
- *   heading underline; only an exact `---` is reported without a warning.
- * - The first separator of a slide doubles as the **opening delimiter of that slide's
- *   frontmatter** when the line after it is non-blank; the block then runs to the next
- *   separator, which is its closing delimiter and belongs to no slide body.
- * - A file that opens with a separator opens with the deck's headmatter, which is also
- *   the first slide's frontmatter.
+ * ## This is a transcription, not an approximation
  *
- * ## Fences are the reason this cannot be a regex
+ * The contract is **agreement with the renderer**: a splitter that disagrees with Slidev
+ * keys prose under a slide the audience never sees, mints identities for slides that do
+ * not exist, and lets `init-ids` write into content that is really a speaker note — all
+ * while `--check` passes. Approximating those rules from observed behaviour was tried
+ * and failed twice, because a divergence is only observable on input that exercises it.
  *
- * The consumer corpus puts multi-document YAML inside fenced code — `kind: Role`, `---`,
- * `kind: RoleBinding` — and nests three-backtick fences inside four-backtick magic-move
- * fences. A naive `^---$` scan splits a slide in the middle of a code block and destroys
- * it. So the scan tracks fences with CommonMark's rule (a fence is closed only by a run
- * of the same character, at least as long, with no info string), which handles nesting
- * for free: the inner ``` is not long enough to close the outer ````.
+ * So the loop below is a line-for-line transcription of `@slidev/parser` 52.19.0's own
+ * scanner (`dist/core.mjs`, the loop at the end of `parse`, plus its
+ * `advanceHtmlCommentState`), with byte offsets recorded alongside. Its rules, in the
+ * order the scanner applies them:
  *
- * ## Where this scan follows Slidev rather than CommonMark
+ * 1. **Inside an HTML comment, nothing else is looked at.** Comment state carries across
+ *    lines for the whole file, so a `---` inside a speaker note is not a slide break.
+ * 2. **A separator** is a line whose trailing whitespace is trimmed and which then
+ *    starts with `---`. Leading whitespace is *not* trimmed, so ` ---` is content.
+ * 3. **A separator opens a frontmatter block** only when its fourth character is not a
+ *    dash and the next line is non-blank. `----` splits without opening a block; `--- x`
+ *    opens one. The block closes at the next line that is *exactly* `---`.
+ * 4. **A fence** is a line that starts with ``` after leading whitespace is trimmed. The
+ *    fence level is the leading whitespace *plus* the backtick run, and the fence closes
+ *    at the next line starting with that same string — so ```` ```md ```` is closed by
+ *    ```` ```ts ````, and indentation beyond three spaces still counts. If no closing
+ *    line exists the scanner resumes on the next line rather than swallowing the file.
+ *    Tilde runs are not fences to Slidev at all.
+ * 5. **Lines are `markdown.split(/\r?\n/)`**, so a file ending in a line break has a
+ *    final empty line — which is why a trailing `---\n` yields an empty last slide and a
+ *    trailing `---` with no newline yields none.
  *
- * The contract is agreement with the renderer, not with the spec, because a splitter
- * that disagrees with Slidev keys prose under a slide the audience never sees. Verified
- * against `@slidev/parser` 52.19.0 (see `slidev-parser-differential.test.ts`):
+ * ## The two places this deliberately does not match, and why
  *
- * - **Tilde fences do not protect a separator.** Slidev tracks backtick fences only, so
- *   it splits at a bare `---` inside `~~~ … ~~~`, cutting the code block in half. This
- *   scan splits there too — and raises an *error*, because agreeing silently would give
- *   the second rendered slide no identity while `--check` still passed. The file has to
- *   be fixed, not guessed at.
- * - **Any run of three or more dashes splits**, whatever follows it on the line. That
- *   makes a setext level-two underline (`Heading` over `-------`) a slide break, which is
- *   a trap authors fall into, so every separator that is not exactly `---` also raises a
- *   warning saying so.
- * - **Indented code blocks are not tracked**, because Slidev does not track them either.
- * - **A byte-order mark is ignored when matching the first line.** Slidev does not strip
- *   it, so a BOM'd file loses its headmatter there; this scan reads the headmatter and
- *   copies the mark through untouched. A deliberate divergence in the consumer's favour:
- *   the alternative is refusing to see a frontmatter block that is plainly written.
+ * Both are refusals, never silent divergence, and both are because matching would mean
+ * reproducing a bug rather than a behaviour:
  *
- * One divergence is closed by refusing instead of matching: Slidev accepts `----` or
- * `--- x` as a frontmatter *closing* delimiter, consumes three dashes and leaks the rest
- * of the line into the slide body. Reproducing that would mean starting a body mid-line
- * to preserve a typo's debris, so a closing delimiter that is not exactly `---` is an
- * error instead.
+ * - **A `---` inside a tilde-fenced block.** Slidev splits there, cutting the code block
+ *   in half; this scan splits identically so identities land where the renderer puts
+ *   them, and raises an *error*, because the second rendered slide would otherwise have
+ *   no identity at all while `--check` passed.
+ * - **A column-0 dash run that is not exactly `---` inside a frontmatter block.** Slidev
+ *   consumes three dashes and leaks the rest of the line into the slide; reproducing
+ *   that means starting a body mid-line to preserve a typo's debris.
+ *
+ * One divergence is in the consumer's favour and is documented rather than refused: a
+ * byte-order mark is ignored when matching the first line. Slidev does not strip it, so
+ * a BOM'd file loses its headmatter; this scan reads the headmatter and copies the mark
+ * through untouched.
+ *
+ * `slidev-parser-differential.test.ts` re-derives every one of these from the real
+ * parser when it is available.
  */
 
 import { type Diagnostic, diagnostic } from './diagnostic.js'
@@ -75,6 +80,13 @@ export interface SlideRange {
   readonly index: number
   /** Offset where the slide starts: just past its opening separator, or 0. */
   readonly start: number
+  /**
+   * The separator line that opened this slide, or `undefined` for the first slide of a
+   * file that does not begin with one. Callers that want to *write* a frontmatter block
+   * need it: Slidev only opens a block after a separator whose fourth character is not a
+   * dash, so a block cannot be inserted after `----`.
+   */
+  readonly separator: { readonly start: number; readonly end: number } | undefined
   /** Offset just past the slide's last byte (the next separator's line start, or EOF). */
   readonly end: number
   readonly frontmatter: FrontmatterBlock | undefined
@@ -99,19 +111,25 @@ interface Line {
   readonly start: number
   /** Offset just past the line's break (or EOF). */
   readonly end: number
-  /** The line without its break. */
+  /** The line without its break — Slidev's `rawLine`. */
   readonly text: string
 }
 
-/** Split `source` into lines, keeping every offset anchored in the original text. */
+/**
+ * Split `source` the way Slidev does (`markdown.split(/\r?\n/)`), keeping every offset
+ * anchored in the original text.
+ *
+ * The trailing empty line a final break produces is deliberately kept: Slidev's decision
+ * to emit a last slide depends on it, so dropping it would invent or lose a slide.
+ */
 function scanLines(source: string): readonly Line[] {
   const lines: Line[] = []
   let start = 0
-  while (start < source.length) {
+  for (;;) {
     const breakIndex = source.indexOf('\n', start)
     if (breakIndex === -1) {
       lines.push({ start, end: source.length, text: source.slice(start) })
-      break
+      return lines
     }
     const text = source.slice(start, breakIndex)
     lines.push({
@@ -121,15 +139,16 @@ function scanLines(source: string): readonly Line[] {
     })
     start = breakIndex + 1
   }
-  return lines
 }
 
-const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})(.*)$/
-const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/
-/** What Slidev splits on: three or more dashes at column 0, whatever follows them. */
-const SEPARATOR = /^-{3,}/
-/** What an author almost certainly meant when they wrote one. */
+/** Slidev's `RE_LEADING_BACKTICKS`: the fence level includes its own indentation. */
+const LEADING_BACKTICKS = /^\s*`+/
+/** A tilde run, tracked for diagnostics only — Slidev does not treat these as fences. */
+const LEADING_TILDES = /^\s*~{3,}/
+/** What an author almost certainly meant when they wrote a separator. */
 const EXACT_SEPARATOR = /^---[ \t]*$/
+/** A column-0 dash run, which is what Slidev's `startsWith("---")` accepts. */
+const DASH_RUN = /^-{3,}/
 
 /**
  * Strip a leading byte-order mark from the first line only. The mark stays in the
@@ -139,164 +158,219 @@ function lineContent(line: Line, index: number): string {
   return index === 0 && line.text.startsWith('﻿') ? line.text.slice(1) : line.text
 }
 
-interface OpenFence {
-  readonly marker: string
-  readonly length: number
-}
-
 /**
- * Mark every line that is a slide separator, skipping fenced code.
+ * Slidev's `advanceHtmlCommentState`: return whether the line ends inside a comment.
  *
- * Also collects `ambiguous-separator` warnings: `----` is a line Slidev's own scan may
- * read as a break while this one does not, and a disagreement with the renderer is
- * exactly the kind of thing that must be visible rather than inferred.
+ * Transcribed rather than approximated because it is what makes a `---` inside a speaker
+ * note harmless, and because it handles several comments on one line.
  */
-function scanSeparators(
-  source: string,
-  lines: readonly Line[],
-  diagnostics: Diagnostic[],
-): readonly boolean[] {
-  const separators: boolean[] = []
-  let fence: OpenFence | undefined
-  for (const [index, line] of lines.entries()) {
-    const text = lineContent(line, index)
-    if (fence !== undefined) {
-      const close = FENCE_CLOSE.exec(text)
-      const run = close?.[1]
-      if (run !== undefined && run[0] === fence.marker && run.length >= fence.length) {
-        fence = undefined
-        separators.push(false)
-        continue
-      }
-      // Slidev tracks backtick fences only, so inside a tilde fence it splits here.
-      if (fence.marker === '~' && SEPARATOR.test(text)) {
-        separators.push(true)
-        diagnostics.push(
-          diagnostic(
-            source,
-            'separator-in-tilde-fence',
-            'error',
-            'Slidev splits the slide at this "---" because it does not track tilde fences, cutting the code block in half — use a backtick fence, or indent the "---"',
-            line.start,
-            line.end,
-          ),
-        )
-        continue
-      }
-      separators.push(false)
-      continue
+function advanceHtmlCommentState(line: string, inHtmlComment: boolean): boolean {
+  let cursor = 0
+  let inside = inHtmlComment
+  while (cursor < line.length) {
+    if (inside) {
+      const end = line.indexOf('-->', cursor)
+      if (end < 0) return true
+      inside = false
+      cursor = end + 3
+    } else {
+      const start = line.indexOf('<!--', cursor)
+      if (start < 0) return false
+      const end = line.indexOf('-->', start + 4)
+      if (end < 0) return true
+      cursor = end + 3
     }
-    const open = FENCE_OPEN.exec(text)
-    const run = open?.[1]
-    if (run !== undefined) {
-      // A backtick fence's info string may not contain a backtick (CommonMark 4.5).
-      const info = open?.[2] ?? ''
-      if (run[0] !== '`' || !info.includes('`')) {
-        fence = { marker: run[0] as string, length: run.length }
-        separators.push(false)
-        continue
-      }
-    }
-    if (SEPARATOR.test(text)) {
-      separators.push(true)
-      if (!EXACT_SEPARATOR.test(text)) {
-        diagnostics.push(
-          diagnostic(
-            source,
-            'ambiguous-separator',
-            'warning',
-            'Slidev splits the slide at this line because it starts with three or more dashes; if it was meant as a setext heading underline or a horizontal rule, it is not one — use exactly "---" to break a slide, or "***" for a rule',
-            line.start,
-            line.end,
-          ),
-        )
-      }
-      continue
-    }
-    separators.push(false)
   }
-  return separators
+  return inside
 }
 
 /** Locate every slide, its frontmatter block and its markdown body. */
 export function parseSlidevDeck(source: string): SlidevDeck {
   const lines = scanLines(source)
   const diagnostics: Diagnostic[] = []
-  const separators = scanSeparators(source, lines, diagnostics)
   const slides: SlideRange[] = []
 
-  const nextSeparator = (from: number): number => {
-    for (let index = from; index < lines.length; index += 1) {
-      if (separators[index] === true) return index
-    }
-    return -1
+  const lineStart = (index: number): number => lines[index]?.start ?? source.length
+  const at = (index: number): Line => lines[index] as Line
+
+  // Slidev's `start` and `contentStart`, in line indices.
+  let startLine = 0
+  let contentLine = 0
+  let openSeparator: number | undefined
+  let frontmatterClose: number | undefined
+  let inHtmlComment = false
+  // Diagnostics only: never consulted when deciding where a slide breaks.
+  let tildeFence: number | undefined
+
+  /** Slidev's `slice(end)`: emit the pending slide, unless it is empty. */
+  const emit = (endLine: number): void => {
+    if (startLine === endLine) return
+    const separator = openSeparator
+    const close = frontmatterClose
+    slides.push({
+      index: slides.length,
+      start: separator === undefined ? lineStart(startLine) : at(separator).end,
+      separator:
+        separator === undefined
+          ? undefined
+          : { start: at(separator).start, end: at(separator).end },
+      end: lineStart(endLine),
+      frontmatter:
+        separator === undefined || close === undefined
+          ? undefined
+          : {
+              start: at(separator).start,
+              end: at(close).end,
+              bodyStart: at(separator).end,
+              bodyEnd: at(close).start,
+            },
+      bodyStart: lineStart(contentLine),
+      bodyEnd: lineStart(endLine),
+      isHeadmatter: slides.length === 0 && separator === 0,
+    })
+    startLine = endLine + 1
+    contentLine = endLine + 1
+    openSeparator = undefined
+    frontmatterClose = undefined
   }
 
-  let openSeparator = separators[0] === true ? 0 : -1
-  let lineIndex = openSeparator === -1 ? 0 : 1
+  for (let index = 0; index < lines.length; index += 1) {
+    const raw = at(index)
+    const text = lineContent(raw, index)
+    const trimmed = text.trimEnd()
 
-  for (;;) {
-    const openLine = openSeparator === -1 ? undefined : lines[openSeparator]
-    const start = openLine === undefined ? 0 : openLine.end
-    let frontmatter: FrontmatterBlock | undefined
-    let bodyLine = lineIndex
+    if (inHtmlComment) {
+      inHtmlComment = advanceHtmlCommentState(text, true)
+      continue
+    }
 
-    const first = lines[lineIndex]
-    if (openLine !== undefined && first !== undefined && first.text.trim() !== '') {
-      const close = nextSeparator(lineIndex)
-      if (close === -1) {
+    if (trimmed.startsWith('---')) {
+      if (tildeFence !== undefined) {
         diagnostics.push(
           diagnostic(
             source,
-            'unclosed-frontmatter',
+            'separator-in-tilde-fence',
             'error',
-            'frontmatter block is never closed by a "---" line; Slidev would read the rest of the file as YAML',
-            openLine.start,
-            openLine.end,
+            'Slidev splits the slide at this "---" because it does not track tilde fences, cutting the code block in half — use a backtick fence, or indent the "---"',
+            raw.start,
+            raw.end,
           ),
         )
-      } else {
-        const closeLine = lines[close] as Line
-        if (!EXACT_SEPARATOR.test(lineContent(closeLine, close))) {
+      }
+      if (!EXACT_SEPARATOR.test(trimmed)) {
+        diagnostics.push(
+          diagnostic(
+            source,
+            'ambiguous-separator',
+            'warning',
+            'Slidev splits the slide at this line because it starts with three or more dashes; if it was meant as a setext heading underline or a horizontal rule, it is not one — use exactly "---" to break a slide, or "***" for a rule',
+            raw.start,
+            raw.end,
+          ),
+        )
+      }
+      emit(index)
+      openSeparator = index
+      const next = lines[index + 1]
+      // Slidev's `line[3] !== "-"`: a longer dash run splits but opens no block.
+      if (trimmed[3] !== '-' && next !== undefined && next.text.trim() !== '') {
+        let close = index + 1
+        let malformed: Line | undefined
+        for (; close < lines.length; close += 1) {
+          const candidate = at(close)
+          const candidateText = candidate.text.trimEnd()
+          if (candidateText === '---') break
+          if (malformed === undefined && DASH_RUN.test(candidateText)) malformed = candidate
+        }
+        if (malformed !== undefined) {
           diagnostics.push(
             diagnostic(
               source,
               'malformed-frontmatter',
               'error',
-              'frontmatter block is closed by a line that is not exactly "---"; Slidev consumes three dashes here and leaks the rest of the line into the slide',
-              closeLine.start,
-              closeLine.end,
+              'a column-0 run of dashes inside this frontmatter block does not close it; Slidev consumes three dashes here and leaks the rest of the line into the slide',
+              malformed.start,
+              malformed.end,
             ),
           )
         }
-        frontmatter = {
-          start: openLine.start,
-          end: closeLine.end,
-          bodyStart: openLine.end,
-          bodyEnd: closeLine.start,
+        if (close === lines.length) {
+          diagnostics.push(
+            diagnostic(
+              source,
+              'unclosed-frontmatter',
+              'error',
+              'frontmatter block is never closed by a "---" line; Slidev would read the rest of the file as YAML',
+              raw.start,
+              raw.end,
+            ),
+          )
+        } else {
+          frontmatterClose = close
         }
-        bodyLine = close + 1
+        startLine = index
+        contentLine = close + 1
+        index = close
       }
+      continue
     }
 
-    const next = nextSeparator(bodyLine)
-    const bodyStart = lines[bodyLine]?.start ?? source.length
-    const end = next === -1 ? source.length : (lines[next] as Line).start
-    slides.push({
-      index: slides.length,
-      start,
-      end,
-      frontmatter,
-      bodyStart,
-      bodyEnd: end,
-      isHeadmatter: slides.length === 0 && openSeparator === 0,
-    })
-    if (next === -1) break
-    openSeparator = next
-    lineIndex = next + 1
+    if (trimmed.trimStart().startsWith('```')) {
+      const level = LEADING_BACKTICKS.exec(trimmed)?.[0] ?? '```'
+      let close = index + 1
+      for (; close < lines.length; close += 1) {
+        if (at(close).text.startsWith(level)) break
+      }
+      if (close === lines.length) {
+        // Slidev resumes on the next line rather than swallowing the file, so this is not
+        // fatal — but the fence is still open, so whether a later `---` breaks a slide now
+        // depends on whether some *later* content happens to close it. That makes slide
+        // identity depend on the order of the deck, which is the one thing ADR 0005 buys.
+        diagnostics.push(
+          diagnostic(
+            source,
+            'unclosed-fence',
+            'warning',
+            'this fenced block is never closed, so where the slides after it break depends on content further down the file — close the fence to keep their identities stable',
+            raw.start,
+            raw.end,
+          ),
+        )
+      } else {
+        index = close
+      }
+      continue
+    }
+
+    tildeFence = advanceTildeState(lines, index, trimmed, tildeFence)
+    inHtmlComment = advanceHtmlCommentState(text, false)
   }
 
+  if (startLine <= lines.length - 1) emit(lines.length)
   return { source, slides, diagnostics }
+}
+
+/**
+ * Track tilde runs for the `separator-in-tilde-fence` diagnostic only.
+ *
+ * A run opens a region only when a closing run of at least the same length exists ahead,
+ * which keeps a stray `~~~` in prose from making every later separator look suspect. This
+ * never influences where a slide breaks — Slidev does not know tildes exist.
+ */
+function advanceTildeState(
+  lines: readonly Line[],
+  index: number,
+  trimmed: string,
+  open: number | undefined,
+): number | undefined {
+  const run = LEADING_TILDES.exec(trimmed)?.[0].trimStart()
+  if (run === undefined) return open
+  if (open !== undefined) return run.length >= open ? undefined : open
+  for (let close = index + 1; close < lines.length; close += 1) {
+    const candidate = LEADING_TILDES.exec((lines[close] as Line).text.trimEnd())?.[0].trimStart()
+    if (candidate !== undefined && candidate.length >= run.length) return run.length
+  }
+  return undefined
 }
 
 /** An HTML-comment speaker note, and the prose range inside it. */
@@ -312,15 +386,20 @@ export interface SpeakerNote {
 }
 
 /**
- * Find a slide's speaker note: the HTML comment that ends the slide.
+ * Find a slide's speaker note — transcribed from Slidev's `parseSlide`.
  *
- * Slidev renders the trailing comment of a slide as the presenter note, so that is the
- * one comment whose prose is content rather than an author aside. The scan reuses the
- * fence tracking above, because a `<!--` inside a fenced block is code — the deck shows
- * HTML comments inside its own examples — and it requires the opener to be the first
- * thing on its line, so an inline `` `<!--` `` in prose cannot open one.
+ * Slidev's rule is deliberately simple and has no fence awareness at all: take the slide
+ * content, trim it, find every `<!-- … -->` comment, and if the **last** one ends at the
+ * end of the content, that comment is the note and everything before it is the body.
  *
- * Earlier comments in the slide are left alone; the prose locator reports them as
+ * An earlier version here required the opener to start its line and skipped comments
+ * inside fenced code, on the theory that this was safely stricter. It was not: a fence
+ * whose closing line is indented does not close by Slidev's rule, which swallowed a real
+ * note and lost its prose, and a note opened mid-line was missed entirely. Both were
+ * silent. Matching the renderer exactly is the only rule that cannot invent or lose a
+ * note relative to what the audience is shown.
+ *
+ * Earlier comments in the slide stay author asides; the prose locator reports them as
  * untranslated HTML blocks, which is the right answer for an aside.
  */
 export function findSpeakerNote(
@@ -328,48 +407,23 @@ export function findSpeakerNote(
   start: number,
   end: number,
 ): SpeakerNote | undefined {
-  const fragment = source.slice(start, end)
-  const lines = scanLines(fragment)
-  let fence: OpenFence | undefined
-  let open: number | undefined
-  let last: SpeakerNote | undefined
+  // Slidev compares against `content.trim()`, so the bounds are the trimmed slide.
+  let from = start
+  while (from < end && /\s/.test(source.charAt(from))) from += 1
+  let to = end
+  while (to > from && /\s/.test(source.charAt(to - 1))) to -= 1
 
-  for (const [index, line] of lines.entries()) {
-    const text = lineContent(line, index)
-    if (open === undefined) {
-      if (fence !== undefined) {
-        const close = FENCE_CLOSE.exec(text)
-        const run = close?.[1]
-        if (run !== undefined && run[0] === fence.marker && run.length >= fence.length) {
-          fence = undefined
-        }
-        continue
-      }
-      const opened = FENCE_OPEN.exec(text)
-      const run = opened?.[1]
-      if (run !== undefined && (run[0] !== '`' || !(opened?.[2] ?? '').includes('`'))) {
-        fence = { marker: run[0] as string, length: run.length }
-        continue
-      }
-      if (text.trimStart().startsWith('<!--')) {
-        open = line.start + text.indexOf('<!--')
-      } else {
-        continue
-      }
-    }
-    const searchFrom = Math.max(open + 4, line.start)
-    const closeIndex = fragment.indexOf('-->', searchFrom)
-    if (closeIndex === -1 || closeIndex >= line.end) continue
-    last = {
-      start: start + open,
-      end: start + closeIndex + 3,
-      innerStart: start + open + 4,
-      innerEnd: start + closeIndex,
-    }
-    open = undefined
+  let last: SpeakerNote | undefined
+  let cursor = from
+  for (;;) {
+    const open = source.indexOf('<!--', cursor)
+    if (open === -1 || open >= to) break
+    const close = source.indexOf('-->', open + 4)
+    if (close === -1 || close + 3 > to) break
+    last = { start: open, end: close + 3, innerStart: open + 4, innerEnd: close }
+    cursor = close + 3
   }
 
-  if (last === undefined) return undefined
   // Only a comment that ends the slide is the note; anything after it is content.
-  return source.slice(last.end, end).trim() === '' ? last : undefined
+  return last !== undefined && last.end === to ? last : undefined
 }

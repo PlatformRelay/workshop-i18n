@@ -7,8 +7,8 @@ heading: Tables, setext headings and hard breaks
 Setext level one
 ================
 
-Setext level two
-----------------
+Setext level two, spelled with `=` because a dash underline is a slide break
+===========================================================================
 
 | Verb   | Effect            | Note |
 | :----- | ----------------: | :--: |

@@ -31,10 +31,12 @@ export type DiagnosticCode =
   | 'unsafe-slide-id'
   /** A declared text field holds something other than a string scalar. */
   | 'non-scalar-text-field'
-  /** A dash run Slidev may read as a slide break but this locator does not. */
+  /** A separator that is not exactly `---`; it splits the slide, which is rarely intended. */
   | 'ambiguous-separator'
   /** A `---` inside a tilde fence: Slidev splits the slide there, cutting the code in half. */
   | 'separator-in-tilde-fence'
+  /** A fence with no closing line, which makes later slide boundaries depend on later content. */
+  | 'unclosed-fence'
   /** Prose inside a raw HTML block or Vue island, which stays protected skeleton. */
   | 'prose-in-html-block'
 

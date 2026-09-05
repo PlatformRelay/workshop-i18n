@@ -24,7 +24,7 @@
 
 import { isSafeContainerId, MAX_CONTAINER_ID_LENGTH } from '@workshop-i18n/core'
 import { parseSlidevDeck, type SlideRange } from './deck.js'
-import type { Diagnostic } from './diagnostic.js'
+import { type Diagnostic, diagnostic } from './diagnostic.js'
 import { locateFrontmatter, SLIDE_ID_KEY } from './frontmatter.js'
 import { locateProse } from './prose.js'
 import { positionAt } from './source.js'
@@ -206,6 +206,26 @@ export function planSlideIds(source: string, options: SlideIdPlanOptions): Slide
     if (located?.slideId !== undefined) continue
     // An id that is present but unsafe is a human decision, not something to overwrite.
     if (located?.diagnostics.some((item) => item.code === 'unsafe-slide-id')) continue
+
+    // Slidev opens a frontmatter block only after a separator whose fourth character is
+    // not a dash, so there is nowhere to put an id after `----`. Writing one anyway would
+    // produce YAML the renderer shows as prose. The separator has to be fixed first.
+    if (block === undefined && slide.separator !== undefined) {
+      const text = source.slice(slide.separator.start, slide.separator.end).trimEnd()
+      if (text.charAt(3) === '-') {
+        diagnostics.push(
+          diagnostic(
+            source,
+            'missing-slide-id',
+            'error',
+            'cannot give this slide an identity: Slidev opens no frontmatter block after a separator of four or more dashes, so change that line to exactly "---" first',
+            slide.separator.start,
+            slide.separator.end,
+          ),
+        )
+        continue
+      }
+    }
 
     const slideId = proposeSlideId(headingOf(source, slide, headingKeys), {
       sectionId: options.sectionId,

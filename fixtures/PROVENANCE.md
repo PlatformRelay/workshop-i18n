@@ -33,7 +33,7 @@ byte-identically.
 | Fixture | Hostile construct it covers |
 | --- | --- |
 | `src-includes-and-assets.md` | `src:` frontmatter includes (absent from the real deck), image references, a slide whose frontmatter is only machinery |
-| `tables-and-setext.md` | GFM tables with alignment rows, escaped `\|` in a cell and ragged rows; setext headings; a two-space hard line break |
+| `tables-and-setext.md` | GFM tables with alignment rows, escaped `\|` in a cell and ragged rows; setext headings (spelled with `=`, since a dash underline is a slide break to Slidev); a two-space hard line break |
 | `fence-mutation.md` | Tilde fences, four-tilde around three-tilde, four-backtick magic-move around three-backtick, a bare fence, an indented closing fence, a fence inside a list item, a four-space indented block |
 | `containers-and-wrapping.md` | Wrapped paragraphs inside blockquotes, ordered and nested lists, a blockquote inside a list item, and a wrapped paragraph with no container at all |
 | `crlf-and-bom.md` | CRLF line endings and a leading byte-order mark |
@@ -41,6 +41,8 @@ byte-identically.
 | `unicode-and-interpolation.md` | Emoji including astral and ZWJ sequences, flags, box drawing, arrows, RTL text, HTML entities, `{{ }}` mustache in prose |
 | `yaml-hostility.md` | Plain / single-quoted / double-quoted / literal-block / folded-block scalars, a doubled-quote escape, numeric-looking strings, and declared text keys holding a list or a number |
 | `lazy-continuation.md` | CommonMark laziness: continuation lines that drop the blockquote marker or the list indentation, the shape the real deck's speaker notes use constantly |
+| `scanner-shapes.md` | Shapes Slidev's scanner distinguishes and fixtures previously did not: a `---` inside a speaker note (which must not split), comments opened and closed mid-line, and a fence indented past four spaces |
+| `trailing-separator.md` | A file whose last byte is a separator, which yields no extra slide (a trailing separator *plus* newline does) |
 | `degenerate.md` | A file that does not open with a delimiter, an empty slide, a frontmatter-only slide, a slide with no frontmatter, and no trailing newline |
 
 ## `adversarial-rejected/`
@@ -55,5 +57,6 @@ must still reproduce them byte-for-byte.
 | `malformed-frontmatter.md` | `malformed-frontmatter` |
 | `missing-slide-id.md` | `missing-slide-id` |
 | `separator-in-tilde-fence.md` | `separator-in-tilde-fence` — Slidev tracks backtick fences only, so it splits the slide inside this code block; agreeing silently would leave the second rendered slide with no identity while `--check` passed |
+| `dash-run-opens-no-block.md` | `missing-slide-id` — a `----` separator splits the slide but opens no frontmatter block, so `init-ids` has nowhere to write an identity and refuses rather than emitting YAML the renderer shows as prose |
 | `unclosed-frontmatter.md` | `unclosed-frontmatter` |
 | `unsafe-slide-id.md` | `unsafe-slide-id` |
