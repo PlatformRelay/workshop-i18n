@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   verify:
-    name: Lint, typecheck, test
+    name: Lint, typecheck, build, test
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -27,4 +27,5 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
+      - run: pnpm build
       - run: pnpm test
