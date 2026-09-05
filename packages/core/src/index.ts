@@ -10,6 +10,14 @@
  */
 
 export {
+  assertSafeLocale,
+  isLocaleTag,
+  LocaleError,
+  type LocaleRejection,
+  localeRejection,
+  MAX_LOCALE_TAG_LENGTH,
+} from './locale.js'
+export {
   DEFAULT_LENGTH_BUDGET,
   type LengthBudgets,
   type LocaleSet,

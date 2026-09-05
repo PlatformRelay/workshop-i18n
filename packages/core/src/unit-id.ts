@@ -14,6 +14,8 @@
  * code that merely re-reads an id the tool itself wrote does not pay the cost twice.
  */
 
+import { isReservedFileName } from './reserved-names.js'
+
 /**
  * Content surfaces, in the canonical order used for deterministic output.
  *
@@ -50,37 +52,6 @@ export const MAX_UNIT_KEY_LENGTH = 256
 
 /** Container ids double as file names, so no separators at all — letters, digits, `.`, `_`, `-`. */
 const CONTAINER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
-
-/**
- * Names Windows cannot give a file, in any case and with any extension. A container id
- * becomes `i18n/<locale>/overrides/<containerId>.md`, so a slide legitimately called
- * `con` would produce a file that cannot be created or checked out on Windows — a
- * corpus that fails to clone, reported as a git error rather than as an id problem.
- */
-const WINDOWS_RESERVED_NAMES = new Set([
-  'con',
-  'prn',
-  'aux',
-  'nul',
-  'com1',
-  'com2',
-  'com3',
-  'com4',
-  'com5',
-  'com6',
-  'com7',
-  'com8',
-  'com9',
-  'lpt1',
-  'lpt2',
-  'lpt3',
-  'lpt4',
-  'lpt5',
-  'lpt6',
-  'lpt7',
-  'lpt8',
-  'lpt9',
-])
 
 /** Unit keys additionally allow `/` and `:` as structure separators (`body/3`, `note:speaker:2`). */
 const UNIT_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/
@@ -167,17 +138,14 @@ function checkContainerId(value: string): UnitIdIssue | undefined {
       'must start with a letter or digit and use only letters, digits, ".", "_" and "-"',
     )
   }
-  if (value.endsWith('.')) {
-    // Windows strips a trailing dot, so `s01.` and `s01` become the same override file.
-    return issue('containerId', 'reserved-name', value, 'must not end with "."')
-  }
-  const stem = value.split('.')[0]?.toLowerCase() ?? ''
-  if (WINDOWS_RESERVED_NAMES.has(stem)) {
+  if (isReservedFileName(value)) {
+    // A container id becomes `overrides/<containerId>.md`. A Windows device name cannot
+    // be a file there, and a trailing dot is stripped, so `s01.` and `s01` collide.
     return issue(
       'containerId',
       'reserved-name',
       value,
-      `must not be a reserved device name (${stem}) — it cannot be a file on Windows`,
+      'must not be a reserved device name or end with "." — it could not be a file on Windows',
     )
   }
   return undefined

@@ -18,6 +18,7 @@
  */
 
 import { parse as parseYaml } from 'yaml'
+import { localeRejection } from './locale.js'
 import { SURFACES, type Surface } from './unit-id.js'
 
 /** The api group every supported manifest declares. */
@@ -146,16 +147,6 @@ const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_-]*$/
  * ambiguity, and `Number('01')` would have quietly accepted the second one.
  */
 const API_VERSION = /^([a-z0-9-]+)\/v(0|[1-9]\d*)$/
-/**
- * BCP 47 tags, and also safe directory names: `i18n/<locale>/` is a real path.
- *
- * Subtags after the language may be 1-8 characters, which admits singletons and
- * private-use sequences (`de-Latn-DE-x-a`, `es-419`) that a 2-3 character cap rejected.
- * The total length is capped separately — the shape is permissive, the path safety
- * comes from the charset (letters, digits and "-" only) plus that cap.
- */
-const LOCALE_TAG = /^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8}){0,8}$/
-const MAX_LOCALE_TAG_LENGTH = 35
 /** Layout names come from the deck; keep them plain so they can be printed and matched. */
 const LAYOUT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 /**
@@ -354,14 +345,11 @@ function readLocales(issues: IssueList, value: unknown): LocaleSet {
 
   let source = 'en'
   if (value.source !== undefined) {
-    if (
-      typeof value.source === 'string' &&
-      value.source.length <= MAX_LOCALE_TAG_LENGTH &&
-      LOCALE_TAG.test(value.source)
-    ) {
-      source = value.source
+    const rejection = localeRejection(value.source)
+    if (rejection === undefined) {
+      source = value.source as string
     } else {
-      issues.add('locales.source', 'invalid', 'must be a locale tag such as "en"')
+      issues.add('locales.source', 'invalid', `must be a locale tag such as "en" (${rejection})`)
     }
   }
 
@@ -386,15 +374,13 @@ function readLocales(issues: IssueList, value: unknown): LocaleSet {
   const foldedTargets = new Set<string>()
   rawTargets.forEach((entry, index) => {
     const path = `locales.targets[${index}]`
-    if (
-      typeof entry !== 'string' ||
-      entry.length > MAX_LOCALE_TAG_LENGTH ||
-      !LOCALE_TAG.test(entry)
-    ) {
+    const rejection = localeRejection(entry)
+    if (rejection !== undefined) {
       issues.add(
         path,
         'invalid',
-        `must be a locale tag usable as a directory name, got ${JSON.stringify(entry)}`,
+        `must be a locale tag usable as a directory name (${rejection}), got ` +
+          `${JSON.stringify(entry)}`,
       )
       return
     }
