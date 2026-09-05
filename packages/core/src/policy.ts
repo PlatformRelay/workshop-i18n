@@ -189,24 +189,35 @@ export function tallyUnitStates(units: Iterable<UnitStatus>): StateReport {
     total += 1
   }
 
-  return {
+  // Frozen like `POLICIES`: a report is evidence, and evidence a consumer can edit in
+  // place is not evidence. It is also the `status --json` payload, so callers that hold
+  // it while rendering must not be able to change what was measured.
+  return Object.freeze({
     total,
-    totals,
-    locales: [...locales.entries()]
-      .sort(([a], [b]) => compareStrings(a, b))
-      .map(([locale, data]) => ({
-        locale,
-        total: UNIT_STATES.reduce((sum, state) => sum + data.counts[state], 0),
-        counts: data.counts,
-        sections: [...data.sections.entries()]
-          .sort(([a], [b]) => compareStrings(a, b))
-          .map(([section, counts]) => ({
-            section,
-            total: UNIT_STATES.reduce((sum, state) => sum + counts[state], 0),
-            counts,
-          })),
-      })),
-  }
+    totals: Object.freeze(totals),
+    locales: Object.freeze(
+      [...locales.entries()]
+        .sort(([a], [b]) => compareStrings(a, b))
+        .map(([locale, data]) =>
+          Object.freeze({
+            locale,
+            total: UNIT_STATES.reduce((sum, state) => sum + data.counts[state], 0),
+            counts: Object.freeze(data.counts),
+            sections: Object.freeze(
+              [...data.sections.entries()]
+                .sort(([a], [b]) => compareStrings(a, b))
+                .map(([section, counts]) =>
+                  Object.freeze({
+                    section,
+                    total: UNIT_STATES.reduce((sum, state) => sum + counts[state], 0),
+                    counts: Object.freeze(counts),
+                  }),
+                ),
+            ),
+          }),
+        ),
+    ),
+  })
 }
 
 /**

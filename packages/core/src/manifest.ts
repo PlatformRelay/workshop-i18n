@@ -67,7 +67,17 @@ export interface QuizSurfaceSpec {
 /** One declared surface. */
 export type SurfaceSpec = MarkdownSurfaceSpec | QuizSurfaceSpec
 
-/** Length budgets: a fallback ratio plus per-layout overrides. */
+/**
+ * Length budgets: a fallback ratio plus per-layout overrides.
+ *
+ * `default` is reserved in the manifest's `lengthBudgets` mapping: it sets this
+ * fallback, so a Slidev layout genuinely named `default` cannot be given a budget of
+ * its own — it gets the fallback, which is the same number every unlisted layout gets.
+ * Left as is rather than renamed to a sigil (`"*"`), because the manifest is a protected
+ * contract, `default` reads better than the alternatives, and the only content this
+ * costs is a per-layout budget for a layout named `default` that differs from the
+ * global one. If a consumer ever needs that, it is an ADR and a key rename, not a patch.
+ */
 export interface LengthBudgets {
   readonly default: number
   readonly byLayout: Readonly<Record<string, number>>

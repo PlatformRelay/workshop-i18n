@@ -9,6 +9,7 @@ import {
   isGated,
   isPolicyName,
   isSurface,
+  type LocaleStateCounts,
   OPTIONAL_EXEMPT_STATES,
   POLICIES,
   type Policy,
@@ -16,6 +17,7 @@ import {
   parseUnitId,
   QUIZ_SCHEMA_VARIANTS,
   resolvePolicy,
+  type SectionStateCounts,
   type SourceUnit,
   type StateThresholds,
   SURFACES,
@@ -102,6 +104,20 @@ describe('tallyUnitStates', () => {
     expect(() => tallyUnitStates(bogus)).toThrow(/translated/)
     expect(() => tallyUnitStates(bogus)).toThrow(/slides:s01-pods:body\/1/)
     expect(() => evaluatePolicy(bogus, 'release')).toThrow(UnknownUnitStateError)
+  })
+
+  it('freezes the report it returns', () => {
+    const report = tallyUnitStates(mixed)
+    expect(Object.isFrozen(report)).toBe(true)
+    expect(Object.isFrozen(report.totals)).toBe(true)
+    expect(Object.isFrozen(report.locales)).toBe(true)
+    const locale = report.locales[0] as LocaleStateCounts
+    expect(Object.isFrozen(locale.counts)).toBe(true)
+    expect(Object.isFrozen(locale.sections)).toBe(true)
+    expect(Object.isFrozen((locale.sections[0] as SectionStateCounts).counts)).toBe(true)
+    expect(() => {
+      ;(report.totals as Record<UnitState, number>).reviewed = 99
+    }).toThrow(TypeError)
   })
 
   it('produces a report that JSON round-trips with no NaN and consistent totals', () => {

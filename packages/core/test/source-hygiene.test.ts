@@ -18,8 +18,11 @@ const DIRECTORIES = ['../src', '../test'].map((relative) =>
 )
 
 function sourceFiles(): readonly string[] {
+  // Recursive: a non-recursive scan left a planted control byte in `src/sub/evil.ts`
+  // undetected, which is the whole failure this test exists to catch.
   return DIRECTORIES.flatMap((directory) =>
-    readdirSync(directory)
+    readdirSync(directory, { recursive: true })
+      .map(String)
       .filter((name) => name.endsWith('.ts'))
       .map((name) => join(directory, name)),
   )
