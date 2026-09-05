@@ -45,6 +45,12 @@ Interoperability, not novelty, is the acceptance bar: catalogs must be readable 
 Weblate. Spec 004 verifies the Weblate review-flag convention against fixtures, and that mapping is
 implemented here rather than in a wrapper.
 
+The bar has two directions, and only one of them is discharged by compiling our own output.
+Reading is evidenced against catalogs the GNU tools actually wrote — `fixtures/catalogs/gnu-generated/`,
+regenerable by the script beside them — because a fixture we hand-wrote to *imitate* GNU output
+evidences our imitation, not gettext. `packages/catalog-po/test/gnu-fixtures.test.ts` reads them,
+and asks `msgcat` itself whether what we write back still means the same thing.
+
 ## Consequences
 
 - One less supply-chain edge in a repo that runs Scorecard and CodeQL, and no upstream lag when we
@@ -74,9 +80,47 @@ idempotent — they happen once, on adoption, not on every run:
   groups are emitted in gettext's order — comments, then `#,` flags, then `#|` previous-source —
   and duplicate flags collapse. No comment class or flag is dropped, including ones we do not
   interpret.
+- **Entry order is canonicalised.** Header, then live entries sorted by `msgctxt` then `msgid`,
+  then obsolete entries sorted the same way. GNU keeps the order the source produced. Sorting is
+  what makes a no-change extract a zero-byte diff (FR-005), so it is not negotiable; against a
+  GNU `--no-wrap` catalog it is the *only* remaining difference, which is how
+  `gnu-fixtures.test.ts` pins it.
+- **Escaped bytes become the characters they encode.** `msgcat --escape` spells every non-ASCII
+  character as octal byte escapes, sometimes split across continuation lines. We decode them and
+  re-emit literal UTF-8, escaping only `"`, `\` and control characters without a mnemonic.
+- **Indentation is dropped.** `msgcat --indent` writes keywords and continuation lines with
+  leading whitespace; we read it and emit the flush-left form.
+
+Each of these was checked against real GNU output rather than against a description of it, and
+each is idempotent: the second pass over our own output is a fixed point.
 
 One asymmetry is worth naming: we keep `#.` and `#:` comments on obsolete (`#~`) entries, because
-they record what a preserved translation was made against. GNU's own writer skips them for
-obsolete entries, so a `msgcat` round trip through another tool will drop them. Nothing depends on
-their retention — the update algorithm rebuilds provenance from the English source when a unit
-returns — so this is a graceful loss, not a correctness one.
+they record what a preserved translation was made against. `msgcat` preserves them too (verified
+on 0.23.2), but `msgmerge` drops both classes at the moment it obsoletes an entry — it rebuilds
+them from the POT, and a unit that left the English source has no POT entry left to rebuild from.
+So a catalog that has been through `msgmerge` will have lost them. Nothing depends on their
+retention — the update algorithm rebuilds provenance from the English source when a unit returns —
+so this is a graceful loss, not a correctness one.
+
+### The one shape we refuse that GNU produces
+
+`parsePo` requires a catalog to begin with the header entry (`msgid ""`). Three GNU invocations
+produce a catalog with no header at all, and we reject all three:
+
+- `xgettext --omit-header`,
+- `msgcomm --omit-header`,
+- and any `msgcat`/`msgmerge` run whose first (or definition) input is one of those, because
+  headerlessness propagates.
+
+These are valid gettext — `msgfmt` compiles them — so this is our limit, not their bug. It is kept
+deliberately: a catalog without a header has no `Content-Type`, so its encoding is undeclared, and
+gettext's own tools warn about multibyte sequences when they process one. Nothing in this tool's
+pipeline can produce one, because `extract` always writes a header. `fixtures/catalogs/gnu-generated/refused/`
+holds both files and a test pins the exact error, so the refusal cannot drift from a decision into
+an accident — and if we ever need to accept them, that test is where the change gets argued.
+
+The parser's other self-flagged strictness — refusing a comment block that is followed by no entry
+— was checked the same way and found *not* to be reachable from GNU output. No tool emits a
+dangling trailing comment; `msgcat` silently discards one if it reads a catalog that has it. We
+raise an error there instead, which is the stricter but safer half of the same disagreement:
+spec 002 forbids dropping translator work silently.
