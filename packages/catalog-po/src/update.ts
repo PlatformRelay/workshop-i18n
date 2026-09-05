@@ -270,7 +270,8 @@ export function isDraftable(entry: CatalogEntry): boolean {
  *
  * A stale `fuzzy` marker is only ever cleared on an entry that had no human translation
  * under it — either nothing was there, or what was there was an earlier draft. The entry
- * stays gated by {@link NEEDS_REVIEW_FLAG} either way.
+ * stays gated by {@link NEEDS_REVIEW_FLAG} either way, and the `#|` previous-source goes
+ * with the translation it was context for.
  *
  * @throws {CatalogError} when the catalog has no live entry for `id`; when the entry
  *   holds human work ({@link isDraftable} is false); or when the draft is empty — an
@@ -309,7 +310,12 @@ export function applyDraftTranslation(catalog: Catalog, id: UnitId, translation:
   const flags = entry.po.flags.filter((flag) => flag !== FUZZY_FLAG)
   if (!flags.includes(NEEDS_REVIEW_FLAG)) flags.push(NEEDS_REVIEW_FLAG)
 
-  const po: PoEntry = { ...entry.po, flags, msgstr: [translation] }
+  // Drop `#|` along with the translation it described. Previous-source is diff context
+  // for revalidating a *specific* translation; once that text is replaced, a `#| msgid`
+  // left behind points at prose no longer in the file — and after F-3 this path is
+  // reachable with the marker still on, so `#, needs-review` would sit beside a stale
+  // `#| msgid` for a translation nobody can see.
+  const po: PoEntry = { ...entry.po, flags, msgstr: [translation], previous: undefined }
   const entries = [...catalog.entries]
   entries[index] = toCatalogEntry(po, id)
   return { ...catalog, entries }

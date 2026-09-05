@@ -19,6 +19,8 @@ interface PackageManifest {
   readonly dependencies?: Readonly<Record<string, string>>
   readonly peerDependencies?: Readonly<Record<string, string>>
   readonly optionalDependencies?: Readonly<Record<string, string>>
+  readonly bundledDependencies?: readonly string[]
+  readonly bundleDependencies?: readonly string[]
 }
 
 function manifest(): PackageManifest {
@@ -27,15 +29,21 @@ function manifest(): PackageManifest {
 
 describe('ADR 0013 — no third-party runtime dependency', () => {
   it('declares only workspace siblings as runtime dependencies', () => {
+    // Both halves are checked: a `workspace:` range on a name that is not one of ours
+    // would still be a foreign package, and a real name with a fabricated range is caught
+    // downstream by `pnpm install --frozen-lockfile`.
     const foreign = Object.entries(manifest().dependencies ?? {}).filter(
-      ([, range]) => !range.startsWith('workspace:'),
+      ([name, range]) => !range.startsWith('workspace:') || !name.startsWith('@workshop-i18n/'),
     )
     expect(foreign, 'ADR 0013 forbids a third-party runtime dependency in this package').toEqual([])
   })
 
-  it('declares no peer or optional dependencies either — the same edge by another name', () => {
-    expect(Object.keys(manifest().peerDependencies ?? {})).toEqual([])
-    expect(Object.keys(manifest().optionalDependencies ?? {})).toEqual([])
+  it('declares no peer, optional or bundled dependencies — the same edge by other names', () => {
+    const found = manifest()
+    expect(Object.keys(found.peerDependencies ?? {})).toEqual([])
+    expect(Object.keys(found.optionalDependencies ?? {})).toEqual([])
+    expect(found.bundledDependencies ?? []).toEqual([])
+    expect(found.bundleDependencies ?? []).toEqual([])
   })
 
   it('is actually reading the manifest it thinks it is', () => {

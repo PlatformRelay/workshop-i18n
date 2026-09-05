@@ -335,6 +335,24 @@ describe('drafted translations (FR-007, constitution V)', () => {
     expect(reseeded.entries[0]?.po.flags).not.toContain('fuzzy')
   })
 
+  it('drops the previous-source when it re-drafts, so no #| outlives its translation', () => {
+    const fresh = updateCatalog({ identity: IDENTITY, units: BASE }).catalog
+    const seeded = applyDraftTranslation(fresh, parseUnitId('slides:s01:body/1'), 'MASCHINE v1')
+    const edited = BASE.map((u, index) =>
+      index === 0 ? unit('slides:s01:body/1', 'A Pod is a group of one or more containers.') : u,
+    )
+    const stale = updateCatalog({ identity: IDENTITY, units: edited, previous: seeded }).catalog
+    expect(serializeCatalog(stale)).toContain('#| msgid "A Pod is a group of containers."')
+
+    const reseeded = applyDraftTranslation(stale, parseUnitId('slides:s01:body/1'), 'MASCHINE v2')
+    // `#| msgid` is diff context for the translation being revalidated. Once that
+    // translation is replaced, it describes prose that no longer exists in the file.
+    expect(reseeded.entries[0]?.po.previous).toBeUndefined()
+    expect(reseeded.entries[0]?.previousSource).toBeUndefined()
+    expect(serializeCatalog(reseeded)).not.toContain('#| msgid')
+    expect(serializeCatalog(reseeded)).toContain('#, needs-review')
+  })
+
   it('still refuses a fuzzy entry that carries no draft marker, and says why truthfully', () => {
     const previous = reviewedCatalog()
     const edited = BASE.map((u, index) =>
