@@ -1,7 +1,29 @@
 /**
- * @workshop-i18n/extract-slidev — see the package description in package.json.
+ * Lossless extraction and composition for Slidev decks (spec 001, ADR 0012).
  *
- * Implementation is spec-driven; see /specs for the feature specs and
- * /docs/adr for the architectural decisions this package must satisfy.
+ * Extraction **locates**; it never re-serializes. It returns the original file text plus
+ * the half-open ranges of the prose inside it, and `composeSkeleton` splices
+ * translations back into those ranges. Everything else — fences, frontmatter machinery,
+ * Vue islands, `src:` includes, image references, HTML — is copied byte-for-byte, so
+ * composing a skeleton with an empty catalog reproduces the source exactly.
+ *
+ * Pure and offline: no `node:fs`, no network, and consumer content is never executed.
+ * Reading files is the CLI's job (constitution IV).
  */
-export const PACKAGE_NAME = '@workshop-i18n/extract-slidev'
+
+export {
+  CompositionError,
+  type CompositionIssue,
+  composeSkeleton,
+  createSkeleton,
+  type Hole,
+  type HoleContext,
+  type HoleEncoding,
+  type ReplacementRejection,
+  type Skeleton,
+  SkeletonError,
+  skeletonUnits,
+  stripContinuationPrefix,
+  type TranslationLookup,
+} from './skeleton.js'
+export { decodeSource, type Position, positionAt, SourceDecodeError } from './source.js'

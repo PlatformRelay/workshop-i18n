@@ -24,6 +24,10 @@ export default defineConfig({
         find: /^@workshop-i18n\/core$/,
         replacement: source('./packages/core/src/index.ts'),
       },
+      {
+        find: /^@workshop-i18n\/extract-slidev$/,
+        replacement: source('./packages/extract-slidev/src/index.ts'),
+      },
     ],
   },
 })

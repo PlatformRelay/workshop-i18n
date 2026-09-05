@@ -10,7 +10,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc"
+    "build": "tsc -p tsconfig.build.json"
   },
   "repository": {
     "type": "git",
@@ -19,5 +19,16 @@
   },
   "engines": {
     "node": ">=22"
+  },
+  "dependencies": {
+    "@workshop-i18n/core": "workspace:*",
+    "mdast-util-from-markdown": "^2.0.3",
+    "mdast-util-gfm-table": "^2.0.0",
+    "micromark-extension-gfm-table": "^2.1.1",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/mdast": "^4.0.4",
+    "@types/node": "^22.20.1"
   }
 }
