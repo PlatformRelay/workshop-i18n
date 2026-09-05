@@ -70,7 +70,7 @@ function gettextVersion(tool: string): string | undefined {
 
 const msgcatVersion = gettextVersion('msgcat')
 const msgfmtVersion = gettextVersion('msgfmt')
-const haveGettext = ['msgcat', 'msgfmt', 'msgen', 'msgconv'].every(
+const haveGettext = ['msgcat', 'msgfmt', 'xgettext'].every(
   (tool) => gettextVersion(tool) !== undefined,
 )
 
@@ -386,9 +386,10 @@ describe('GNU output this codec deliberately refuses', () => {
       expect(error).toBeInstanceOf(PoSyntaxError)
       expect((error as PoSyntaxError).message).toBe(
         `${name}:1: catalog has no header entry (msgid ""), so its encoding and plural ` +
-          'rules are undeclared — synthesize one with `msgen <file> | msgconv ' +
-          '--to-code=UTF-8`, or re-export the catalog from your TMS with its header ' +
-          '(`--omit-header` output is a template for diffing, not a catalog to ship)',
+          'rules are undeclared — re-run the extraction or TMS export without ' +
+          '`--omit-header`, which is what removed it. Adding a header afterwards is not ' +
+          'the same fix: `--omit-header` also strips non-ASCII characters out of the ' +
+          'msgids, and nothing puts those back.',
       )
     }
   })
@@ -399,10 +400,12 @@ describe('GNU output this codec deliberately refuses', () => {
    * is all a facilitator typing `--locale con` will ever read. Asserted separately from
    * the exact string above so that what matters about it survives a rewording.
    *
-   * `msgconv` is in the advice, not decoration: `msgen` and `msginit` both synthesize a
-   * header declaring `charset=ASCII`, which this tool then refuses at the catalog layer.
-   * Advice that walks the reader into a second wall is not advice, so the pipe is part of
-   * it — and the test below runs the whole thing to prove it lands somewhere better.
+   * The advice must not name a *tool* to synthesize a header, and that is a scar rather
+   * than a preference. This message twice recommended `msgen`, which emits a header on
+   * gettext 0.23.2 and not on 0.21 — so CI, which runs 0.21, was told to run advice that
+   * does not work there. gettext's own manual says why: msgen "doesn't care specially
+   * about the header entry" (msginit does). Behaviour upstream declines to specify is not
+   * something to build shipped advice on, whichever versions happen to agree today.
    */
   it.each(HEADERLESS)('tells the reader how to fix %s, not only what is wrong', (name) => {
     try {
@@ -410,11 +413,14 @@ describe('GNU output this codec deliberately refuses', () => {
       expect.unreachable(`expected ${name} to be refused`)
     } catch (error) {
       const { message } = error as PoSyntaxError
-      // Commands that produce a header this tool will accept, so the reader can act.
-      expect(message).toContain('msgen')
-      expect(message).toContain('msgconv --to-code=UTF-8')
-      // And where a headerless catalog comes from, so they recognise their own situation.
+      // Redo the step that dropped the header, rather than patch its output.
+      expect(message).toMatch(/re-run the extraction|re-export/)
+      // Name what removed it, so the reader recognises their own situation.
       expect(message).toContain('--omit-header')
+      // And warn that patching it afterwards does not undo the loss it caused.
+      expect(message).toContain('non-ASCII')
+      // No version-dependent tool in shipped advice. See the note above.
+      expect(message).not.toContain('msgen')
     }
   })
 
@@ -423,6 +429,20 @@ describe('GNU output this codec deliberately refuses', () => {
    * any catalog is one `msgconv` away from declaring a charset we refuse, and `msgfmt`
    * compiles the result happily.
    */
+  /**
+   * The other half of what the message claims, asserted on committed bytes so it holds on
+   * every machine and every gettext generation — including the ones where the fixture
+   * cannot be regenerated. `--omit-header` leaves xgettext nowhere to declare a charset,
+   * so it falls back to ASCII and discards the rest: this fixture was extracted from a
+   * source reading `Grüße, 日本語 — first line`.
+   */
+  it('shows why a synthesized header would not have been the fix', () => {
+    const damaged = read('refused/xgettext-omit-header.po')
+    expect(damaged).toContain('"Gre,   first line\\n"')
+    expect(damaged).not.toContain('Grüße')
+    expect(damaged).not.toContain('日本語')
+  })
+
   it('refuses a catalog that declares a charset other than UTF-8', () => {
     const name = 'refused/msgconv-iso-8859-1.po'
     const text = read(name)
@@ -534,33 +554,43 @@ describe('gettext agrees with what we write back', () => {
   )
 
   /**
-   * The remedy the error message names, executed rather than asserted. This is the shape
-   * of mistake worth guarding: the first version of that message said `msginit` or
-   * `msgen`, both of which do synthesize a header — declaring `charset=ASCII`, which the
-   * catalog layer then refuses. The advice was true and useless. Running it here means a
-   * future reword cannot quietly reintroduce a dead end.
+   * The remedy the error message names, executed rather than asserted — and the second
+   * time in this lane that executing a claim has caught something real.
+   *
+   * The previous version ran `msgen <file> | msgconv --to-code=UTF-8`, which works on
+   * gettext 0.23.2 and does *not* work on 0.21, the generation our CI runs: `msgen` there
+   * passes a headerless catalog straight through, so the "fixed" file is still headerless.
+   * The manual is explicit that this was never promised — msgen "doesn't care specially
+   * about the header entry" — so the advice was resting on incidental behaviour.
+   *
+   * The remedy is now to redo the step that dropped the header rather than to patch its
+   * output, which depends on no tool whose behaviour drifts between generations. It is
+   * also the only *correct* advice: `--omit-header` discards every non-ASCII character on
+   * the way out, so a synthesized header would have produced a catalog that parses and is
+   * still missing its text. Both halves are asserted below.
    */
   it.runIf(haveGettext)('fixes a headerless catalog by following its own error message', () => {
-    for (const name of HEADERLESS) {
-      const source = join(mkdtempSync(join(tmpdir(), 'workshop-i18n-remedy-')), 'in.po')
-      writeFileSync(source, readFileSync(join(GNU, name)))
+    const workspace = mkdtempSync(join(tmpdir(), 'workshop-i18n-remedy-'))
+    const source = join(workspace, 'src.c')
+    writeFileSync(source, 'void f(void) {\n  puts(_("Grüße, 日本語 — first line"));\n}\n')
 
-      // Exactly what the message says: msgen <file> | msgconv --to-code=UTF-8
-      const generated = spawnSync('msgen', [source], { encoding: 'utf8' })
-      expect(generated.status, `msgen ${name}: ${generated.stderr}`).toBe(0)
-      const converted = spawnSync('msgconv', ['--to-code=UTF-8'], {
-        encoding: 'utf8',
-        input: generated.stdout,
-      })
-      expect(converted.status, `msgconv ${name}: ${converted.stderr}`).toBe(0)
-
-      // The codec now accepts it, and the charset gate no longer fires.
-      expect(() => parsePo(converted.stdout, { fileName: name })).not.toThrow()
-      expect(charsetRefusal(converted.stdout, name)).toBeUndefined()
-
-      // Whereas msgen alone — the advice that message used to give — walks into a wall.
-      expect(charsetRefusal(generated.stdout, name)).toContain('charset "ASCII"')
+    const extract = (extra: readonly string[], out: string): string => {
+      const result = spawnSync(
+        'xgettext',
+        ['--from-code=UTF-8', '-k_', ...extra, '-o', join(workspace, out), source],
+        { encoding: 'utf8' },
+      )
+      expect(result.status, `xgettext ${extra.join(' ')}: ${result.stderr}`).toBe(0)
+      return readFileSync(join(workspace, out), 'utf8')
     }
+
+    // Exactly what the message says: the same extraction, keeping its header. Nothing
+    // here leans on behaviour gettext declines to specify — an extraction writes a header
+    // unless told not to, and declares the encoding it converted to.
+    const kept = extract([], 'kept.pot')
+    expect(() => parsePo(kept, { fileName: 'kept.pot' })).not.toThrow()
+    expect(charsetRefusal(kept, 'kept.pot')).toBeUndefined()
+    expect(kept).toContain('Grüße, 日本語 — first line')
   })
 
   /** The other half of the disagreement pinned above: gettext reads it, then drops it. */

@@ -412,9 +412,18 @@ export function parsePo(text: string, options: ParsePoOptions): PoFile {
   // `msgattrib --set-obsolete` all leave `msgid ""` at the top, because gettext treats the
   // header as a distinguished entry rather than as a message — so every GNU catalog that
   // arrives here is missing its header outright, and that is the message worth writing
-  // well. It names the way out, because this string is all a translator handed a rejected
-  // file will read; `msgconv` is in the pipeline because `msgen` alone writes
-  // `charset=ASCII`, which `catalog.ts` then refuses.
+  // well, because this string is all a translator handed a rejected file will read.
+  //
+  // It names no tool. Two earlier versions did — `msginit`/`msgen`, then
+  // `msgen | msgconv` — and both were wrong in the same way: `msgen` synthesizes a header
+  // on gettext 0.23.2 and not on 0.21, which is behaviour the GNU manual explicitly
+  // declines to promise ("msginit cares specially about the header entry, whereas msgen
+  // doesn't"). Advice we ship has to hold on every generation a user might have.
+  //
+  // Redoing the extraction is portable because it depends on no such behaviour, and it is
+  // the only correct advice anyway: `--omit-header` strips every non-ASCII character from
+  // the msgids on its way out, so bolting a header onto its output yields a catalog that
+  // parses and is still missing its text.
   const first = entries[0]
   if (first !== undefined && !isHeaderEntry(first)) {
     const header = entries.find((entry) => isHeaderEntry(entry))
@@ -422,9 +431,10 @@ export function parsePo(text: string, options: ParsePoOptions): PoFile {
       { fileName, line: first.line },
       header === undefined
         ? 'catalog has no header entry (msgid ""), so its encoding and plural rules ' +
-            'are undeclared — synthesize one with `msgen <file> | msgconv ' +
-            '--to-code=UTF-8`, or re-export the catalog from your TMS with its header ' +
-            '(`--omit-header` output is a template for diffing, not a catalog to ship)'
+            'are undeclared — re-run the extraction or TMS export without ' +
+            '`--omit-header`, which is what removed it. Adding a header afterwards is ' +
+            'not the same fix: `--omit-header` also strips non-ASCII characters out of ' +
+            'the msgids, and nothing puts those back.'
         : 'catalog does not start with its header entry (msgid "") — the header is at ' +
             `line ${header.line}; move it above the first message`,
     )

@@ -141,11 +141,22 @@ refusals live at different layers.
 
 Because both refusals stand, their messages carry the remedy rather than only the rule — the shape
 `packages/core` uses for its reserved-locale rejection, on the same reasoning: that string is all a
-translator handed a rejected file will read. The headerless message names
-`msgen <file> | msgconv --to-code=UTF-8`, and the pipe is load-bearing: `msgen` and `msginit` both
-synthesize a header declaring `charset=ASCII`, which the charset rule above then refuses, so advice
-naming either of them alone walks the reader into a second wall. A gettext-gated test *executes*
-the remedy rather than asserting it, because that is the mistake this message already made once.
+translator handed a rejected file will read.
+
+The headerless message names **no tool**, and that is a scar. Two earlier versions named one —
+`msginit`/`msgen`, then `msgen <file> | msgconv --to-code=UTF-8` — and both were wrong in the same
+way. `msgen` synthesizes a header on gettext 0.23.2 and does not on 0.21, the generation our own CI
+runs, so we shipped advice that failed on the version we test against; gettext's manual says the
+behaviour was never promised, since "`msginit` cares specially about the header entry, whereas
+`msgen` doesn't". The message now says to re-run the extraction or TMS export without
+`--omit-header`. That is portable because it leans on no unspecified behaviour, and it is the only
+*correct* advice anyway: `--omit-header` strips non-ASCII characters out of the msgids on the way
+out, so synthesizing a header would produce a catalog that parses and is still missing its text.
+
+A gettext-gated test *executes* the remedy rather than asserting its wording, and the damage claim
+is asserted against committed fixture bytes so it holds without gettext at all. Executing rather
+than asserting is what caught this: the version-dependence surfaced as a CI failure on a real
+runner rather than as advice quietly failing in a translator's terminal.
 
 **How the header rule fires.** `parsePo` requires the header to be the *first* entry, and that
 ordering form is kept deliberately: relaxing it to "a header exists somewhere" would newly accept a

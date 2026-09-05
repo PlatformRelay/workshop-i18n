@@ -87,16 +87,18 @@ So the parser refuses, and its message carries the way out rather than only the 
 
 ```
 <file>:1: catalog has no header entry (msgid ""), so its encoding and plural rules are
-undeclared — synthesize one with `msgen <file> | msgconv --to-code=UTF-8`, or re-export
-the catalog from your TMS with its header (`--omit-header` output is a template for
-diffing, not a catalog to ship)
+undeclared — re-run the extraction or TMS export without `--omit-header`, which is what
+removed it. Adding a header afterwards is not the same fix: `--omit-header` also strips
+non-ASCII characters out of the msgids, and nothing puts those back.
 ```
 
-The pipe is load-bearing. `msgen` and `msginit` each synthesize a header declaring
-`charset=ASCII`, which the charset rule in the table above then refuses — so advice naming
-either alone would walk the reader straight into a second wall. A gettext-gated test runs
-the whole pipeline rather than asserting it, because this message already made that
-mistake once.
+It names no tool, and that is deliberate. Two earlier versions named one — `msginit`/`msgen`,
+then `msgen <file> | msgconv --to-code=UTF-8` — and both broke on gettext 0.21, where
+`msgen` passes a headerless catalog straight through instead of synthesizing a header.
+The manual says that was never promised: "`msginit` cares specially about the header
+entry, whereas `msgen` doesn't." Redoing the extraction depends on no such behaviour, and
+it is also the only fix that recovers the text `--omit-header` discarded — see the
+`Gre,   first line` above.
 
 ### What the header rule is *not*
 
