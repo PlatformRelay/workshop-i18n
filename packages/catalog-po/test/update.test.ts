@@ -251,6 +251,73 @@ describe('updateCatalog — a deleted unit (FR-004)', () => {
   })
 })
 
+describe('updateCatalog — review state survives obsoletion and revival', () => {
+  /**
+   * Obsoleting and reviving both rewrite an entry's flag set, which makes them state
+   * producers as surely as the mapping is. Nothing pinned that the gating flags come
+   * through, and "an obsolete entry is not up for review, so drop its review flags"
+   * reads like reasonable cleanup — it silently promotes a machine draft to `reviewed`,
+   * which `catalogStatuses` then hands to the release gate.
+   *
+   * Every earlier delete/revive test ran on a catalog whose entries were all `reviewed`,
+   * so no test in the package had ever obsoleted or resurrected a *gated* entry.
+   */
+  function seededCatalog(): Catalog {
+    const fresh = updateCatalog({ identity: IDENTITY, units: BASE }).catalog
+    const seeded = applyDraftTranslation(fresh, parseUnitId('slides:s02:body/1'), 'MASCHINE')
+    expect(seeded.entries[2]?.state).toBe('needs-review')
+    return seeded
+  }
+
+  it('keeps a machine draft gated when its unit leaves the English source', () => {
+    const previous = seededCatalog()
+    const result = updateCatalog({ identity: IDENTITY, units: BASE.slice(0, 2), previous })
+
+    const gone = result.catalog.obsolete[0]
+    expect(gone?.po.flags).toContain(NEEDS_REVIEW_FLAG)
+    expect(gone?.state).toBe('needs-review')
+    expect(gone?.translation).toBe('MASCHINE')
+    expect(serializeCatalog(result.catalog)).toContain('#, needs-review')
+  })
+
+  it('keeps it gated when the unit comes back, all the way through to the gate', () => {
+    const previous = seededCatalog()
+    const removed = updateCatalog({ identity: IDENTITY, units: BASE.slice(0, 2), previous }).catalog
+    const back = updateCatalog({ identity: IDENTITY, units: BASE, previous: reread(removed) })
+
+    expect(back.summary.resurrected).toEqual(['slides:s02:body/1'])
+    const revived = back.catalog.entries[2]
+    expect(revived?.po.flags).toContain(NEEDS_REVIEW_FLAG)
+    expect(revived?.state).toBe('needs-review')
+    expect(revived?.translation).toBe('MASCHINE')
+
+    // The projection a release gate reads must agree — this is the whole point.
+    const status = catalogStatuses(back.catalog).find(
+      (candidate) => formatUnitId(candidate.id) === 'slides:s02:body/1',
+    )
+    expect(status?.state).toBe('needs-review')
+  })
+
+  it('keeps a fuzzy entry fuzzy when its unit leaves the English source', () => {
+    const previous = reviewedCatalog()
+    const edited = BASE.map((u, index) =>
+      index === 2 ? unit('slides:s02:body/1', 'A Service gives Pods one stable address.') : u,
+    )
+    const stale = updateCatalog({ identity: IDENTITY, units: edited, previous }).catalog
+    expect(stale.entries[2]?.state).toBe('fuzzy')
+
+    const result = updateCatalog({
+      identity: IDENTITY,
+      units: edited.slice(0, 2),
+      previous: stale,
+    })
+    const gone = result.catalog.obsolete[0]
+    expect(gone?.po.flags).toContain('fuzzy')
+    expect(gone?.state).toBe('fuzzy')
+    expect(gone?.translation).toBe('übersetzt')
+  })
+})
+
 describe('updateCatalog — new units alongside existing ones', () => {
   it('adds the new unit as missing and leaves the rest alone', () => {
     const previous = reviewedCatalog()
@@ -399,6 +466,38 @@ describe('drafted translations (FR-007, constitution V)', () => {
 })
 
 describe('catalogStatuses', () => {
+  /**
+   * A catalog reaching all four states, so an alternating lie has room to show. Built
+   * only through the public API — note that `applyDraftTranslation` refuses the reviewed
+   * entries, which is why the draft goes onto a newly added unit.
+   */
+  function seededMixedCatalog(): Catalog {
+    const previous = reviewedCatalog()
+    const units = [
+      unit('slides:s01:body/1', 'A Pod is a group of one or more containers.'),
+      ...BASE.slice(1),
+      unit('slides:s03:body/1', 'Deployments manage ReplicaSets.'),
+      unit('slides:s03:body/2', 'ReplicaSets manage Pods.'),
+    ]
+    const grown = updateCatalog({ identity: IDENTITY, units, previous }).catalog
+    const mixed = applyDraftTranslation(grown, parseUnitId('slides:s03:body/1'), 'MASCHINE')
+    expect(new Set(mixed.entries.map((entry) => entry.state))).toEqual(
+      new Set(['fuzzy', 'reviewed', 'needs-review', 'missing']),
+    )
+    return mixed
+  }
+
+  it('reports the same states however many times it is asked', () => {
+    // Called once per assertion, a producer that lies on alternate calls survives. The
+    // other two producers are called many times over by the property tests; this one was
+    // not, so it gets the check explicitly.
+    const catalog = seededMixedCatalog()
+    expect(catalogStatuses(catalog)).toEqual(catalogStatuses(catalog))
+    expect(catalogStatuses(catalog).map((s) => s.state)).toEqual(
+      catalog.entries.map((entry) => entry.state),
+    )
+  })
+
   it('reports state per unit and never speaks to requiredness', () => {
     const catalog = reviewedCatalog()
     const statuses = catalogStatuses(catalog)
