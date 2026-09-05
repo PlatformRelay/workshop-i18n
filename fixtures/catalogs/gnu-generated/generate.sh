@@ -18,9 +18,11 @@
 # The only bytes in the outputs this script writes itself are (a) the C sources xgettext
 # reads, (b) the German translations, injected into one intermediate catalog and then
 # re-emitted by `msgcat` so even their spelling is GNU's, and (c) four volatile timestamp
-# fields pinned to fixed values so re-running is a zero-byte diff. Every structural shape
-# — wrapping, fuzzy marking, `#|` previous-source, `#~` obsoletion, comment ordering — is
-# the tools' own.
+# fields pinned to fixed values so re-running is a zero-byte diff — and only where the
+# tool wrote a real timestamp, never over a placeholder it left for a human. Every
+# structural shape — wrapping, fuzzy marking, `#|` previous-source, `#~` obsoletion,
+# comment ordering, charset — is the tools' own. The two `refused/` catalogs GNU built
+# from scratch contain no authored bytes at all.
 
 set -euo pipefail
 
@@ -28,7 +30,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-for tool in xgettext msginit msgmerge msgcat msgattrib msgconv msgfmt msgunfmt; do
+for tool in xgettext msginit msgmerge msgcat msgattrib msgconv msggrep msgfmt msgunfmt; do
   command -v "$tool" >/dev/null || { echo "missing $tool — install gettext" >&2; exit 1; }
 done
 
@@ -79,10 +81,14 @@ extract() { # extract <source> <output> <version>
 #    timestamps; none of them is a structural shape the codec has to read.
 # --------------------------------------------------------------------------------------
 
+# Only a value beginning with a digit is a real timestamp. xgettext writes the literal
+# placeholder `YEAR-MO-DA HO:MI+ZONE` into a fresh template, and substituting a plausible
+# date for that would put a small fiction into a directory whose whole point is that it
+# contains none — so a placeholder is left exactly as the tool wrote it.
 pin_dates() {
   sed -i \
-    -e 's/^"POT-Creation-Date: .*/"POT-Creation-Date: 2026-01-15 09:00+0000\\n"/' \
-    -e 's/^"PO-Revision-Date: .*/"PO-Revision-Date: 2026-01-15 10:30+0000\\n"/' \
+    -e 's/^"POT-Creation-Date: [0-9].*/"POT-Creation-Date: 2026-01-15 09:00+0000\\n"/' \
+    -e 's/^"PO-Revision-Date: [0-9].*/"PO-Revision-Date: 2026-01-15 10:30+0000\\n"/' \
     -e 's/^# Copyright (C) [0-9]* /# Copyright (C) 2026 /' \
     -e 's/^# Automatically generated, [0-9]*\./# Automatically generated, 2026./' \
     "$1"
@@ -217,12 +223,18 @@ emit xgettext-hostile-no-wrap.po
 
 # --------------------------------------------------------------------------------------
 # 5. GNU output this codec refuses. Kept as fixtures precisely because they are valid
-#    gettext: the refusal is a deliberate limit, and it is pinned so it cannot drift into
-#    an accident. See README.md in this directory and ADR 0013.
+#    gettext — `msgfmt` compiles all three — so the refusals are deliberate limits, and
+#    pinning them stops one drifting into an accident. README.md and ADR 0013 say why each
+#    is kept.
 # --------------------------------------------------------------------------------------
 
 mkdir -p "$here/refused"
 
+# Note what --omit-header costs, visible in the output: with no header there is no
+# `Content-Type` to declare a charset in, so xgettext falls back to ASCII and strips every
+# non-ASCII byte out of the msgids. `Grüße, 日本語 — first line` is extracted as
+# `Gre,   first line`. The stderr suppressed here is the `invalid multibyte sequence` run
+# that reports it, one line per lost character.
 ( cd "$work" && xgettext --from-code=UTF-8 -k_ -kpgettext:1c,2 -kngettext:1,2 \
     --add-comments=TRANSLATORS --omit-header \
     -o "$here/refused/xgettext-omit-header.po" src-v2.c 2>/dev/null )
@@ -233,5 +245,13 @@ emit refused/xgettext-omit-header.po
 msgmerge --previous -o "$here/refused/msgmerge-headerless.po" \
   "$here/refused/xgettext-omit-header.po" "$work/v2.pot" 2>/dev/null
 emit refused/msgmerge-headerless.po
+
+# The second shape we refuse: a header that declares a charset other than UTF-8. One
+# msgconv away from any catalog, and `msgfmt` compiles the result. Dropping the entry with
+# Japanese in it first, because ISO-8859-1 cannot represent it and msgconv rightly fails
+# rather than losing it — which is itself the reason this tool stays UTF-8 only.
+msggrep -v --msgid -e '日本語' -o "$work/latin1-safe.po" "$here/msgmerge-previous.po"
+msgconv --to-code=ISO-8859-1 -o "$here/refused/msgconv-iso-8859-1.po" "$work/latin1-safe.po"
+emit refused/msgconv-iso-8859-1.po
 
 echo "done."

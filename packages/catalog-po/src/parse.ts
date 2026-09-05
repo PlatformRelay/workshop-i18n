@@ -19,7 +19,13 @@
 
 import { type PoLocation, PoSyntaxError, UnsupportedPoError } from './errors.js'
 import { unescapePoString } from './escape.js'
-import type { PoComment, PoEntry, PoFile, PoPrevious } from './po-file.js'
+import {
+  isHeaderEntry,
+  type PoComment,
+  type PoEntry,
+  type PoFile,
+  type PoPrevious,
+} from './po-file.js'
 
 /** Options for {@link parsePo}. */
 export interface ParsePoOptions {
@@ -398,23 +404,29 @@ export function parsePo(text: string, options: ParsePoOptions): PoFile {
 
   flush()
 
-  // In practice this fires one way only. Every GNU producer emits the header first —
-  // `--sort-output`, `--sort-by-file` and `msgattrib --set-obsolete` all leave it there,
-  // because gettext treats it as a distinguished entry rather than a message — so the
-  // catalogs that reach here are the ones that have no header at all. Hence a message
-  // about a *missing* header: it is the situation the reader is actually in, and it names
-  // the way out, because this string is all a translator handed a rejected file will read.
+  // An ordering rule, deliberately: requiring only that a header exists *somewhere* would
+  // newly accept a hand-edited catalog whose header drifted into the middle, which is a
+  // behaviour change nobody asked for. But the two ways to fail it need different answers.
+  //
+  // No GNU producer can reach the misplaced branch — `--sort-output`, `--sort-by-file` and
+  // `msgattrib --set-obsolete` all leave `msgid ""` at the top, because gettext treats the
+  // header as a distinguished entry rather than as a message — so every GNU catalog that
+  // arrives here is missing its header outright, and that is the message worth writing
+  // well. It names the way out, because this string is all a translator handed a rejected
+  // file will read; `msgconv` is in the pipeline because `msgen` alone writes
+  // `charset=ASCII`, which `catalog.ts` then refuses.
   const first = entries[0]
-  if (
-    first !== undefined &&
-    (first.msgctxt !== undefined || first.msgid !== '' || first.obsolete)
-  ) {
+  if (first !== undefined && !isHeaderEntry(first)) {
+    const header = entries.find((entry) => isHeaderEntry(entry))
     throw new PoSyntaxError(
       { fileName, line: first.line },
-      'catalog does not start with a header entry (msgid ""), so its encoding and ' +
-        'plural rules are undeclared — synthesize one with `msginit` or `msgen`, or ' +
-        're-export the catalog from your TMS with its header (`--omit-header` output ' +
-        'is a template for diffing, not a catalog to ship)',
+      header === undefined
+        ? 'catalog has no header entry (msgid ""), so its encoding and plural rules ' +
+            'are undeclared — synthesize one with `msgen <file> | msgconv ' +
+            '--to-code=UTF-8`, or re-export the catalog from your TMS with its header ' +
+            '(`--omit-header` output is a template for diffing, not a catalog to ship)'
+        : 'catalog does not start with its header entry (msgid "") — the header is at ' +
+            `line ${header.line}; move it above the first message`,
     )
   }
 

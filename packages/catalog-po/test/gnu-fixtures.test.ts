@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { PoSyntaxError, parsePo, serializePo } from '../src/index.js'
+import type { CatalogIdentity } from '../src/index.js'
+import { CatalogError, PoSyntaxError, parseCatalog, parsePo, serializePo } from '../src/index.js'
 
 /**
  * The *reading* half of ADR 0013's interoperability bar.
@@ -21,8 +22,9 @@ import { PoSyntaxError, parsePo, serializePo } from '../src/index.js'
  * reads them, and that what it writes back means the same thing to gettext.
  *
  * Note which half needs the tools. Parsing assertions run everywhere, because the
- * catalogs are committed. Only the two checks that ask *gettext itself* to judge our
- * output are gated — and gated the way `msgfmt.test.ts` gates: a named skip on a
+ * catalogs are committed. Only the checks that hand something *back* to gettext — to
+ * judge our round trip, to compile the fixtures, or to run the remedy an error message
+ * recommends — are gated, and gated the way `msgfmt.test.ts` gates: a named skip on a
  * developer machine, a hard failure under `CI`, so an unmet bar can never look like a
  * green run.
  */
@@ -35,11 +37,17 @@ const ACCEPTED = readdirSync(GNU)
   .filter((name) => name.endsWith('.po'))
   .sort()
 
-/** Catalogs GNU wrote that the codec refuses. See the README beside them. */
+/** Catalogs GNU wrote that we refuse, at one layer or another. See the README beside them. */
 const REFUSED = readdirSync(join(GNU, 'refused'))
   .filter((name) => name.endsWith('.po'))
   .sort()
   .map((name) => `refused/${name}`)
+
+/** The subset the *codec* refuses: no header entry at all. */
+const HEADERLESS = REFUSED.filter((name) => name.includes('header'))
+
+/** Any identity will do — none of these catalogs gets far enough for it to matter. */
+const IDENTITY: CatalogIdentity = { locale: 'de', name: '03-pods' }
 
 function gettextVersion(tool: string): string | undefined {
   const probe = spawnSync(tool, ['--version'], { encoding: 'utf8' })
@@ -49,7 +57,24 @@ function gettextVersion(tool: string): string | undefined {
 
 const msgcatVersion = gettextVersion('msgcat')
 const msgfmtVersion = gettextVersion('msgfmt')
-const haveGettext = msgcatVersion !== undefined && msgfmtVersion !== undefined
+const haveGettext = ['msgcat', 'msgfmt', 'msgen', 'msgconv'].every(
+  (tool) => gettextVersion(tool) !== undefined,
+)
+
+/**
+ * The charset complaint the catalog layer raises, or `undefined` when it is happy. Any
+ * other rejection is not this test's business — these are foreign catalogs and they fail
+ * this tool's own `msgctxt` convention regardless.
+ */
+function charsetRefusal(text: string, fileName: string): string | undefined {
+  try {
+    parseCatalog(text, { identity: IDENTITY, fileName })
+  } catch (error) {
+    const { message } = error as Error
+    return message.includes('charset') ? message : undefined
+  }
+  return undefined
+}
 
 /** True on GitHub Actions and every other runner that sets the conventional variable. */
 const inCI = (process.env.CI ?? '') !== '' && process.env.CI !== 'false'
@@ -284,22 +309,46 @@ describe('normalizations applied to a GNU-written catalog', () => {
 })
 
 /**
- * GNU output the codec refuses. Both files compile under `msgfmt` — they are valid
- * gettext, not garbage — so this is a deliberate limit of ours, recorded in ADR 0013 and
- * pinned here so it stays a decision rather than becoming an accident. Loosening it is a
- * change to make on purpose, with this test as the place to say so.
+ * GNU output we refuse. All three compile under `msgfmt` — they are valid gettext, not
+ * garbage — so these are deliberate limits of ours, recorded in ADR 0013 and pinned here
+ * so they stay decisions rather than becoming accidents. Loosening one is a change to
+ * make on purpose, with these tests as the place to say so.
+ *
+ * The two shapes are refused at different layers, and that is not a detail: the codec
+ * (`parsePo`) refuses a headerless catalog because a PO file without `msgid ""` is
+ * structurally incomplete, while the catalog layer (`parseCatalog`) refuses a non-UTF-8
+ * charset, because that is a policy of this tool rather than of the format.
  */
 describe('GNU output this codec deliberately refuses', () => {
-  it.each(REFUSED)('refuses %s, naming the line', (name) => {
+  /** Nothing may sit under `refused/` quietly accepted, whichever layer does the refusing. */
+  it.each(REFUSED)('refuses %s at some layer', (name) => {
+    const text = read(name)
+    let refusedBy: string | undefined
+    try {
+      parsePo(text, { fileName: name })
+    } catch {
+      refusedBy = 'parsePo'
+    }
+    if (refusedBy === undefined) {
+      try {
+        parseCatalog(text, { identity: IDENTITY, fileName: name })
+      } catch (error) {
+        refusedBy = (error as Error).constructor.name
+      }
+    }
+    expect(refusedBy, `${name} was accepted by every layer`).toBeDefined()
+  })
+
+  it.each(HEADERLESS)('refuses %s, naming the line', (name) => {
     try {
       parsePo(read(name), { fileName: name })
       expect.unreachable(`expected ${name} to be refused`)
     } catch (error) {
       expect(error).toBeInstanceOf(PoSyntaxError)
       expect((error as PoSyntaxError).message).toBe(
-        `${name}:1: catalog does not start with a header entry (msgid ""), so its ` +
-          'encoding and plural rules are undeclared — synthesize one with `msginit` or ' +
-          '`msgen`, or re-export the catalog from your TMS with its header ' +
+        `${name}:1: catalog has no header entry (msgid ""), so its encoding and plural ` +
+          'rules are undeclared — synthesize one with `msgen <file> | msgconv ' +
+          '--to-code=UTF-8`, or re-export the catalog from your TMS with its header ' +
           '(`--omit-header` output is a template for diffing, not a catalog to ship)',
       )
     }
@@ -310,18 +359,70 @@ describe('GNU output this codec deliberately refuses', () => {
    * — the shape `packages/core` uses for its reserved-locale rejection, where the message
    * is all a facilitator typing `--locale con` will ever read. Asserted separately from
    * the exact string above so that what matters about it survives a rewording.
+   *
+   * `msgconv` is in the advice, not decoration: `msgen` and `msginit` both synthesize a
+   * header declaring `charset=ASCII`, which this tool then refuses at the catalog layer.
+   * Advice that walks the reader into a second wall is not advice, so the pipe is part of
+   * it — and the test below runs the whole thing to prove it lands somewhere better.
    */
-  it.each(REFUSED)('tells the reader how to fix %s, not only what is wrong', (name) => {
+  it.each(HEADERLESS)('tells the reader how to fix %s, not only what is wrong', (name) => {
     try {
       parsePo(read(name), { fileName: name })
       expect.unreachable(`expected ${name} to be refused`)
     } catch (error) {
       const { message } = error as PoSyntaxError
-      // A command that produces the missing header, so the reader has somewhere to go.
-      expect(message).toContain('msginit')
+      // Commands that produce a header this tool will accept, so the reader can act.
       expect(message).toContain('msgen')
+      expect(message).toContain('msgconv --to-code=UTF-8')
       // And where a headerless catalog comes from, so they recognise their own situation.
       expect(message).toContain('--omit-header')
+    }
+  })
+
+  /**
+   * The second shape, and the reason the section is no longer called "the one shape":
+   * any catalog is one `msgconv` away from declaring a charset we refuse, and `msgfmt`
+   * compiles the result happily.
+   */
+  it('refuses a catalog that declares a charset other than UTF-8', () => {
+    const name = 'refused/msgconv-iso-8859-1.po'
+    const text = read(name)
+    // The codec is indifferent — this is a policy of the tool, not of the format.
+    expect(() => parsePo(text, { fileName: name })).not.toThrow()
+    try {
+      parseCatalog(text, { identity: IDENTITY, fileName: name })
+      expect.unreachable('expected a non-UTF-8 charset to be refused')
+    } catch (error) {
+      expect(error).toBeInstanceOf(CatalogError)
+      expect((error as CatalogError).message).toContain('charset "ISO-8859-1"')
+    }
+  })
+
+  /**
+   * The rule is written as an ordering rule and kept that way deliberately: narrowing it
+   * to "a header exists somewhere" would newly *accept* a hand-edited catalog with a late
+   * header, a behaviour change nobody asked for. But the condition and the message have
+   * to agree. Telling someone whose header sits at line 17 to synthesize a header is
+   * advice they cannot act on, so the message branches even though what is accepted does
+   * not. No GNU producer can reach this branch — every one of them writes the header
+   * first — which is exactly why it is worth a test rather than a comment.
+   */
+  it('tells a late header apart from a missing one', () => {
+    const blocks = read('msgcat-no-wrap.po')
+      .split('\n\n')
+      .filter((entry) => entry.trim() !== '')
+    const [header, first, ...rest] = blocks
+    const moved = `${[first, header, ...rest].join('\n\n')}\n`
+
+    try {
+      parsePo(moved, { fileName: 'late-header.po' })
+      expect.unreachable('expected a late header to be refused')
+    } catch (error) {
+      const { message } = error as PoSyntaxError
+      expect(message).toContain('does not start with its header entry')
+      // It names where the header actually is, instead of claiming there is none.
+      expect(message).toMatch(/header is at line \d+/)
+      expect(message).not.toContain('msgen')
     }
   })
 
@@ -378,7 +479,9 @@ describe('gettext agrees with what we write back', () => {
       const workspace = mkdtempSync(join(tmpdir(), 'workshop-i18n-gnu-'))
       for (const name of [...ACCEPTED, ...REFUSED]) {
         const source = join(workspace, name.replace('/', '-'))
-        writeFileSync(source, read(name))
+        // Bytes, not text: one fixture is genuinely ISO-8859-1, and decoding it as UTF-8
+        // on the way through would hand msgfmt a file no tool ever produced.
+        writeFileSync(source, readFileSync(join(GNU, name)))
         const result = spawnSync('msgfmt', ['--output-file', `${source}.mo`, source], {
           encoding: 'utf8',
         })
@@ -386,6 +489,36 @@ describe('gettext agrees with what we write back', () => {
       }
     },
   )
+
+  /**
+   * The remedy the error message names, executed rather than asserted. This is the shape
+   * of mistake worth guarding: the first version of that message said `msginit` or
+   * `msgen`, both of which do synthesize a header — declaring `charset=ASCII`, which the
+   * catalog layer then refuses. The advice was true and useless. Running it here means a
+   * future reword cannot quietly reintroduce a dead end.
+   */
+  it.runIf(haveGettext)('fixes a headerless catalog by following its own error message', () => {
+    for (const name of HEADERLESS) {
+      const source = join(mkdtempSync(join(tmpdir(), 'workshop-i18n-remedy-')), 'in.po')
+      writeFileSync(source, readFileSync(join(GNU, name)))
+
+      // Exactly what the message says: msgen <file> | msgconv --to-code=UTF-8
+      const generated = spawnSync('msgen', [source], { encoding: 'utf8' })
+      expect(generated.status, `msgen ${name}: ${generated.stderr}`).toBe(0)
+      const converted = spawnSync('msgconv', ['--to-code=UTF-8'], {
+        encoding: 'utf8',
+        input: generated.stdout,
+      })
+      expect(converted.status, `msgconv ${name}: ${converted.stderr}`).toBe(0)
+
+      // The codec now accepts it, and the charset gate no longer fires.
+      expect(() => parsePo(converted.stdout, { fileName: name })).not.toThrow()
+      expect(charsetRefusal(converted.stdout, name)).toBeUndefined()
+
+      // Whereas msgen alone — the advice that message used to give — walks into a wall.
+      expect(charsetRefusal(generated.stdout, name)).toContain('charset "ASCII"')
+    }
+  })
 
   /** The other half of the disagreement pinned above: gettext reads it, then drops it. */
   it.runIf(haveGettext)('confirms gettext discards a trailing comment rather than refusing', () => {

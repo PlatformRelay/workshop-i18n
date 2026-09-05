@@ -75,7 +75,11 @@ idempotent — they happen once, on adoption, not on every run:
   wrapping is rejected precisely because it makes the bytes depend on a width constant and
   re-flows a whole entry when one word changes, which is the opposite of FR-005.
 - **A UTF-8 BOM is dropped and CRLF line endings become LF.** Catalogs are UTF-8 (ADR 0004) and
-  git-native; a BOM and CRLF are both read without complaint and neither is re-emitted.
+  git-native; a BOM and CRLF are both read without complaint and neither is re-emitted. Worth
+  naming: on the BOM we are *more* permissive than gettext, which refuses the same file
+  (`msgfmt` reports `bom.po:1:2: syntax error`). So "what we accept" is not a subset of "what
+  gettext accepts", and the interoperability claim runs one way only — everything we *write* is
+  ordinary gettext, which is the direction that matters for a catalog leaving this tool.
 - **Comment and flag order is canonicalised.** Comments keep the order they were read in, but the
   groups are emitted in gettext's order — comments, then `#,` flags, then `#|` previous-source —
   and duplicate flags collapse. No comment class or flag is dropped, including ones we do not
@@ -102,43 +106,55 @@ So a catalog that has been through `msgmerge` will have lost them. Nothing depen
 retention — the update algorithm rebuilds provenance from the English source when a unit returns —
 so this is a graceful loss, not a correctness one.
 
-### The one shape we refuse that GNU produces
+### Shapes we refuse that GNU produces
 
-`parsePo` requires the header entry (`msgid ""`) to be the first entry. The rule is written as an
-ordering rule, but it fires as an *absence* rule, and the distinction matters when reading an error
-report. Every GNU producer emits the header first and never obsoletes it — `--sort-output` and
-`--sort-by-file` both put `msgid ""` at the top (it sorts first, and gettext keeps it there
-regardless), and `msgattrib --set-obsolete` obsoletes every entry except the header, because
-gettext treats it as a distinguished entry rather than as a message. Fifteen ordering-affecting
-invocations were checked and none moved it. So a GNU-written catalog that trips this rule is
-always a catalog with **no header at all**, never one with a late header. A header out of position
-is reachable only by hand-editing — and gettext itself is indifferent to it: `msgcat` leaves a
-mid-file header where it found it and `msgfmt` still compiles the result.
+Two of them, both valid gettext — `msgfmt` compiles all three fixtures under
+`fixtures/catalogs/gnu-generated/refused/` — so these are our limits, not gettext's bugs. Each is
+kept on purpose and pinned by a test, so neither can drift from a decision into an accident.
 
-Three GNU invocations produce a headerless catalog, and we reject all three:
+**A catalog with no header entry.** Three GNU invocations produce one:
 
 - `xgettext --omit-header`,
 - `msgcomm --omit-header`,
 - and any `msgcat`/`msgmerge` run whose first (or definition) input is one of those, because
   headerlessness propagates.
 
-These are valid gettext — `msgfmt` compiles them — so this is our limit, not their bug, and it is
-kept deliberately. The header is where `Content-Type` and `Plural-Forms` live, so without it the
-catalog's encoding is undeclared: that is why gettext's own tools emit `invalid multibyte sequence`
-on such files, and why `msgen` synthesizes a header rather than propagating its absence. Nothing in
-this tool's pipeline can produce one, because `extract` always writes a header, and `--omit-header`
-is a POT-diffing convenience rather than a shipping format. In a tool whose entire contract is
-byte-exactness, accepting a catalog whose encoding is undeclared trades a real invariant for a case
-no consumer hits.
+The header is where `Content-Type` and `Plural-Forms` live, so a headerless catalog has no declared
+encoding — and that is not an abstract worry. `xgettext --omit-header` has nowhere to write a
+charset, so it falls back to ASCII and **strips every non-ASCII byte out of the msgids it
+extracts**: our own fixture, extracted from a source containing `Grüße, 日本語 — first line`, holds
+`Gre,   first line`. The loss happens at production time, announced by a run of `invalid multibyte
+sequence` on xgettext's stderr. Consumers reading the result afterwards say nothing at all — there is
+nothing left to complain about — so the file arrives looking clean. Nothing in this tool's pipeline
+can produce one, because `extract` always writes a header, and `--omit-header` is a POT-diffing
+convenience rather than a shipping format. In a tool whose entire contract is byte-exactness,
+accepting a catalog whose encoding is undeclared trades a real invariant for a case no consumer
+hits.
 
-Because the refusal stands, the message carries the remedy rather than only the rule — the same
-shape `packages/core` uses for its reserved-locale rejection, on the same reasoning: that string is
-all a translator handed a rejected file will read. It names `msginit` and `msgen` as ways to
-synthesize the missing header, and names `--omit-header` so the reader recognises where their file
-came from. `fixtures/catalogs/gnu-generated/refused/` holds both catalogs; one test pins the exact
-message and a second asserts the remedy survives any rewording. So the refusal cannot drift from a
-decision into an accident — and if we ever need to accept these, those tests are where the change
-gets argued.
+**A catalog declaring a charset other than UTF-8.** One `msgconv --to-code=ISO-8859-1` away from
+any catalog, and `msgfmt` compiles the result. Refused by `catalog.ts`, not by the codec — the
+format is indifferent to charset and this is a policy of the tool (ADR 0004), which is why the two
+refusals live at different layers.
+
+Because both refusals stand, their messages carry the remedy rather than only the rule — the shape
+`packages/core` uses for its reserved-locale rejection, on the same reasoning: that string is all a
+translator handed a rejected file will read. The headerless message names
+`msgen <file> | msgconv --to-code=UTF-8`, and the pipe is load-bearing: `msgen` and `msginit` both
+synthesize a header declaring `charset=ASCII`, which the charset rule above then refuses, so advice
+naming either of them alone walks the reader into a second wall. A gettext-gated test *executes*
+the remedy rather than asserting it, because that is the mistake this message already made once.
+
+**How the header rule fires.** `parsePo` requires the header to be the *first* entry, and that
+ordering form is kept deliberately: relaxing it to "a header exists somewhere" would newly accept a
+hand-edited catalog whose header drifted into the middle. But no GNU producer can fail it that way.
+`--sort-output` and `--sort-by-file` both leave `msgid ""` at the top, and `msgattrib
+--set-obsolete` obsoletes every entry *except* the header, because gettext treats it as a
+distinguished entry rather than as a message; thirty ordering-affecting invocations were checked
+and none moved it. So every GNU catalog that trips this rule is missing its header outright, never
+carrying a late one — and gettext is indifferent to a late header anyway, since `msgcat` leaves a
+mid-file header where it found it and `msgfmt` still compiles the result. The condition therefore
+stays an ordering check while the *message* branches: a missing header gets the remedy above, a
+misplaced one gets told which line its header is on.
 
 The parser's other self-flagged strictness — refusing a comment block that is followed by no entry
 — was checked the same way and found *not* to be reachable from GNU output. No tool emits a
