@@ -57,3 +57,23 @@ moved or reordered slide changes offsets while identities and catalogs are untou
 - A unit whose translation is missing or fuzzy splices English plus a watermark (spec 003 FR-005);
   the watermark is the only case where composed output differs from a pure copy in the skeleton's
   vicinity, and it is confined to the hole.
+
+## Amendment 2026-09-05: "byte range" means an index into the decoded source
+
+The decision above says the skeleton records "the half-open byte range `[start, end)`". The
+implementation records half-open ranges of **UTF-16 code units into the decoded source string**,
+which is what a markdown parser reports and what `String.prototype.slice` consumes. This
+amendment states that explicitly rather than leaving the code quietly at odds with the ADR.
+
+Nothing about the guarantee changes, because for valid UTF-8 the two indexings are in bijection:
+every code-unit boundary is a byte boundary, so a splice at those offsets leaves every byte
+outside the hole exactly where it was. The property the ADR actually claims — "any byte outside a
+recorded prose range is byte-identical in every locale" — holds unchanged.
+
+The bijection has one precondition, and it is enforced rather than assumed. Decoding must not
+repair anything: `readFileSync(path, 'utf8')` substitutes U+FFFD for an invalid byte sequence,
+which would make a corrupted file round-trip "successfully" into a different file. So consumer
+bytes enter through `decodeSource`, which uses a fatal `TextDecoder` and refuses input that is
+not valid UTF-8, and the byte-order mark is deliberately not stripped. The round-trip property
+tests assert equality on `Buffer`s, not only on strings, so the claim is tested at the byte level
+even though the arithmetic is done in code units.
