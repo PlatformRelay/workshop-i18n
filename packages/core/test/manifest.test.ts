@@ -169,6 +169,21 @@ describe('parseManifest — malformed input', () => {
     }
   })
 
+  it('reports an undefined alias as a manifest error, not a bare ReferenceError', () => {
+    const error = issuesOf('apiVersion: *nowhere\n')
+    expect(error).toBeInstanceOf(ManifestError)
+    expect(error.issues[0]?.code).toBe('malformed-yaml')
+    expect(error.issues[0]?.path).toBeTruthy()
+  })
+
+  it('turns anything the YAML parser throws into a manifest error', () => {
+    for (const hostile of ['a: *x\nb: &x 1\n', 'a:\n  - *nope\n', '{{{\n']) {
+      const error = issuesOf(hostile)
+      expect(error).toBeInstanceOf(ManifestError)
+      expect(error.issues[0]?.code).toBe('malformed-yaml')
+    }
+  })
+
   it('rejects a document that is not a mapping', () => {
     expect(issuesOf('- a\n- b\n').issues[0]?.code).toBe('invalid')
     expect(issuesOf('').issues[0]?.code).toBe('invalid')
@@ -310,6 +325,15 @@ describe('parseManifest — protected terms and length budgets', () => {
         path: 'lengthBudgets.statement',
         code: 'invalid',
       })
+    }
+  })
+
+  it('never resolves a layout budget off the prototype chain', () => {
+    const manifest = parseManifest(complete)
+    for (const hostile of ['toString', 'constructor', 'valueOf', '__proto__', 'hasOwnProperty']) {
+      const budget = lengthBudgetFor(manifest, hostile)
+      expect(typeof budget).toBe('number')
+      expect(budget).toBe(manifest.lengthBudgets.default)
     }
   })
 

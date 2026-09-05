@@ -17,7 +17,7 @@
  * `locales.targets[1]`) and says what was wrong. Nothing here throws a bare cast error.
  */
 
-import { parse as parseYaml, YAMLParseError } from 'yaml'
+import { parse as parseYaml } from 'yaml'
 import { SURFACES, type Surface } from './unit-id.js'
 
 /** The api group every supported manifest declares. */
@@ -406,7 +406,9 @@ function readLengthBudgets(issues: IssueList, value: unknown): LengthBudgets {
   }
 
   let fallback = DEFAULT_LENGTH_BUDGET
-  const byLayout: Record<string, number> = {}
+  // Null-prototype: layout names come from the deck, so `constructor` and friends must
+  // be absent rather than inherited. `lengthBudgetFor` guards the read as well.
+  const byLayout: Record<string, number> = Object.create(null)
   for (const [key, raw] of Object.entries(value)) {
     const path = childPath('lengthBudgets', key)
     if (key !== 'default' && !LAYOUT_NAME.test(key)) {
@@ -493,13 +495,19 @@ export function parseManifest(yamlText: string, opts?: ParseManifestOptions): Ma
   try {
     document = parseYaml(yamlText)
   } catch (error) {
-    if (error instanceof YAMLParseError) {
-      throw new ManifestError(
-        [{ path: DOCUMENT_PATH, code: 'malformed-yaml', message: error.message }],
-        source,
-      )
-    }
-    throw error
+    // Any throw from the parser, not just YAMLParseError: an undefined alias raises a
+    // bare ReferenceError, and a parser this consumes hostile input with must never be
+    // able to surface an error that carries no manifest path (spec 002 edge case).
+    throw new ManifestError(
+      [
+        {
+          path: DOCUMENT_PATH,
+          code: 'malformed-yaml',
+          message: error instanceof Error ? error.message : String(error),
+        },
+      ],
+      source,
+    )
   }
 
   if (!isRecord(document)) {
@@ -549,5 +557,12 @@ export function surfaceSpec(manifest: Manifest, surface: Surface): SurfaceSpec |
  */
 export function lengthBudgetFor(manifest: Manifest, layout?: string): number {
   if (layout === undefined) return manifest.lengthBudgets.default
-  return manifest.lengthBudgets.byLayout[layout] ?? manifest.lengthBudgets.default
+  // `Object.hasOwn`, never a plain index: a layout named `toString` or `constructor`
+  // would otherwise resolve to a function where a number is declared, and the ADR 0009
+  // overflow gate would silently stop gating that layout.
+  if (!Object.hasOwn(manifest.lengthBudgets.byLayout, layout)) {
+    return manifest.lengthBudgets.default
+  }
+  const budget = manifest.lengthBudgets.byLayout[layout]
+  return typeof budget === 'number' ? budget : manifest.lengthBudgets.default
 }
