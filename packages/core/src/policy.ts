@@ -339,6 +339,18 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/**
+ * A threshold map must be a *plain* object: `Object.entries` reads own enumerable string
+ * keys only, so ceilings living on a prototype, or inside a `Map`, read as "no ceilings"
+ * — a policy that gates nothing while looking like it does. Not reachable from JSON or
+ * YAML, but the failure is the one this module keeps closing, so it is closed here too.
+ */
+function isThresholdMap(value: unknown): value is Record<string, unknown> {
+  if (!isPlainObject(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
 /** Render a rejected value for a message without invoking its own stringification. */
 function describe(value: unknown): string {
   if (typeof value === 'string') return JSON.stringify(value)
@@ -358,10 +370,17 @@ export function definePolicy(
   if (typeof name !== 'string' || name === '') {
     throw new Error(`invalid policy: name must be a non-empty string, got ${describe(name)}`)
   }
-  if (!isPlainObject(maxRequired)) {
+  if (!isThresholdMap(maxRequired)) {
     throw new Error(
-      `policy ${JSON.stringify(name)}: maxRequired must be an object of state ceilings, ` +
+      `policy ${JSON.stringify(name)}: maxRequired must be a plain object of state ceilings, ` +
         `got ${describe(maxRequired)}`,
+    )
+  }
+  const symbolKeys = Object.getOwnPropertySymbols(maxRequired)
+  if (symbolKeys.length > 0) {
+    throw new Error(
+      `policy ${JSON.stringify(name)}: maxRequired must not carry symbol keys — a ceiling ` +
+        'under a symbol is invisible to the enumeration that enforces it',
     )
   }
   const thresholds: Record<string, number> = {}
@@ -458,6 +477,18 @@ export function resolvePolicy(policy: Policy | PolicyName): Policy {
         `ceilings, got ${describe(policy.maxRequired)}`,
     )
   }
+  // A forged `{name: 'release', maxRequired: {}}` is a well-formed policy that gates
+  // nothing, and its evaluation is indistinguishable from a genuine pass on the fields
+  // anyone reads: `{policy: "release", satisfied: true, violations: []}`. `{}` cannot be
+  // banned — `preview` is exactly that — so the name is what gets reserved. The built-ins
+  // above short-circuit by identity and are unaffected.
+  if (typeof policy.name === 'string' && isPolicyName(policy.name)) {
+    throw new Error(
+      `invalid policy ${JSON.stringify(policy.name)}: that name is reserved for the built-in ` +
+        'policy — pass the name as a string to use it, or choose another name',
+    )
+  }
+
   return definePolicy(policy.name as string, policy.maxRequired as StateThresholds, {
     gateOptionalUnits: policy.gateOptionalUnits === true,
   })

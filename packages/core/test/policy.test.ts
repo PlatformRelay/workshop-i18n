@@ -302,6 +302,33 @@ describe('policy resolution', () => {
     ).toThrow(/name/)
   })
 
+  it('reserves the built-in names, so nothing can impersonate release', () => {
+    const draft = unit('slides:a:body/1', 'de', 's', 'needs-review')
+    for (const name of ['release', 'preview']) {
+      const impostor = { name, maxRequired: {}, gateOptionalUnits: false }
+      expect(() => resolvePolicy(impostor as Policy)).toThrow(/reserved/i)
+      expect(() => evaluatePolicy([draft], impostor as Policy)).toThrow(new RegExp(name))
+    }
+    // The genuine ones still resolve by identity, and still gate.
+    expect(resolvePolicy(POLICIES.release)).toBe(POLICIES.release)
+    expect(evaluatePolicy([draft], 'release').satisfied).toBe(false)
+    // A policy under any other name is unaffected.
+    expect(
+      resolvePolicy({ name: 'house-style', maxRequired: {}, gateOptionalUnits: false } as Policy)
+        .name,
+    ).toBe('house-style')
+  })
+
+  it('refuses ceilings the enumeration cannot see', () => {
+    const onPrototype = Object.create({ 'needs-review': 0 }) as StateThresholds
+    expect(() => definePolicy('inherited', onPrototype)).toThrow(/maxRequired/)
+    const symbolKeyed = { [Symbol('needs-review')]: 0 } as unknown as StateThresholds
+    expect(() => definePolicy('symbolic', symbolKeyed)).toThrow(/symbol/i)
+    expect(() => definePolicy('mapped', new Map() as unknown as StateThresholds)).toThrow(
+      /maxRequired/,
+    )
+  })
+
   it('normalises and freezes a hand-built policy object', () => {
     const fromJson = { name: 'raw', maxRequired: { fuzzy: 1 }, gateOptionalUnits: false }
     const resolved = resolvePolicy(fromJson as Policy)
