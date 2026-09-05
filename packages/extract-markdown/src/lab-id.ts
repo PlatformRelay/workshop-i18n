@@ -20,9 +20,12 @@
  *
  * Three reasons for that spelling rather than YAML frontmatter:
  *
- * 1. **The corpus already models it.** Every adopted lab carries
- *    `<!-- lab-contract:v1 -->` in exactly this position; `labId` is the same marker
- *    convention, so a contributor recognises it without being taught.
+ * 1. **The corpus already models it.** 26 of Kubernetes-Workshop's 28 participant labs
+ *    carry `<!-- lab-contract:v1 -->` on the line after the H1 — exactly this position
+ *    and exactly this spelling. (The two exceptions are `00-setup.md` and the deferred
+ *    `24-kubebuilder.md` stub; the solution companions and all 61 OpenTofu labs carry no
+ *    marker at all, so for those this convention is being introduced rather than
+ *    followed.) A contributor who has seen one recognises the other without being taught.
  * 2. **It is invisible everywhere a lab is read.** A lab is a standalone file a
  *    participant reads on GitHub, in MkDocs, or in a text editor. GitHub renders YAML
  *    frontmatter in a `.md` file as a visible table; an HTML comment renders as nothing

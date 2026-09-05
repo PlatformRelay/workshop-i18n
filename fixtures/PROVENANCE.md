@@ -79,8 +79,8 @@ ADR 0012 (sibling lab solutions) makes the shape of every answer.
 | Fixture | Hostile construct it covers |
 | --- | --- |
 | `day-1-00-setup.md` | 13 `<details>` spoilers in a *participant* file (the rest of the corpus keeps them in the companion); 46 fences; four-space indented blocks |
-| `day-1-02-container-security.md` | Footnote references, an empty blockquote line, six heredocs, `$ENGINE`-style shell variables in prose |
-| `day-1-02-container-security.solution.md` | The most `<details>` blocks of any file (15); footnotes inside a companion |
+| `day-1-02-container-security.md` | An empty blockquote line, six heredocs, `$ENGINE`-style shell variables in prose, and a `grep -o '"name":"[^"]*"'` one-liner whose `[^"]` looks like a footnote to a careless pattern |
+| `day-1-02-container-security.solution.md` | The most `<details>` blocks of any file in the Kubernetes tree (15) |
 | `day-1-08-ingress.md` | Three bare `---` document separators **inside** a heredoc'd manifest — the single best regression test against a naive `^---$` splitter; 16 blockquotes |
 | `day-2-09-gateway-api.md` | Seven heredocs, 38 list items, a `<details>` and three in-fence `---`s in one participant file |
 | `day-2-12-statefulset.solution.md` | The heaviest inline HTML (71 tags): `<code>`, `&lt;ns&gt;` entities, nested spoilers |
@@ -107,6 +107,7 @@ byte-identically.
 | `crlf-and-bom.md` | CRLF line endings and a leading byte-order mark. Deliberately the one fixture **left un-adopted** — it carries no `labId` marker — so the corpus suite runs `init-ids` on a BOM file for real. **This fixture found two bugs of one class**: micromark's preprocessor drops a leading U+FEFF, so every offset in a BOM file was one code unit short; and `init-ids` wrote a marker there it could not read back, making the codemod non-idempotent. Both are invisible to a losslessness assertion, because untranslated holes copy the original bytes either way — and the second one hid until the marker was taken out of this file, because an already-adopted fixture never exercises insertion |
 | `spoilers-and-html.md` | `<details>`/`<summary>` in every shape the corpus uses and two it does not: a summary on its own line, an empty summary, inline `<code>` and entities inside a summary, a `<div>` holding trapped prose, and an un-fenced `<placeholder>` in prose |
 | `unicode-and-entities.md` | Astral emoji, a flag, a ZWJ sequence, an emoji with a skin-tone modifier, RTL scripts, combining marks (precomposed *and* decomposed), a zero-width space, a non-breaking space, HTML entities, box arrows, and `{{ }}` mustache in prose |
+| `references-and-footnotes.md` | Footnote references and definitions, reference-style links, a collapsed and a shortcut reference, a reference-style image, and link reference definitions with and without titles. Added because the corpus contained **no footnote at all** while a teeth-guard row claimed it did — `/\[\^/` was matching `[^"]` inside a fenced `grep -o`, so the guard certified the one construct composition now has to protect |
 | `degenerate.md` | An empty ATX heading, a whitespace-only heading, all three thematic-break spellings, a link reference definition, an image-only paragraph, an inline-code-only paragraph, an empty comment, and no trailing newline |
 
 ## `adversarial-labs-rejected/`
@@ -120,6 +121,31 @@ must still reproduce them byte-for-byte, because refusing is not mangling.
 | `missing-lab-id.md` | `missing-lab-id` — inventing an identity from the path or the position is exactly what constitution II forbids, so the fix is `init-ids`, not a fallback |
 | `unsafe-lab-id.md` | `unsafe-lab-id` — the id becomes an override file name and a PO `msgctxt` |
 | `duplicate-lab-id.md` | `duplicate-lab-id` — two markers in one file make its identity ambiguous; taking the first one silently would attach a lab's translations to whichever marker happened to be read first |
+
+## `corpus-opentofu-labs/`
+
+Verbatim copies of lab files from **OpenTofu-Workshop**
+(`PlatformRelay/opentofu-workshop`, `labs/day-N/NN-topic.md`), pinned at commit
+`591e258b0b7f306bd536fe9a4e5824a75253bc23` (2026-09-05). ADR 0001/0010 require both
+consumer golden corpora to pass before a release, and this is the labs half of that for
+the second workshop.
+
+The two lab corpora are not redundant. OpenTofu labs are markedly denser (one file is
+57 KB against Kubernetes' 23 KB ceiling), carry `<details>` spoilers in the *participant*
+file rather than only the companion, use far longer lines, and carry **no**
+`<!-- lab-contract:v1 -->` marker anywhere — so for this tree the identity comment is a
+convention being introduced rather than followed.
+
+| Fixture | Hostile construct it covers |
+| --- | --- |
+| `day-1-04-state.md` | The longest line in either corpus (375 characters); 74 fences and 16 spoilers in one participant file |
+| `day-1-08-naming-labels.solution.md` | A 273-character line in a companion, plus ordered lists |
+| `day-1-09-best-practices.md` | The largest file in either corpus (57 KB): 158 fences, 23 spoilers, 43 blockquotes, 92 inline tags |
+| `day-1-11-taco-landscape.md` | The degenerate opposite end: **zero** fenced blocks, and 19 table rows carrying almost all of its prose |
+| `day-2-14-security-scanners.md` | The only setext heading in the OpenTofu tree; 20 table rows; 10 spoilers |
+| `day-3-26-capstone.md` | 17 spoilers, 14 distinct non-ASCII glyphs, ordered lists nested in prose |
+| `day-3-27-terragrunt-comparison.md` | 282-character lines inside a 15-row comparison table |
+| `fixtures-drift-demo.md` | A 1.8 KB file inside the labs tree that is not a lab and has no `# Lab NN` title — the OpenTofu counterpart to `labs-README.md` |
 
 ## `corpus-quiz/`
 

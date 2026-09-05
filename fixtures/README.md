@@ -10,6 +10,7 @@ fixtures/
   adversarial-rejected/  # files extraction must refuse, each with the diagnostic it raises
 
   corpus-k8s-labs/           # sampled labs from Kubernetes-Workshop (pinned snapshot)
+  corpus-opentofu-labs/      # sampled labs from OpenTofu-Workshop (pinned snapshot)
   adversarial-labs/          # hand-built hostile Markdown the real labs happen to lack
   adversarial-labs-rejected/ # lab files extraction must refuse, each with its diagnostic
 
@@ -34,6 +35,9 @@ Rules:
   runs over every file in its corpus and adversarial trees, and
   `packages/extract-quiz/test/corpus.test.ts` over `corpus-quiz/` and `adversarial-quiz/`,
   each asserting its own hostile constructs are still present.
+- **Both** consumer corpora must be represented, not one (ADR 0001/0010). The lab suite
+  asserts the tree *names* it loads, so dropping a workshop fails loudly rather than
+  quietly shrinking a count nobody reads.
 - `adversarial-rejected/` exists so that "unsupported" stays a tested behaviour: each
   file must produce a named error diagnostic, and composition must still reproduce it
   byte-for-byte, because refusing is not the same as mangling. `adversarial-labs-rejected/`
