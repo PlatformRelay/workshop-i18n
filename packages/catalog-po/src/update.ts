@@ -217,6 +217,19 @@ export function updateCatalog(options: UpdateCatalogOptions): UpdateResult {
 }
 
 /**
+ * May a draft be written over this entry? True only for `missing` (nothing there) and
+ * `needs-review` (an earlier draft, which is machine work, not human work).
+ *
+ * A bulk seeding pass filters on this; {@link applyDraftTranslation} enforces it. Both
+ * exist because spec 004 FR-001 requires seeding to never overwrite a human-touched
+ * entry, and a predicate that callers can ask *before* acting is friendlier than a
+ * thrown error they have to catch per unit.
+ */
+export function isDraftable(entry: CatalogEntry): boolean {
+  return entry.state === 'missing' || entry.state === 'needs-review'
+}
+
+/**
  * Record a drafted translation — seeded, machine translated, or imported — as
  * `needs-review` (spec 002 FR-007, ADR 0009, constitution V).
  *
@@ -226,12 +239,26 @@ export function updateCatalog(options: UpdateCatalogOptions): UpdateResult {
  * could set `reviewed` would be a path for unreviewed prose to ship silently, which is
  * the one thing constitution V forbids.
  *
- * A stale `fuzzy` marker is cleared, because the draft was written against the current
- * source; the entry stays gated by {@link NEEDS_REVIEW_FLAG} either way.
+ * ## It overwrites, so it refuses human work
  *
- * @throws {CatalogError} when the catalog has no live entry for `id`, or when the draft
- *   is empty — an empty msgstr reads as `missing`, so accepting one would leave a
- *   `needs-review` flag on a unit that has nothing to review.
+ * This replaces `msgstr` outright — there is nowhere in a PO entry to keep a displaced
+ * translation, since `#|` carries previous *source*, not previous translation. So it
+ * writes only where {@link isDraftable} holds. A `reviewed` entry is a human's accepted
+ * prose and a `fuzzy` entry is a human's prose waiting to be revalidated against a moved
+ * source — the translator's workflow there is to edit what is already written next to
+ * `#| msgid`, and a machine draft dropped on top of it destroys exactly that. Spec 004
+ * FR-001 states the rule; this is where it is enforced.
+ *
+ * Demoting the state would not have made an overwrite safe: nothing unreviewed would
+ * *ship*, but the human's work would still be gone.
+ *
+ * A stale `fuzzy` marker is only ever cleared on an entry that had no human translation
+ * under it; the entry stays gated by {@link NEEDS_REVIEW_FLAG} either way.
+ *
+ * @throws {CatalogError} when the catalog has no live entry for `id`; when the entry
+ *   holds human work ({@link isDraftable} is false); or when the draft is empty — an
+ *   empty msgstr reads as `missing`, so accepting one would leave a `needs-review` flag
+ *   on a unit that has nothing to review.
  */
 export function applyDraftTranslation(catalog: Catalog, id: UnitId, translation: string): Catalog {
   const key = formatUnitId(id)
@@ -248,6 +275,14 @@ export function applyDraftTranslation(catalog: Catalog, id: UnitId, translation:
   const entry = catalog.entries[index]
   if (entry === undefined) {
     throw new CatalogError(undefined, `catalog has no entry for unit id ${JSON.stringify(key)}`)
+  }
+
+  if (!isDraftable(entry)) {
+    throw new CatalogError(
+      undefined,
+      `refusing to overwrite the human-authored translation of unit id ${JSON.stringify(key)} ` +
+        `(state ${JSON.stringify(entry.state)}) with a draft`,
+    )
   }
 
   const flags = entry.po.flags.filter((flag) => flag !== FUZZY_FLAG)

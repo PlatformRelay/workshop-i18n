@@ -9,6 +9,7 @@ import type { Catalog, CatalogIdentity, ExtractedUnit } from '../src/index.js'
 import {
   applyDraftTranslation,
   catalogStatuses,
+  isDraftable,
   parseCatalog,
   serializeCatalog,
   updateCatalog,
@@ -273,6 +274,43 @@ describe('drafted translations (FR-007, constitution V)', () => {
     expect(serializeCatalog(drafted)).toContain('#, needs-review')
   })
 
+  it('refuses to overwrite a human-accepted translation (spec 004 FR-001)', () => {
+    const previous = reviewedCatalog()
+    expect(previous.entries[0]?.state).toBe('reviewed')
+    expect(() =>
+      applyDraftTranslation(previous, parseUnitId('slides:s01:body/1'), 'MASCHINE'),
+    ).toThrow(/human-authored|reviewed/)
+    // and leaves the catalog untouched
+    expect(previous.entries[0]?.translation).toBe('übersetzt')
+  })
+
+  it('refuses to overwrite the human translation sitting under a fuzzy marker', () => {
+    const previous = reviewedCatalog()
+    const edited = BASE.map((u, index) =>
+      index === 0 ? unit('slides:s01:body/1', 'A Pod holds containers.') : u,
+    )
+    const stale = updateCatalog({ identity: IDENTITY, units: edited, previous }).catalog
+    expect(stale.entries[0]?.state).toBe('fuzzy')
+    expect(() =>
+      applyDraftTranslation(stale, parseUnitId('slides:s01:body/1'), 'MASCHINE'),
+    ).toThrow(/human-authored|fuzzy/)
+    expect(stale.entries[0]?.translation).toBe('übersetzt')
+  })
+
+  it('re-drafts over an earlier machine draft, which is not human work', () => {
+    const fresh = updateCatalog({ identity: IDENTITY, units: BASE }).catalog
+    const once = applyDraftTranslation(fresh, parseUnitId('slides:s01:body/1'), 'Erste Fassung.')
+    const twice = applyDraftTranslation(once, parseUnitId('slides:s01:body/1'), 'Zweite Fassung.')
+    expect(twice.entries[0]?.translation).toBe('Zweite Fassung.')
+    expect(twice.entries[0]?.state).toBe('needs-review')
+  })
+
+  it('exposes the predicate a bulk seeding pass filters on', () => {
+    const fresh = updateCatalog({ identity: IDENTITY, units: BASE }).catalog
+    expect(fresh.entries.every((entry) => isDraftable(entry))).toBe(true)
+    expect(reviewedCatalog().entries.some((entry) => isDraftable(entry))).toBe(false)
+  })
+
   it('refuses an empty draft, which would flag a unit that has nothing to review', () => {
     const fresh = updateCatalog({ identity: IDENTITY, units: BASE }).catalog
     expect(() => applyDraftTranslation(fresh, parseUnitId('slides:s01:body/1'), '')).toThrow(
@@ -280,12 +318,19 @@ describe('drafted translations (FR-007, constitution V)', () => {
     )
   })
 
-  it('clears a stale fuzzy marker but never reaches reviewed on its own', () => {
-    const previous = reviewedCatalog()
-    const edited = BASE.map((u, index) =>
-      index === 0 ? unit('slides:s01:body/1', 'A Pod holds containers.') : u,
+  it('clears a stale fuzzy marker on an entry that had no human translation under it', () => {
+    // A fuzzy flag over an empty msgstr reads as `missing`, so there is no human work to
+    // destroy — this is the one case where drafting legitimately clears the marker.
+    const fresh = updateCatalog({ identity: IDENTITY, units: BASE }).catalog
+    const stale = parseCatalog(
+      serializeCatalog(fresh).replace(
+        'msgctxt "slides:s01:body/1"',
+        '#, fuzzy\nmsgctxt "slides:s01:body/1"',
+      ),
+      { identity: IDENTITY, fileName: FILE },
     )
-    const stale = updateCatalog({ identity: IDENTITY, units: edited, previous }).catalog
+    expect(stale.entries[0]?.state).toBe('missing')
+
     const drafted = applyDraftTranslation(stale, parseUnitId('slides:s01:body/1'), 'Neu gedraftet.')
     const entry = drafted.entries.find((e) => e.id.unitKey === 'body/1')
     expect(entry?.state).toBe('needs-review')
