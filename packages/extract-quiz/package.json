@@ -1,7 +1,7 @@
 {
   "name": "@workshop-i18n/extract-quiz",
   "version": "0.1.0",
-  "description": "Translatable-string extraction for structured quiz JSON",
+  "description": "Lossless quiz JSON extraction and reinsertion by offset splice",
   "license": "MIT",
   "type": "module",
   "main": "dist/index.js",
@@ -10,7 +10,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc"
+    "build": "tsc -p tsconfig.build.json"
   },
   "repository": {
     "type": "git",
@@ -19,5 +19,11 @@
   },
   "engines": {
     "node": ">=22"
+  },
+  "dependencies": {
+    "@workshop-i18n/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1"
   }
 }

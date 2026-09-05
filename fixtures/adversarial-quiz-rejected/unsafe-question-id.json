@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "questions": [
+    {
+      "id": "../../etc/passwd",
+      "section": "S00",
+      "prompt": "Prompt for ../../etc/passwd?",
+      "options": [
+        { "id": "a", "text": "Text a.", "rationale": "Rationale a." },
+        { "id": "b", "text": "Text b.", "rationale": "Rationale b." },
+        { "id": "c", "text": "Text c.", "rationale": "Rationale c." }
+      ],
+      "answer": "a",
+      "explanation": "Explanation for ../../etc/passwd.",
+      "difficulty": "introductory",
+      "learningObjective": "Objective for ../../etc/passwd.",
+      "references": ["https://example.invalid/"]
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "$schema": "./questions.schema.json",
+  "schemaVersion": 1,
+  "questions": [
+    {
+      "id": "S00-Q-ESC-01",
+      "section": "S00",
+      "prompt": "A quoted \"term\", a backslash \\, a solidus \/, and a tab\there. Why?",
+      "options": [
+        { "id": "escaped", "text": "Escaped astral: \ud83d\ude80 and BMP: \u00e9 \u20ac \u2713.", "rationale": "A \u005c-u escape and the character it names must decode the same." },
+        { "id": "literal", "text": "Literal astral: 🚀 and BMP: é € ✓.", "rationale": "The same text written as bytes rather than escapes." },
+        { "id": "controls", "text": "Line\nbreak, carriage\rreturn, backspace\b, formfeed\f.", "rationale": "Control characters are legal in JSON only as escapes." }
+      ],
+      "answer": "escaped",
+      "explanation": "An explanation with a \"quote\", an em dash —, an ellipsis …, and a \u00fcmlaut.",
+      "difficulty": "advanced",
+      "learningObjective": "Survive every JSON escape kind in both directions.",
+      "references": ["https://www.rfc-editor.org/rfc/rfc8259"]
+    },
+    {
+      "id": "S01-Q-ESC-02",
+      "section": "S01",
+      "prompt": "RTL inside English: العربية and עברית. Now what?",
+      "options": [
+        { "id": "zwj", "text": "A ZWJ sequence 👩‍💻 and a flag 🇩🇪.", "rationale": "Grapheme clusters must not be split by an offset." },
+        { "id": "combining", "text": "Combining marks: é versus é.", "rationale": "Both spellings must survive verbatim; nothing is normalised." },
+        { "id": "empty-ish", "text": " ", "rationale": "A single space is still a translatable string." }
+      ],
+      "answer": "zwj",
+      "explanation": "Box drawing ─│└ and arrows →⇒ ride along literally.",
+      "difficulty": "advanced",
+      "learningObjective": "Keep grapheme clusters intact across a splice.",
+      "references": ["https://unicode.org/reports/tr29/"]
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "questions": [
+    {
+      "id": "S00-Q-DUP-01",
+      "section": "S00",
+      "prompt": "Prompt for S00-Q-DUP-01?",
+      "options": [
+        { "id": "a", "text": "Text a.", "rationale": "Rationale a." },
+        { "id": "b", "text": "Text b.", "rationale": "Rationale b." },
+        { "id": "c", "text": "Text c.", "rationale": "Rationale c." }
+      ],
+      "answer": "a",
+      "explanation": "Explanation for S00-Q-DUP-01.",
+      "difficulty": "introductory",
+      "learningObjective": "Objective for S00-Q-DUP-01.",
+      "references": ["https://example.invalid/"]
+    },
+    {
+      "id": "S00-Q-DUP-01",
+      "section": "S00",
+      "prompt": "Prompt for S00-Q-DUP-01?",
+      "options": [
+        { "id": "a", "text": "Text a.", "rationale": "Rationale a." },
+        { "id": "b", "text": "Text b.", "rationale": "Rationale b." },
+        { "id": "c", "text": "Text c.", "rationale": "Rationale c." }
+      ],
+      "answer": "a",
+      "explanation": "Explanation for S00-Q-DUP-01.",
+      "difficulty": "introductory",
+      "learningObjective": "Objective for S00-Q-DUP-01.",
+      "references": ["https://example.invalid/"]
+    }
+  ]
+}

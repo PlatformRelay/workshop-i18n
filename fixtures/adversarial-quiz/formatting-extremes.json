@@ -1,0 +1,23 @@
+{"schemaVersion":1,"questions":[{"id":"S00-Q-FMT-01","section":"S00","prompt":"Minified, no spaces at all?","options":[{"id":"a","text":"Yes.","rationale":"It parses."},{"id":"b","text":"No.","rationale":"It does not."},{"id":"c","text":"Maybe.","rationale":"Unclear."}],"answer":"a","explanation":"A whole question on one line.","difficulty":"introductory","learningObjective":"Read minified JSON.","references":["https://example.invalid/"]},
+	{
+		"id"	:	"S01-Q-FMT-02" ,
+		"section" : "S01",
+
+		"prompt"    :    "Tabs, CRLF and a blank line inside one object?",
+		"options" : [
+				{ "id" : "a" ,
+				  "text" : "Yes." ,
+				  "rationale" : "Whitespace is not structure." } ,
+				{"id":"b","text":"No.","rationale":"It is not."},
+				{
+					"id": "c",
+					"text": "Only sometimes.",
+					"rationale": "Still not structure."
+				}
+		] ,
+		"answer" : "a" ,
+		"explanation" : "Every byte of this layout must come back unchanged." ,
+		"difficulty" : "intermediate" ,
+		"learningObjective" : "Preserve hostile whitespace." ,
+		"references" : [ "https://example.invalid/" ]
+	}]}

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "questions": [
+    {
+      "id": "S00-Q-MIS-01",
+      "section": "S00",
+      "options": [
+        { "id": "a", "text": "One.", "rationale": "First." },
+        { "id": "b", "text": "Two.", "rationale": "Second." },
+        { "id": "c", "text": "Three.", "rationale": "Third." }
+      ],
+      "answer": "a",
+      "explanation": "No prompt key at all.",
+      "difficulty": "introductory",
+      "learningObjective": "Fail closed on a missing translatable field.",
+      "references": ["https://example.invalid/"]
+    }
+  ]
+}

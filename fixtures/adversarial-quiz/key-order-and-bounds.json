@@ -1,0 +1,22 @@
+{
+  "questions": [
+    {
+      "references": ["https://example.invalid/"],
+      "learningObjective": "Survive an unconventional key order.",
+      "difficulty": "intermediate",
+      "explanation": "Key order is the author's, not the tool's.",
+      "answer": "c",
+      "options": [
+        { "rationale": "First.", "text": "Option one.", "id": "a" },
+        { "rationale": "Second.", "text": "Option two.", "id": "b" },
+        { "rationale": "Third.", "text": "Option three.", "id": "c" },
+        { "rationale": "Fourth.", "text": "Option four.", "id": "d" },
+        { "rationale": "Fifth.", "text": "Option five.", "id": "e" }
+      ],
+      "prompt": "Five options, keys reversed. Does anything move?",
+      "section": "S00",
+      "id": "S00-Q-ORD-01"
+    }
+  ],
+  "schemaVersion": 1
+}
