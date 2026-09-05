@@ -2,7 +2,7 @@
  * `@workshop-i18n/catalog-po` — gettext PO as the working exchange format (ADR 0004),
  * with the codec owned rather than depended on (ADR 0013).
  *
- * Two layers so far, smallest first:
+ * Three layers, smallest first:
  *
  * 1. **The codec** (`parsePo`/`serializePo`) — the gettext format and nothing else:
  *    total on read, lossless on constructs it does not interpret, and deterministic on
@@ -10,6 +10,7 @@
  * 2. **The catalog** (`parseCatalog`/`serializeCatalog`) — this tool's conventions on top
  *    of it: `msgctxt` is the stable unit id, `#.` carries source reference and source
  *    hash, `#~` preserves work for units that left the English source.
+ * 3. **The update algorithm** (`updateCatalog`) — spec 002 User Story 1.
  *
  * The gettext to `UnitState` mapping lives here rather than in `packages/core`, so core
  * stays free of a format dependency. It maps *state only*: requiredness is an operator
@@ -51,3 +52,11 @@ export {
 } from './provenance.js'
 export { serializePo } from './serialize.js'
 export { FUZZY_FLAG, NEEDS_REVIEW_FLAG, unitStateOf } from './state.js'
+export {
+  applyDraftTranslation,
+  type ExtractedUnit,
+  type UpdateCatalogOptions,
+  type UpdateResult,
+  type UpdateSummary,
+  updateCatalog,
+} from './update.js'
