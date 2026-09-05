@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import type { DiagnosticCode } from '../src/diagnostic.js'
 import { extractLabFile, LabExtractionError, locateLabFile } from '../src/extract.js'
 import { checkLabIds, collectLabIds, type LabIdPlan, planLabId } from '../src/lab-id.js'
-import { composeSkeleton, stripContinuationPrefix } from '../src/skeleton.js'
+import { composeSkeleton } from '../src/skeleton.js'
 import { decodeSource } from '../src/source.js'
 
 const FIXTURE_ROOT = fileURLToPath(new URL('../../../fixtures/', import.meta.url))
@@ -102,9 +102,9 @@ function fenceBlocks(text: string): readonly string[] {
  * Two exclusions, both because the line carries prose as well as machinery. A
  * `<summary>` label is prose living on a tag line, so it is blanked before comparing —
  * otherwise this would assert that translating a spoiler label does not translate it.
- * And a *footnote* definition (`[^cve]: …`) only looks like a link definition: the
- * parser scopes it as a paragraph, so its body is a unit, and only its `[^cve]:` label
- * is machinery — which `composeSkeleton` guards separately.
+ * And a *footnote* definition (`[^cve]: …`) only looks like a link definition: its
+ * marker is skeleton but its body is a unit sitting on the same line, so the line as a
+ * whole is expected to change between locales.
  */
 function machineryLines(text: string): readonly string[] {
   return text
@@ -140,14 +140,19 @@ function idsOf(text: string): readonly string[] {
  * A stand-in translation for one unit: different from the English in every case, but
  * still keeping the machinery `composeSkeleton` requires a translator to keep.
  *
- * Today that is the `[^label]:` a footnote definition opens with. The parser scopes such
- * a definition as a paragraph, so the label ends up inside the unit even though renaming
- * it would orphan every reference — composition refuses that, and a stand-in translation
- * that ignored the rule would only prove the refusal fires, not that the property holds.
+ * That means **every** reference-definition opener the unit has, not the first one. An
+ * earlier version regenerated only the first `[^label]:` and so deleted the second
+ * footnote of a two-definition unit outright — satisfying the guard's letter while
+ * violating its purpose, and hiding the fact that the guard only enforced the first
+ * label. A stand-in that a real translator's output could not match is not a stand-in.
  */
 function translationFor(unit: { source: string }, index: number): string {
-  const label = /^ {0,3}\[\^([^\]\s]+)\]:/.exec(unit.source)?.[1]
-  return label === undefined ? `uebersetzt ${index}` : `[^${label}]: uebersetzt ${index}`
+  const openers = unit.source
+    .split(/\r?\n/)
+    .map((line) => /^ {0,3}(\[\^?[^\]]*\]:)/.exec(line)?.[1])
+    .filter((opener): opener is string => opener !== undefined)
+  if (openers.length === 0) return `uebersetzt ${index}`
+  return openers.map((opener, at) => `${opener} uebersetzt ${index}-${at}`).join('\n')
 }
 
 describe.each(CORPUS.map((fixture) => [fixture.name, fixture] as const))(
@@ -184,15 +189,20 @@ describe.each(CORPUS.map((fixture) => [fixture.name, fixture] as const))(
     it('anchors every hole on the bytes it claims (the offset invariant)', () => {
       // Losslessness cannot see a misplaced hole: an untranslated hole is filled with
       // source.slice(start, end) either way, so a skew round-trips green and only shows
-      // up once something is actually translated. This is the assertion that sees it —
-      // and it is the one that caught micromark dropping a leading byte-order mark.
+      // up once something is actually translated.
+      //
+      // Comparing hole.source against a re-slice of its own offsets does not see it
+      // either — hole.source *is* fragment.slice(r) and hole.start *is* base + r, the
+      // same expression whatever the base is wrong by. That version of this assertion
+      // was a tautology and passed with the byte-order-mark payback removed.
+      //
+      // What a skew actually does is shift a span off the inline content it was measured
+      // from, and inline content never begins or ends with whitespace. So a markdown
+      // hole's text is exactly its own trimmed self, and that is the invariant with
+      // teeth: it goes red the moment locateProse stops paying the mark back.
       for (const hole of extraction.skeleton.holes) {
-        const raw = adopted.slice(hole.start, hole.end)
-        const expected =
-          hole.encoding.kind === 'markdown'
-            ? stripContinuationPrefix(raw, hole.encoding.continuationPrefix)
-            : raw
-        expect(expected).toBe(hole.source)
+        if (hole.encoding.kind !== 'markdown') continue
+        expect(hole.source).toBe(hole.source.trim())
       }
     })
 
