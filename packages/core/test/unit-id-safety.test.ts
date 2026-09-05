@@ -89,6 +89,24 @@ describe('validateUnitId', () => {
     })
     expect(issues[0]).toMatchObject({ field: 'surface', reason: 'unknown-surface' })
   })
+
+  it('reports a non-string container id as an issue, not as a raw TypeError', () => {
+    for (const hostile of [42, null, undefined, {}, ['a'], true]) {
+      const id = { surface: 'slides', containerId: hostile, unitKey: 'body/1' } as unknown as UnitId
+      expect(isSafeContainerId(hostile as unknown as string)).toBe(false)
+      expect(validateUnitId(id)[0]).toMatchObject({
+        field: 'containerId',
+        reason: 'not-a-string',
+      })
+      expect(() => assertSafeUnitId(id)).toThrow(UnitIdError)
+    }
+  })
+
+  it('reports a non-string unit key the same way', () => {
+    const id = { surface: 'labs', containerId: 'lab-01', unitKey: 7 } as unknown as UnitId
+    expect(validateUnitId(id)[0]).toMatchObject({ field: 'unitKey', reason: 'not-a-string' })
+    expect(isSafeUnitKey(7 as unknown as string)).toBe(false)
+  })
 })
 
 describe('assertSafeUnitId', () => {
@@ -128,6 +146,28 @@ describe('parseSafeUnitId', () => {
 })
 
 describe('compareUnitIds', () => {
+  it('orders by code unit, not by locale collation', () => {
+    // ICU sorts "a" before "B"; code-unit order puts "B" (0x42) first. Catalog ordering
+    // must not depend on the machine's collation, so this pins the code-unit answer —
+    // swapping in localeCompare turns this red.
+    const upper: UnitId = { surface: 'slides', containerId: 'B', unitKey: 'body/1' }
+    const lower: UnitId = { surface: 'slides', containerId: 'a', unitKey: 'body/1' }
+    expect(compareUnitIds(upper, lower)).toBeLessThan(0)
+    expect('B'.localeCompare('a')).toBeGreaterThan(0)
+
+    const upperKey: UnitId = { surface: 'slides', containerId: 's01', unitKey: 'Body/1' }
+    const lowerKey: UnitId = { surface: 'slides', containerId: 's01', unitKey: 'body/1' }
+    expect(compareUnitIds(upperKey, lowerKey)).toBeLessThan(0)
+  })
+
+  it('is a total order: antisymmetric, and 0 only for equal ids', () => {
+    const a: UnitId = { surface: 'slides', containerId: 'a-b', unitKey: 'body/1' }
+    const b: UnitId = { surface: 'slides', containerId: 'ab', unitKey: 'body/1' }
+    expect(compareUnitIds(a, b)).toBe(-compareUnitIds(b, a))
+    expect(compareUnitIds(a, { ...a })).toBe(0)
+    expect(compareUnitIds(a, b)).not.toBe(0)
+  })
+
   it('orders deterministically by formatted id', () => {
     const ids: UnitId[] = [
       { surface: 'slides', containerId: 'b', unitKey: 'body/1' },

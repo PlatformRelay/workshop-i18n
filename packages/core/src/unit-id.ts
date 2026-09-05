@@ -51,6 +51,7 @@ const UNIT_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/
 
 /** Why an identity was rejected. Machine-readable so the CLI can group failures. */
 export type UnitIdRejection =
+  | 'not-a-string'
   | 'empty'
   | 'too-long'
   | 'path-traversal'
@@ -77,16 +78,33 @@ export class UnitIdError extends Error {
   }
 }
 
+/**
+ * Render an arbitrary value for an error message without letting it print itself:
+ * `JSON.stringify` escapes control characters, and anything it cannot serialize (a
+ * cycle, a bigint) falls back to its type name rather than throwing inside validation.
+ */
+function describeValue(value: unknown): string {
+  if (typeof value === 'string') return JSON.stringify(value)
+  try {
+    return JSON.stringify(value) ?? String(value)
+  } catch {
+    return typeof value
+  }
+}
+
 function issue(
   field: UnitIdIssue['field'],
   reason: UnitIdRejection,
-  value: string,
+  value: unknown,
   detail: string,
 ): UnitIdIssue {
-  return { field, reason, message: `${field} ${JSON.stringify(value)}: ${detail}` }
+  return { field, reason, message: `${field} ${describeValue(value)}: ${detail}` }
 }
 
 function checkContainerId(value: string): UnitIdIssue | undefined {
+  if (typeof value !== 'string') {
+    return issue('containerId', 'not-a-string', value, 'must be a string')
+  }
   if (value === '') return issue('containerId', 'empty', value, 'must not be empty')
   if (value.length > MAX_CONTAINER_ID_LENGTH) {
     return issue(
@@ -116,6 +134,9 @@ function checkContainerId(value: string): UnitIdIssue | undefined {
 }
 
 function checkUnitKey(value: string): UnitIdIssue | undefined {
+  if (typeof value !== 'string') {
+    return issue('unitKey', 'not-a-string', value, 'must be a string')
+  }
   if (value === '') return issue('unitKey', 'empty', value, 'must not be empty')
   if (value.length > MAX_UNIT_KEY_LENGTH) {
     return issue('unitKey', 'too-long', value, `must be at most ${MAX_UNIT_KEY_LENGTH} characters`)
