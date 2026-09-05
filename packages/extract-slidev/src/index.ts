@@ -24,6 +24,21 @@ export {
   hasErrors,
 } from './diagnostic.js'
 export {
+  type ExtractedSlide,
+  extractSlidevFile,
+  locateSlidevFile,
+  type SlidevExtraction,
+  SlidevExtractionError,
+  type SlidevExtractOptions,
+} from './extract.js'
+export {
+  DEFAULT_FRONTMATTER_TEXT_KEYS,
+  type FrontmatterField,
+  type FrontmatterLocation,
+  locateFrontmatter,
+  SLIDE_ID_KEY,
+} from './frontmatter.js'
+export {
   locateProse,
   type ProseLocation,
   type ProseOptions,

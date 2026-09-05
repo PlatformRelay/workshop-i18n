@@ -246,3 +246,78 @@ export function parseSlidevDeck(source: string): SlidevDeck {
 
   return { source, slides, diagnostics }
 }
+
+/** An HTML-comment speaker note, and the prose range inside it. */
+export interface SpeakerNote {
+  /** Offset of the opening `<!--`. */
+  readonly start: number
+  /** Offset just past the closing `-->`. */
+  readonly end: number
+  /** Offset of the first byte inside the comment. */
+  readonly innerStart: number
+  /** Offset just past the last byte inside the comment. */
+  readonly innerEnd: number
+}
+
+/**
+ * Find a slide's speaker note: the HTML comment that ends the slide.
+ *
+ * Slidev renders the trailing comment of a slide as the presenter note, so that is the
+ * one comment whose prose is content rather than an author aside. The scan reuses the
+ * fence tracking above, because a `<!--` inside a fenced block is code — the deck shows
+ * HTML comments inside its own examples — and it requires the opener to be the first
+ * thing on its line, so an inline `` `<!--` `` in prose cannot open one.
+ *
+ * Earlier comments in the slide are left alone; the prose locator reports them as
+ * untranslated HTML blocks, which is the right answer for an aside.
+ */
+export function findSpeakerNote(
+  source: string,
+  start: number,
+  end: number,
+): SpeakerNote | undefined {
+  const fragment = source.slice(start, end)
+  const lines = scanLines(fragment)
+  let fence: OpenFence | undefined
+  let open: number | undefined
+  let last: SpeakerNote | undefined
+
+  for (const [index, line] of lines.entries()) {
+    const text = lineContent(line, index)
+    if (open === undefined) {
+      if (fence !== undefined) {
+        const close = FENCE_CLOSE.exec(text)
+        const run = close?.[1]
+        if (run !== undefined && run[0] === fence.marker && run.length >= fence.length) {
+          fence = undefined
+        }
+        continue
+      }
+      const opened = FENCE_OPEN.exec(text)
+      const run = opened?.[1]
+      if (run !== undefined && (run[0] !== '`' || !(opened?.[2] ?? '').includes('`'))) {
+        fence = { marker: run[0] as string, length: run.length }
+        continue
+      }
+      if (text.trimStart().startsWith('<!--')) {
+        open = line.start + text.indexOf('<!--')
+      } else {
+        continue
+      }
+    }
+    const searchFrom = Math.max(open + 4, line.start)
+    const closeIndex = fragment.indexOf('-->', searchFrom)
+    if (closeIndex === -1 || closeIndex >= line.end) continue
+    last = {
+      start: start + open,
+      end: start + closeIndex + 3,
+      innerStart: start + open + 4,
+      innerEnd: start + closeIndex,
+    }
+    open = undefined
+  }
+
+  if (last === undefined) return undefined
+  // Only a comment that ends the slide is the note; anything after it is content.
+  return source.slice(last.end, end).trim() === '' ? last : undefined
+}
