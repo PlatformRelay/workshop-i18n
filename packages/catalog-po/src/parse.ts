@@ -398,6 +398,12 @@ export function parsePo(text: string, options: ParsePoOptions): PoFile {
 
   flush()
 
+  // In practice this fires one way only. Every GNU producer emits the header first —
+  // `--sort-output`, `--sort-by-file` and `msgattrib --set-obsolete` all leave it there,
+  // because gettext treats it as a distinguished entry rather than a message — so the
+  // catalogs that reach here are the ones that have no header at all. Hence a message
+  // about a *missing* header: it is the situation the reader is actually in, and it names
+  // the way out, because this string is all a translator handed a rejected file will read.
   const first = entries[0]
   if (
     first !== undefined &&
@@ -405,7 +411,10 @@ export function parsePo(text: string, options: ParsePoOptions): PoFile {
   ) {
     throw new PoSyntaxError(
       { fileName, line: first.line },
-      'catalog does not start with a header entry (msgid "")',
+      'catalog does not start with a header entry (msgid ""), so its encoding and ' +
+        'plural rules are undeclared — synthesize one with `msginit` or `msgen`, or ' +
+        're-export the catalog from your TMS with its header (`--omit-header` output ' +
+        'is a template for diffing, not a catalog to ship)',
     )
   }
 

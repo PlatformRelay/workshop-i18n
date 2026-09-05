@@ -104,20 +104,41 @@ so this is a graceful loss, not a correctness one.
 
 ### The one shape we refuse that GNU produces
 
-`parsePo` requires a catalog to begin with the header entry (`msgid ""`). Three GNU invocations
-produce a catalog with no header at all, and we reject all three:
+`parsePo` requires the header entry (`msgid ""`) to be the first entry. The rule is written as an
+ordering rule, but it fires as an *absence* rule, and the distinction matters when reading an error
+report. Every GNU producer emits the header first and never obsoletes it — `--sort-output` and
+`--sort-by-file` both put `msgid ""` at the top (it sorts first, and gettext keeps it there
+regardless), and `msgattrib --set-obsolete` obsoletes every entry except the header, because
+gettext treats it as a distinguished entry rather than as a message. Fifteen ordering-affecting
+invocations were checked and none moved it. So a GNU-written catalog that trips this rule is
+always a catalog with **no header at all**, never one with a late header. A header out of position
+is reachable only by hand-editing — and gettext itself is indifferent to it: `msgcat` leaves a
+mid-file header where it found it and `msgfmt` still compiles the result.
+
+Three GNU invocations produce a headerless catalog, and we reject all three:
 
 - `xgettext --omit-header`,
 - `msgcomm --omit-header`,
 - and any `msgcat`/`msgmerge` run whose first (or definition) input is one of those, because
   headerlessness propagates.
 
-These are valid gettext — `msgfmt` compiles them — so this is our limit, not their bug. It is kept
-deliberately: a catalog without a header has no `Content-Type`, so its encoding is undeclared, and
-gettext's own tools warn about multibyte sequences when they process one. Nothing in this tool's
-pipeline can produce one, because `extract` always writes a header. `fixtures/catalogs/gnu-generated/refused/`
-holds both files and a test pins the exact error, so the refusal cannot drift from a decision into
-an accident — and if we ever need to accept them, that test is where the change gets argued.
+These are valid gettext — `msgfmt` compiles them — so this is our limit, not their bug, and it is
+kept deliberately. The header is where `Content-Type` and `Plural-Forms` live, so without it the
+catalog's encoding is undeclared: that is why gettext's own tools emit `invalid multibyte sequence`
+on such files, and why `msgen` synthesizes a header rather than propagating its absence. Nothing in
+this tool's pipeline can produce one, because `extract` always writes a header, and `--omit-header`
+is a POT-diffing convenience rather than a shipping format. In a tool whose entire contract is
+byte-exactness, accepting a catalog whose encoding is undeclared trades a real invariant for a case
+no consumer hits.
+
+Because the refusal stands, the message carries the remedy rather than only the rule — the same
+shape `packages/core` uses for its reserved-locale rejection, on the same reasoning: that string is
+all a translator handed a rejected file will read. It names `msginit` and `msgen` as ways to
+synthesize the missing header, and names `--omit-header` so the reader recognises where their file
+came from. `fixtures/catalogs/gnu-generated/refused/` holds both catalogs; one test pins the exact
+message and a second asserts the remedy survives any rewording. So the refusal cannot drift from a
+decision into an accident — and if we ever need to accept these, those tests are where the change
+gets argued.
 
 The parser's other self-flagged strictness — refusing a comment block that is followed by no entry
 — was checked the same way and found *not* to be reachable from GNU output. No tool emits a

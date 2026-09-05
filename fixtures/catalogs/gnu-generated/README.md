@@ -55,8 +55,23 @@ decision into an accident.
 | `refused/xgettext-omit-header.po` | `xgettext … --omit-header src-v2.c` | no header entry — `parsePo` requires the catalog to start with `msgid ""` |
 | `refused/msgmerge-headerless.po` | `msgmerge --previous refused/xgettext-omit-header.po v2.pot` | same: headerlessness propagates, because `msgmerge` takes the header from its definition file |
 
-This is a real limit, not a hypothetical one. ADR 0013 records it, and the parser's
-`catalog does not start with a header entry (msgid "")` error names it precisely. Nothing
-in this tool's own pipeline can produce a headerless catalog — `extract` always writes a
-header — so the limit costs nothing today; it would matter if the catalog directory were
-ever fed a `--omit-header` template from elsewhere.
+This is a real limit, not a hypothetical one, and it is kept on purpose: the header is
+where `Content-Type` and `Plural-Forms` live, so a headerless catalog has an undeclared
+encoding — which is why gettext's own tools emit `invalid multibyte sequence` on these
+files, and why `msgen` synthesizes a header rather than propagating its absence. Nothing
+in this tool's own pipeline can produce one, because `extract` always writes a header.
+
+So the parser refuses, and its message carries the way out rather than only the rule:
+
+```
+<file>:1: catalog does not start with a header entry (msgid ""), so its encoding and
+plural rules are undeclared — synthesize one with `msginit` or `msgen`, or re-export the
+catalog from your TMS with its header (`--omit-header` output is a template for diffing,
+not a catalog to ship)
+```
+
+Note what the rule is *not*. It is written as "the header must be first", but no GNU tool
+can trip it that way: `--sort-output`, `--sort-by-file` and `msgattrib --set-obsolete` all
+leave `msgid ""` at the top, because gettext treats the header as a distinguished entry
+rather than as a message. Every GNU catalog that reaches the error has no header at all.
+See ADR 0013 for the full reasoning.

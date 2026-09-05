@@ -297,8 +297,31 @@ describe('GNU output this codec deliberately refuses', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(PoSyntaxError)
       expect((error as PoSyntaxError).message).toBe(
-        `${name}:1: catalog does not start with a header entry (msgid "")`,
+        `${name}:1: catalog does not start with a header entry (msgid ""), so its ` +
+          'encoding and plural rules are undeclared — synthesize one with `msginit` or ' +
+          '`msgen`, or re-export the catalog from your TMS with its header ' +
+          '(`--omit-header` output is a template for diffing, not a catalog to ship)',
       )
+    }
+  })
+
+  /**
+   * The message a translator is left holding has to name the way out, not just the rule
+   * — the shape `packages/core` uses for its reserved-locale rejection, where the message
+   * is all a facilitator typing `--locale con` will ever read. Asserted separately from
+   * the exact string above so that what matters about it survives a rewording.
+   */
+  it.each(REFUSED)('tells the reader how to fix %s, not only what is wrong', (name) => {
+    try {
+      parsePo(read(name), { fileName: name })
+      expect.unreachable(`expected ${name} to be refused`)
+    } catch (error) {
+      const { message } = error as PoSyntaxError
+      // A command that produces the missing header, so the reader has somewhere to go.
+      expect(message).toContain('msginit')
+      expect(message).toContain('msgen')
+      // And where a headerless catalog comes from, so they recognise their own situation.
+      expect(message).toContain('--omit-header')
     }
   })
 
