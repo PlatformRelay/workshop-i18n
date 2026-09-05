@@ -145,6 +145,15 @@ describe('parseManifest — apiVersion (spec 001 FR-003)', () => {
     })
   })
 
+  it('gives the version exactly one spelling — no zero-padded majors', () => {
+    for (const spelling of ['workshop-i18n/v01', 'workshop-i18n/v1.0', 'workshop-i18n/V1']) {
+      expect(issuesOf(minimal.replace('workshop-i18n/v1', spelling)).issues[0]).toMatchObject({
+        path: 'apiVersion',
+        code: 'invalid',
+      })
+    }
+  })
+
   it('does not bother reporting other problems once the version is unsupported', () => {
     const error = issuesOf(`apiVersion: ${MANIFEST_API_GROUP}/v9\nsurfaces: 42\n`)
     expect(error.issues).toHaveLength(1)
@@ -209,9 +218,10 @@ describe('parseManifest — surfaces', () => {
     })
   })
 
-  it('rejects an unknown surface name, naming the manifest entry', () => {
+  it('rejects an unknown surface name with the same code as any other unknown key', () => {
     const error = issuesOf(`${minimal}  handouts:\n    include: ['h/*.md']\n`)
-    expect(error.issues[0]).toMatchObject({ path: 'surfaces.handouts', code: 'invalid' })
+    expect(error.issues[0]).toMatchObject({ path: 'surfaces.handouts', code: 'unknown-key' })
+    expect(error.message).toContain('slides, labs, quiz')
   })
 
   it('requires a non-empty include list', () => {
@@ -288,6 +298,13 @@ describe('parseManifest — locales', () => {
       path: 'locales.targets[1]',
       code: 'invalid',
     })
+  })
+
+  it('accepts real BCP 47 tags, including script, region and private-use subtags', () => {
+    for (const tag of ['de', 'pt-BR', 'zh-Hans-CN', 'de-Latn-DE-x-a', 'es-419']) {
+      const manifest = parseManifest(minimal.replace('[de]', `['${tag}']`))
+      expect(manifest.locales.targets).toEqual([tag])
+    }
   })
 
   it('rejects locale tags that are not safe directory names', () => {

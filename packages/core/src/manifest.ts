@@ -127,10 +127,22 @@ export interface ParseManifestOptions {
 const DOCUMENT_PATH = '<document>'
 
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_-]*$/
-/** `workshop-i18n/v<major>`, nothing else. */
-const API_VERSION = /^([a-z0-9-]+)\/v(\d+)$/
-/** BCP 47-ish, and also a safe directory name: `i18n/<locale>/` is a real path. */
-const LOCALE_TAG = /^[A-Za-z]{2,8}(-[A-Za-z0-9]{2,8}){0,3}$/
+/**
+ * `workshop-i18n/v<major>`, nothing else. The major is unpadded (`v1`, never `v01`):
+ * a protected contract with two spellings of the same version is a contract with an
+ * ambiguity, and `Number('01')` would have quietly accepted the second one.
+ */
+const API_VERSION = /^([a-z0-9-]+)\/v(0|[1-9]\d*)$/
+/**
+ * BCP 47 tags, and also safe directory names: `i18n/<locale>/` is a real path.
+ *
+ * Subtags after the language may be 1-8 characters, which admits singletons and
+ * private-use sequences (`de-Latn-DE-x-a`, `es-419`) that a 2-3 character cap rejected.
+ * The total length is capped separately — the shape is permissive, the path safety
+ * comes from the charset (letters, digits and "-" only) plus that cap.
+ */
+const LOCALE_TAG = /^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8}){0,8}$/
+const MAX_LOCALE_TAG_LENGTH = 35
 /** Layout names come from the deck; keep them plain so they can be printed and matched. */
 const LAYOUT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 /**
@@ -242,9 +254,11 @@ function readSurfaces(issues: IssueList, value: unknown): readonly SurfaceSpec[]
 
   for (const key of Object.keys(value)) {
     if (!(SURFACES as readonly string[]).includes(key)) {
+      // `unknown-key`, matching every other unknown key in the document: a consumer
+      // filtering issues by code should not have to know that surfaces are special.
       issues.add(
         childPath('surfaces', key),
-        'invalid',
+        'unknown-key',
         `unknown surface — known surfaces are ${SURFACES.join(', ')}`,
       )
     }
@@ -327,7 +341,11 @@ function readLocales(issues: IssueList, value: unknown): LocaleSet {
 
   let source = 'en'
   if (value.source !== undefined) {
-    if (typeof value.source === 'string' && LOCALE_TAG.test(value.source)) {
+    if (
+      typeof value.source === 'string' &&
+      value.source.length <= MAX_LOCALE_TAG_LENGTH &&
+      LOCALE_TAG.test(value.source)
+    ) {
       source = value.source
     } else {
       issues.add('locales.source', 'invalid', 'must be a locale tag such as "en"')
@@ -351,7 +369,11 @@ function readLocales(issues: IssueList, value: unknown): LocaleSet {
   const targets: string[] = []
   rawTargets.forEach((entry, index) => {
     const path = `locales.targets[${index}]`
-    if (typeof entry !== 'string' || !LOCALE_TAG.test(entry)) {
+    if (
+      typeof entry !== 'string' ||
+      entry.length > MAX_LOCALE_TAG_LENGTH ||
+      !LOCALE_TAG.test(entry)
+    ) {
       issues.add(
         path,
         'invalid',
