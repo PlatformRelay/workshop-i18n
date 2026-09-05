@@ -1,0 +1,32 @@
+/** The translatable unit and its per-locale lifecycle. */
+
+import type { UnitId } from './unit-id.js'
+
+/** Lifecycle of a translation for one unit in one locale (gettext-aligned). */
+export type UnitState =
+  | 'missing' // no translation yet
+  | 'fuzzy' // source changed since translation; needs human revalidation
+  | 'needs-review' // drafted (e.g. seeded or machine-assisted); not yet human-accepted
+  | 'reviewed' // human-accepted; shipping-grade
+
+/** Every state, in worst-to-best order — the order reports and violations use. */
+export const UNIT_STATES = [
+  'missing',
+  'fuzzy',
+  'needs-review',
+  'reviewed',
+] as const satisfies readonly UnitState[]
+
+/** Type guard for {@link UnitState}, for reading a state out of a catalog or JSON. */
+export function isUnitState(value: unknown): value is UnitState {
+  return typeof value === 'string' && (UNIT_STATES as readonly string[]).includes(value)
+}
+
+/** One extracted translatable unit with provenance. */
+export interface TranslationUnit {
+  readonly id: UnitId
+  /** English source text, markdown inline markup left literal. */
+  readonly source: string
+  /** Hash of the source at extraction time — staleness anchor. */
+  readonly sourceHash: string
+}
