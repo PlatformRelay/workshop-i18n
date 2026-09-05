@@ -133,6 +133,35 @@ describe('parseManifest — defaults', () => {
     expect(manifest.lengthBudgets).toEqual({ default: DEFAULT_LENGTH_BUDGET, byLayout: {} })
   })
 
+  it('freezes the values it defaulted, not only the ones the author wrote', () => {
+    // The `complete` fixture declares every optional key, so the earlier freeze test only
+    // ever exercised the populated paths. A manifest that omits `lengthBudgets` and
+    // `exclude` takes different returns, and those were the ones left mutable.
+    expect(Object.isFrozen(manifest.lengthBudgets)).toBe(true)
+    expect(Object.isFrozen(manifest.lengthBudgets.byLayout)).toBe(true)
+    const slides = surfaceSpec(manifest, 'slides') as MarkdownSurfaceSpec
+    expect(Object.isFrozen(slides)).toBe(true)
+    expect(Object.isFrozen(slides.include)).toBe(true)
+    expect(Object.isFrozen(slides.exclude)).toBe(true)
+    expect(Object.isFrozen(manifest.protectedTerms)).toBe(true)
+    expect(Object.isFrozen(manifest.locales.targets)).toBe(true)
+  })
+
+  it('keeps the overflow gate where parsing put it', () => {
+    expect(() => {
+      ;(manifest.lengthBudgets as { default: number }).default = 99
+    }).toThrow(TypeError)
+    expect(lengthBudgetFor(manifest)).toBe(DEFAULT_LENGTH_BUDGET)
+  })
+
+  it('keeps the extraction scope where parsing put it', () => {
+    const slides = surfaceSpec(manifest, 'slides') as MarkdownSurfaceSpec
+    expect(() => {
+      ;(slides.exclude as string[]).push('**/*')
+    }).toThrow(TypeError)
+    expect(slides.exclude).toEqual([])
+  })
+
   it('reports an absent surface as undefined rather than guessing a path', () => {
     expect(surfaceSpec(manifest, 'quiz')).toBeUndefined()
   })

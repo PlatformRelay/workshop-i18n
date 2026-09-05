@@ -183,6 +183,9 @@ class IssueList {
   }
 }
 
+/** Shared frozen empty list, so no code path can return a mutable one. */
+const EMPTY_GLOBS: readonly string[] = Object.freeze([])
+
 /** Validate one glob: repo-relative, POSIX, and unable to escape the working tree. */
 function checkGlob(issues: IssueList, path: string, value: unknown): string | undefined {
   if (typeof value !== 'string') {
@@ -222,17 +225,20 @@ function readGlobList(
   value: unknown,
   { required }: { required: boolean },
 ): readonly string[] {
+  // Every return here is frozen, the defaulted ones included: an omitted `exclude:` is
+  // the common case, and an unfrozen `[]` is a glob list a consumer can widen after the
+  // manifest was validated.
   if (value === undefined) {
     if (required) issues.add(path, 'missing', 'is required')
-    return []
+    return EMPTY_GLOBS
   }
   if (!Array.isArray(value)) {
     issues.add(path, 'invalid', 'must be a list of path globs')
-    return []
+    return EMPTY_GLOBS
   }
   if (required && value.length === 0) {
     issues.add(path, 'invalid', 'must list at least one path glob')
-    return []
+    return EMPTY_GLOBS
   }
   const globs: string[] = []
   value.forEach((entry, index) => {
@@ -430,15 +436,21 @@ function readProtectedTerms(issues: IssueList, value: unknown): readonly string[
   return Object.freeze(terms)
 }
 
+/** The budgets a manifest that declares none gets — frozen like every other return. */
+const DEFAULT_LENGTH_BUDGETS: LengthBudgets = Object.freeze({
+  default: DEFAULT_LENGTH_BUDGET,
+  byLayout: Object.freeze(Object.create(null) as Record<string, number>),
+})
+
 function readLengthBudgets(issues: IssueList, value: unknown): LengthBudgets {
-  if (value === undefined) return { default: DEFAULT_LENGTH_BUDGET, byLayout: {} }
+  if (value === undefined) return DEFAULT_LENGTH_BUDGETS
   if (!isRecord(value)) {
     issues.add(
       'lengthBudgets',
       'invalid',
       'must be a mapping of layout name to a target/source length ratio',
     )
-    return Object.freeze({ default: DEFAULT_LENGTH_BUDGET, byLayout: Object.freeze({}) })
+    return DEFAULT_LENGTH_BUDGETS
   }
 
   let fallback = DEFAULT_LENGTH_BUDGET
@@ -594,7 +606,7 @@ export function parseManifest(yamlText: string, opts?: ParseManifestOptions): Ma
     locales,
     surfaces: Object.freeze(surfaces),
     protectedTerms: Object.freeze(protectedTerms),
-    lengthBudgets,
+    lengthBudgets: Object.freeze(lengthBudgets),
   })
 }
 
