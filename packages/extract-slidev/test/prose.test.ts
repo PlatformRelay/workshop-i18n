@@ -180,6 +180,15 @@ describe('locateProse leaves protected skeleton alone', () => {
     expect(located.diagnostics[0]?.severity).toBe('warning')
   })
 
+  it('reports prose a tag sits in front of on the same line', () => {
+    // A line starting with `<` is not automatically markup: `<p>text</p>` is prose with a
+    // tag in front of it, and a coverage metric that under-reports is worse than none.
+    const fragment = ['<div class="grid">', '<p>Trapped prose lives here</p>', '</div>', ''].join(
+      '\n',
+    )
+    expect(locate(fragment).diagnostics.map((d) => d.code)).toEqual(['prose-in-html-block'])
+  })
+
   it('stays quiet about an HTML block that carries no prose', () => {
     const fragment = ['<div class="grid">', '  <K8sIcon kind="sts" />', '</div>', ''].join('\n')
     expect(locate(fragment).diagnostics).toEqual([])
@@ -191,6 +200,20 @@ describe('locateProse leaves protected skeleton alone', () => {
 
   it('never emits an empty or whitespace-only span', () => {
     expect(texts('#\n\n##   \n\n- \n')).toEqual([])
+  })
+
+  it('never emits a span that is only inline code', () => {
+    // `rate(http_requests_total[5m])` as a whole heading is an API identifier, which
+    // FR-005 requires byte-identical in every locale — there is nothing to translate.
+    expect(texts('# `rate(http_requests_total[5m])`\n')).toEqual([])
+    expect(texts('- `--dry-run=client`\n')).toEqual([])
+    expect(texts('| `get` | `list` |\n| --- | --- |\n')).toEqual([])
+  })
+
+  it('still emits a span where inline code sits inside a sentence', () => {
+    expect(texts('Run `kubectl get pods` to list them.\n')).toEqual([
+      'Run `kubectl get pods` to list them.',
+    ])
   })
 })
 

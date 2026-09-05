@@ -166,11 +166,16 @@ describe('proposeSlideId', () => {
 
   it('escapes a heading that slugifies to a name no file system can hold', () => {
     // `con`, `nul`, `aux`, `prn` are Windows device names; a container id becomes a file.
+    // The escape reads as an escape: a numeric suffix would read as "the second `con`".
     for (const reserved of ['CON', 'Aux', 'nul', 'PRN', 'lpt1']) {
       const id = propose(reserved, [], '')
       expect(isSafeContainerId(id)).toBe(true)
-      expect(id).not.toBe(reserved.toLowerCase())
+      expect(id).toBe(`${reserved.toLowerCase()}-slide`)
     }
+  })
+
+  it('still disambiguates a reserved name that collides with an existing id', () => {
+    expect(propose('CON', ['con-slide'], '')).toBe('con-slide-2')
   })
 
   it('always proposes an id core will accept', () => {

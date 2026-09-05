@@ -18,11 +18,16 @@
  * - **Heading path, not a flat ordinal.** Role counters restart inside every heading
  *   scope, so editing one section cannot renumber another.
  *
- * Within one heading scope a key is still ordinal, so inserting a paragraph renumbers
- * the paragraphs after it *in that scope only*. That residue is the honest cost of
- * keying content that carries no identity of its own; slides are small, the blast radius
- * is one scope, and the alternative — per-paragraph ids in the English source — is
- * exactly the authoring-surface pollution constitution I forbids.
+ * Within a scope the trailing counter is still ordinal, and the residue is bigger than
+ * one paragraph: inserting or removing a block re-keys its later siblings in the same
+ * heading scope, and inserting a heading — or changing a heading's level — re-keys every
+ * later sibling scope *and everything nested under it* (measured: adding one `##` moved
+ * four of eight ids in a slide). That is the honest cost of keying content which carries
+ * no identity of its own; the alternative, per-paragraph ids in the English source, is
+ * exactly the authoring-surface pollution constitution I forbids. It is bounded rather
+ * than silent: a re-keyed unit reaches the catalog as a removed id plus an added id, so
+ * its translation is lost and re-matched by translation memory, never attached to the
+ * wrong English. ADR 0005's amendment of 2026-09-05 records the trade.
  *
  * ## What is prose and what is skeleton
  *
@@ -160,17 +165,20 @@ function isParent(node: Node): node is Parent {
 /**
  * True when a span carries text a translator can act on.
  *
- * A paragraph holding only `![](/covers/section-18.webp)` has no words in it: emitting
- * it would hand a translator an image reference — a byte spec 001 FR-005 requires to be
- * identical in every locale — and nothing to translate. An image *inside* a sentence is
- * different: the sentence is the unit and the reference rides along literally, which is
- * what FR-004 asks for.
+ * A paragraph holding only `![](/covers/section-18.webp)`, or a heading that is nothing
+ * but an inline-code `rate(http_requests_total[5m])`, has no words in it: emitting either
+ * would hand a translator a byte spec 001 FR-005 requires identical in every locale — an
+ * image reference, an API identifier — and nothing to translate. Inside a sentence both
+ * are different: the sentence is the unit and they ride along literally, which is what
+ * FR-004 asks for. So a span needs at least one plain-text node before it becomes one.
  */
 function hasTranslatableText(node: Node): boolean {
-  if (node.type === 'text' || node.type === 'inlineCode') {
+  if (node.type === 'text') {
     return String((node as { value?: unknown }).value ?? '').trim() !== ''
   }
-  if (node.type === 'image' || node.type === 'imageReference') return false
+  if (node.type === 'inlineCode' || node.type === 'image' || node.type === 'imageReference') {
+    return false
+  }
   return isParent(node) && node.children.some(hasTranslatableText)
 }
 
@@ -178,14 +186,16 @@ function hasTranslatableText(node: Node): boolean {
  * True when a line of a raw HTML block looks like prose a translator should have seen.
  *
  * Deliberately crude: it exists to make a coverage gap visible, not to decide anything.
- * A line that starts with a tag is markup; a line with three or more characters left
- * after tags and entities are removed is text.
+ * What is left after tags and entities are stripped is text; three or more characters of
+ * it means the block holds words.
+ *
+ * The line is *not* dismissed for starting with `<`. `<p>Trapped prose</p>` starts with a
+ * tag and is entirely prose, and a coverage metric that under-reports is worse than no
+ * metric at all — it reads as a clean bill of health on 9% of the blocks it missed.
  */
 function looksLikeProse(line: string): boolean {
-  const trimmed = line.trim()
-  if (trimmed === '' || trimmed.startsWith('<')) return false
   return (
-    trimmed
+    line
       .replace(/<[^>]*>/g, '')
       .replace(/&[#\w]+;/g, '')
       .trim().length >= 3

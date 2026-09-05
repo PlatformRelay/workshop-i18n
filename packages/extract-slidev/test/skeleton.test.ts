@@ -160,6 +160,13 @@ describe('composeSkeleton refuses a replacement that would break out of its hole
     }
   })
 
+  it('rejects a body translation that opens an HTML comment', () => {
+    // Bytes would survive, but the renderer would swallow the skeleton after the hole.
+    expect(() => composeSkeleton(skeleton, { 'slides:s1:body/p-1': 'eins <!-- zwei' })).toThrow(
+      CompositionError,
+    )
+  })
+
   it('rejects a speaker-note translation that closes the HTML comment early', () => {
     const note = '<!--\nSpeaker: hello\n-->\n'
     const noteSkeleton = createSkeleton(note, [

@@ -30,10 +30,11 @@
  *
  * A translation is data from a TMS, so it is hostile input. A markdown hole whose
  * replacement contains a line `---` would split the slide in two; one containing a
- * fence opener would swallow the rest of the file; one inside a speaker note containing
- * `-->` would close the comment early. Those are silent mangles of the protected
- * skeleton, so composition fails closed on them (constitution III/V) rather than
- * emitting them and hoping a later gate notices.
+ * fence opener would swallow the rest of the file; one containing `<!--` would comment
+ * out the skeleton that follows it, and inside a speaker note a `-->` would close the
+ * comment early. The bytes would survive all four — the damage is at render time — so
+ * composition fails closed on them (constitution III/V) rather than emitting them and
+ * hoping a later gate notices.
  */
 
 import {
@@ -240,10 +241,12 @@ function rejectReplacement(hole: Hole, replacement: string): CompositionIssue | 
     return reject('control-byte', 'translation contains a control character')
   }
   if (hole.encoding.kind === 'yaml-scalar') return undefined
-  if (hole.encoding.context === 'note' && /-->|<!--/.test(replacement)) {
+  if (/<!--|-->/.test(replacement)) {
     return reject(
       'comment-terminator',
-      'translation contains "<!--" or "-->", which would break out of the speaker-note comment',
+      hole.encoding.context === 'note'
+        ? 'translation contains "<!--" or "-->", which would break out of the speaker-note comment'
+        : 'translation contains "<!--" or "-->", which would open or close an HTML comment and hide the skeleton after it',
     )
   }
   for (const line of splitLines(replacement)) {

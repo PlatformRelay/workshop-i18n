@@ -138,8 +138,12 @@ export function proposeSlideId(
   const section = slugify(options.sectionId)
   const stem = slugify(heading ?? '') || FALLBACK_STEM
   const joined = section === '' ? stem : `${section}-${stem}`
-  const base =
+  const trimmed =
     joined.slice(0, MAX_CONTAINER_ID_LENGTH - SUFFIX_HEADROOM).replace(/-+$/, '') || FALLBACK_STEM
+  // A heading of "CON" or "Aux" slugifies to a Windows device name, which core rejects
+  // because a container id becomes a file. The escape is a word, not a number: `con-2`
+  // reads as "the second slide called con", which is a different and misleading claim.
+  const base = isSafeContainerId(trimmed) ? trimmed : `${trimmed}-${FALLBACK_STEM}`
 
   let candidate = base
   for (let attempt = 2; attempt < 10_000; attempt += 1) {
