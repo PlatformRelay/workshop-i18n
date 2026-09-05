@@ -218,6 +218,19 @@ export function assertSafeUnitId(id: UnitId): void {
 
 /** Render a unit id as the `<surface>:<containerId>:<unitKey>` string used as PO `msgctxt`. */
 export function formatUnitId(id: UnitId): string {
+  // Template interpolation would call a content-supplied `toString`, and this runs on
+  // ids read back from catalogs before anything has validated them (`tallyUnitStates`
+  // formats first, checks later). Three typeof checks keep that from being a way in.
+  if (
+    typeof id.surface !== 'string' ||
+    typeof id.containerId !== 'string' ||
+    typeof id.unitKey !== 'string'
+  ) {
+    throw new UnitIdError(
+      'invalid unit id: surface, containerId and unitKey must all be strings',
+      validateUnitId(id),
+    )
+  }
   return `${id.surface}:${id.containerId}:${id.unitKey}`
 }
 
@@ -232,7 +245,9 @@ export function parseUnitId(raw: string): UnitId {
     throw new UnitIdError(`invalid unit id: ${JSON.stringify(raw)}`)
   }
   const [surface, containerId, ...rest] = parts
-  if (surface !== 'slides' && surface !== 'labs' && surface !== 'quiz') {
+  // `isSurface`, not a repeated literal list: a surface added to `SURFACES` must not
+  // leave `parseUnitId` rejecting ids that `isSurface` accepts.
+  if (!isSurface(surface)) {
     throw new UnitIdError(`invalid surface in unit id: ${JSON.stringify(raw)}`)
   }
   if (containerId === undefined || containerId === '' || rest.join(':') === '') {

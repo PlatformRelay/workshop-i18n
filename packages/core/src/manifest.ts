@@ -512,7 +512,13 @@ function readApiVersion(
   return { version: value as string, major }
 }
 
-const ROOT_KEYS = ['apiVersion', 'locales', 'surfaces', 'protectedTerms', 'lengthBudgets']
+const ROOT_KEYS = Object.freeze([
+  'apiVersion',
+  'locales',
+  'surfaces',
+  'protectedTerms',
+  'lengthBudgets',
+])
 
 /**
  * Parse and validate `.localization/workshop.yaml` from its text.

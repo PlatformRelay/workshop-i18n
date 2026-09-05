@@ -39,6 +39,15 @@ export interface UnitStatus {
    * letting them set this flag would let content decide whether human review is
    * required. Populate it from the manifest, or leave it unset; never from the `.po`
    * file you are reading states out of.
+   *
+   * ## Status: no producer yet
+   *
+   * Nothing in this tool sets this field today — there is no manifest key for it, and
+   * adding one is a protected-contract change that needs an ADR. Until that lands the
+   * only correct value is unset, which means required, which fails closed. A lane that
+   * needs optional content must raise the ADR rather than sourcing the flag from the
+   * nearest available place, because the nearest available place is the catalog, and
+   * that is the one source this contract forbids.
    */
   readonly required?: boolean
 }
@@ -480,11 +489,15 @@ export interface StatePolicyViolation {
  * A discriminated union with one member today. The discriminator exists now because
  * spec 002 FR-006 wants `status` to report override staleness and spec 003 FR-005 makes
  * `--strict` fail on it, and an override is stale independently of any `UnitState` — so
- * a violation that is not keyed by state has to be expressible. Adding
- * `{ kind: 'override-stale', ... }` later must not be a breaking change for the five
- * lanes coding against this type, and it will not be if consumers switch on `kind` and
- * treat an unrecognised kind as a violation rather than ignoring it. Narrow before
- * reading `state`.
+ * a violation that is not keyed by state has to be expressible.
+ *
+ * Adding `{ kind: 'override-stale', ... }` will still break consumers that read `state`
+ * without narrowing first — a single-member union does not force a `switch`, so `tsc`
+ * accepts `violation.state` today and will reject it then. That break is the intended
+ * behaviour: it is a compile error at the exact lines that need a decision, rather than
+ * a stale override silently missing from a report. Narrow on `kind` before reading
+ * `state`, and treat an unrecognised kind as a violation rather than ignoring it, and
+ * the addition costs you nothing.
  */
 export type PolicyViolation = StatePolicyViolation
 

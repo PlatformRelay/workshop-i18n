@@ -6,6 +6,8 @@ import {
   isSafeContainerId,
   isSafeUnitKey,
   parseSafeUnitId,
+  parseUnitId,
+  SURFACES,
   type UnitId,
   UnitIdError,
   validateUnitId,
@@ -183,6 +185,30 @@ describe('assertSafeUnitId', () => {
   })
 })
 
+describe('formatUnitId', () => {
+  it('refuses to interpolate a non-string segment', () => {
+    const hostile = {
+      toString() {
+        throw new Error('boom')
+      },
+    }
+    expect(() => formatUnitId({ ...safe, containerId: hostile as unknown as string })).toThrow(
+      UnitIdError,
+    )
+    expect(() => formatUnitId({ ...safe, unitKey: 7 as unknown as string })).toThrow(UnitIdError)
+    expect(() =>
+      formatUnitId({
+        surface: hostile as unknown as UnitId['surface'],
+        ...{ containerId: 'a', unitKey: 'b' },
+      }),
+    ).toThrow(UnitIdError)
+  })
+
+  it('still formats a well-formed id', () => {
+    expect(formatUnitId(safe)).toBe('slides:s00-welcome-why:body/1')
+  })
+})
+
 describe('parseSafeUnitId', () => {
   it('parses and validates in one step', () => {
     expect(parseSafeUnitId(formatUnitId(safe))).toEqual(safe)
@@ -194,6 +220,12 @@ describe('parseSafeUnitId', () => {
 
   it('still rejects structurally malformed ids', () => {
     expect(() => parseSafeUnitId('slides:only-two')).toThrow(/invalid unit id/)
+  })
+
+  it('accepts exactly the surfaces isSurface accepts', () => {
+    for (const surface of SURFACES) {
+      expect(parseUnitId(`${surface}:c:k`).surface).toBe(surface)
+    }
   })
 })
 
