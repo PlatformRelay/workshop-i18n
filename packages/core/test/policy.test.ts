@@ -8,6 +8,7 @@ import {
   isSurface,
   OPTIONAL_EXEMPT_STATES,
   POLICIES,
+  type Policy,
   type PolicyName,
   parseUnitId,
   QUIZ_SCHEMA_VARIANTS,
@@ -243,6 +244,30 @@ describe('policy resolution', () => {
 
   it('accepts a policy object directly', () => {
     expect(resolvePolicy(POLICIES.release)).toBe(POLICIES.release)
+  })
+
+  it('validates a policy object it did not build — a --policy-file cannot smuggle a typo', () => {
+    const fromJson = { name: 'raw', maxRequired: { fuzzzy: 0 }, gateOptionalUnits: false }
+    expect(() => resolvePolicy(fromJson as unknown as Policy)).toThrow(/fuzzzy/)
+    expect(() => evaluatePolicy([], fromJson as unknown as Policy)).toThrow(/fuzzzy/)
+  })
+
+  it('normalises and freezes a hand-built policy object', () => {
+    const fromJson = { name: 'raw', maxRequired: { fuzzy: 1 }, gateOptionalUnits: false }
+    const resolved = resolvePolicy(fromJson as Policy)
+    expect(Object.isFrozen(resolved)).toBe(true)
+    expect(Object.isFrozen(resolved.maxRequired)).toBe(true)
+    const twoFuzzy = [
+      unit('slides:a:body/1', 'de', 's', 'fuzzy'),
+      unit('slides:a:body/2', 'de', 's', 'fuzzy'),
+    ]
+    expect(evaluatePolicy(twoFuzzy, fromJson as Policy).satisfied).toBe(false)
+
+    // The snapshot is taken at resolve time: a later edit to the caller's object cannot
+    // reach a policy already resolved from it.
+    fromJson.maxRequired.fuzzy = 99
+    expect(resolved.maxRequired.fuzzy).toBe(1)
+    expect(evaluatePolicy(twoFuzzy, resolved).satisfied).toBe(false)
   })
 
   it('cannot be weakened at runtime — the built-in policies are deep-frozen', () => {

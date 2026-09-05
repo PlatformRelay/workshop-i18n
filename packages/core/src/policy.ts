@@ -226,6 +226,9 @@ export interface Policy {
  * The thresholds are copied and the result is frozen, so a policy cannot be weakened
  * later through the object the caller still holds.
  */
+/** Policies this module built, and therefore already validated and froze. */
+const VALIDATED_POLICIES = new WeakSet<Policy>()
+
 export function definePolicy(
   name: string,
   maxRequired: StateThresholds,
@@ -248,11 +251,13 @@ export function definePolicy(
     }
     thresholds[key] = limit
   }
-  return Object.freeze({
+  const policy = Object.freeze({
     name,
     maxRequired: Object.freeze(thresholds) as StateThresholds,
     gateOptionalUnits: options?.gateOptionalUnits === true,
   })
+  VALIDATED_POLICIES.add(policy)
+  return policy
 }
 
 /** The built-in policy names. */
@@ -287,16 +292,34 @@ export function isPolicyName(value: unknown): value is PolicyName {
   return typeof value === 'string' && Object.hasOwn(POLICIES, value)
 }
 
-/** Resolve a policy name to a {@link Policy}; a policy object passes through unchanged. */
+/**
+ * Resolve a policy name to a {@link Policy}. A policy this module built passes through
+ * unchanged; any other object is re-run through {@link definePolicy}, which validates
+ * its keys and thresholds and returns a frozen copy.
+ *
+ * The re-run is the point. TypeScript's excess-property check does not apply to a value
+ * read from JSON, which is exactly what a `--policy-file` flag will hand this function,
+ * so `{ name: 'ours', maxRequired: { fuzzzy: 0 } }` type-checks, gates nothing and
+ * reports success — the silent gate-disable `definePolicy` already refuses when it is
+ * the one being called.
+ */
 export function resolvePolicy(policy: Policy | PolicyName): Policy {
-  if (typeof policy !== 'string') return policy
-  if (!isPolicyName(policy)) {
-    throw new Error(
-      `unknown policy ${JSON.stringify(policy)}: known policies are ` +
-        `${Object.keys(POLICIES).sort().join(', ')}`,
-    )
+  if (typeof policy === 'string') {
+    if (!isPolicyName(policy)) {
+      throw new Error(
+        `unknown policy ${JSON.stringify(policy)}: known policies are ` +
+          `${Object.keys(POLICIES).sort().join(', ')}`,
+      )
+    }
+    return POLICIES[policy]
   }
-  return POLICIES[policy]
+  if (VALIDATED_POLICIES.has(policy)) return policy
+  if (typeof policy?.name !== 'string') {
+    throw new Error(`invalid policy: name must be a string, got ${typeof policy?.name}`)
+  }
+  return definePolicy(policy.name, policy.maxRequired ?? {}, {
+    gateOptionalUnits: policy.gateOptionalUnits === true,
+  })
 }
 
 /** A unit that broke a policy, with the section a reviewer should look in. */
@@ -354,7 +377,15 @@ function isGated(unit: UnitStatus, policy: Policy): boolean {
  * Evaluate a policy over unit states. Pure: it reports what is wrong and leaves what to
  * do about it to the caller.
  *
+ * **Building the input:** `UnitStatus.required` decides whether constitution V's gate
+ * applies to a unit, so it must come from an operator decision — the manifest or an
+ * explicit CLI flag, both PR-reviewed — and never from catalog content: not a PO flag,
+ * not a translator comment, not a TMS or seeding field. Content that can set this flag
+ * is content deciding whether a human has to review it. Leaving it unset is safe: it
+ * defaults to required. See {@link UnitStatus.required}.
+ *
  * @throws {DuplicateUnitError} when a unit id repeats within one locale.
+ * @throws {UnknownUnitStateError} when a unit carries a state this release does not know.
  */
 export function evaluatePolicy(
   units: Iterable<UnitStatus>,
