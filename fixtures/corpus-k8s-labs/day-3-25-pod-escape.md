@@ -1,0 +1,495 @@
+# Lab 25 — Security & pod escape (S25)
+
+<!-- lab-contract:v1 -->
+
+> ## ⛔ STRICTLY DEFENSIVE · KIND-ONLY
+>
+> This lab performs a **controlled container escape** to teach you how to **block** it. It runs
+> **only** in a throwaway **kind** cluster **you own and will delete**.
+>
+> - **Do NOT run any step against a shared, managed, or production cluster.** The escape Pod
+>   reads the node's filesystem — on a real cluster that is a real compromise.
+> - Every offensive step is gated by **`context-check.sh`**, which verifies the exact local kind
+>   cluster, its provider metadata, and a workshop ownership marker. Run it before anything offensive.
+> - The "attack" is a single **benign read** (`cat /host/etc/os-release`) to *prove* host access.
+>   We **never** dump Secrets or credentials, and we **never** write to the host. The danger of
+>   doing so is explained in words, not performed.
+
+| | |
+| --- | --- |
+| **Section** | S25 — Security & pod escape |
+| **Environment** | **kind-only · strictly defensive** (no shared-cluster path) |
+| **Estimated time** | 30 min |
+
+## Objective
+
+See — in the safest possible way — how two Pod fields (`privileged` + `hostPath: /`) let a
+container **escape onto its node**, then **block that exact Pod** with the `restricted` Pod
+Security Standard from S17. You will:
+
+1. Prove you're on a kind cluster with a **guard script** before touching anything offensive.
+2. In a **permissive** namespace, run the escape Pod and read **one benign node file** to prove
+   you're reading the **node's** filesystem — not the container image's.
+3. **Delete** the Pod, label the namespace **`enforce=restricted`**, and **re-apply the same Pod**
+   → watch **Pod Security Admission reject it at CREATE**, for the privileged/hostPath violations.
+4. Apply the **hardened** manifest and confirm the same gate **admits** it.
+
+The lab turns on one contrast: the settings that make an escape possible are **exactly** the ones
+`restricted` forbids — and admission blocks them **before the Pod ever exists**.
+
+## Prerequisites
+
+- **Docker + `kind` + `kubectl`**, and rights to create a local cluster. You will create a
+  disposable cluster named `escape-lab` and delete it at the end.
+- **No shared-cluster path exists for this lab.** The offensive step reads the node filesystem;
+  that is only acceptable on a cluster you own. If you can't run kind, **read along** — every step
+  has a spoiler with the exact output.
+- Internet pull access for `alpine:3.20` (a tiny image with a shell — used for *both* the escape
+  Pod and the hardened Pod, so the only thing that changes is the security settings).
+- Pod Security Admission is **built into the API server** (stable since v1.25) — nothing to install.
+
+## Files used
+
+- `context-check.sh` — refuses to proceed unless the current target is the exact, locally owned
+  disposable kind cluster. This is
+  the workshop's shared safety guard, kept byte-identical to the tested canonical
+  [`infra/context-guard.sh`](../../infra/context-guard.sh).
+- `pod-escape.yaml` — the `privileged` + `hostPath: /` Pod. **Dangerous by design.**
+- `pod-hardened.yaml` — the same workload, hardened to satisfy `restricted` → admitted.
+
+Everything the lab creates is labelled `app: s25` so cleanup is a single selector — and the whole
+cluster is disposable anyway.
+
+---
+
+## Guided task
+
+Work through the steps without opening the companion unless you are blocked. The spoiler
+contains exact commands, expected state, explanations, and recovery guidance.
+
+[Spoiler: guided solutions and expected output](./25-pod-escape.solution.md#guided-solutions)
+
+### Step 0 — a throwaway cluster, and the guard that gates everything
+
+```bash
+export WORKSHOP_CLUSTER_NAME=escape-lab
+kind create cluster --name "$WORKSHOP_CLUSTER_NAME"
+```
+
+Now write the guard. Its `--claim` mode can establish the ownership marker on an existing disposable
+cluster, but only **after** the exact context, loopback API endpoint, local kind provider, and node
+metadata have all passed. The endpoint must equal the server in kind's own generated kubeconfig.
+Every later offensive step runs the stricter read-only check in the `escape` namespace.
+
+```bash
+cat > context-check.sh <<'EOF'
+#!/usr/bin/env sh
+# Fail closed unless this is the exact, locally owned disposable kind cluster.
+
+set -eu
+
+marker_name="platformrelay-workshop-ownership"
+claim_marker=false
+
+refuse() {
+  echo "REFUSING: $*" >&2
+  echo "This lab performs a container escape and must run ONLY in a disposable kind cluster you own." >&2
+  exit 1
+}
+
+case "${1:-}" in
+  "") ;;
+  --claim) claim_marker=true ;;
+  *) refuse "unknown option '$1'" ;;
+esac
+[ "$#" -le 1 ] || refuse "too many arguments"
+
+expected_cluster="${WORKSHOP_CLUSTER_NAME:-workshop}"
+printf '%s\n' "$expected_cluster" | LC_ALL=C grep -Eq '^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$' || \
+  refuse "WORKSHOP_CLUSTER_NAME is not a safe kind cluster name"
+expected_context="kind-${expected_cluster}"
+expected_node="${expected_cluster}-control-plane"
+expected_namespace="${WORKSHOP_LAB_NAMESPACE:-escape}"
+printf '%s\n' "$expected_namespace" | LC_ALL=C grep -Eq '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$' || \
+  refuse "WORKSHOP_LAB_NAMESPACE is not a safe Kubernetes namespace name"
+
+if ! context="$(kubectl config current-context 2>/dev/null)" || [ -z "$context" ]; then
+  refuse "kubectl has no readable current context"
+fi
+if ! cluster="$(kubectl config view --minify -o 'jsonpath={.contexts[0].context.cluster}' 2>/dev/null)" || [ -z "$cluster" ]; then
+  refuse "kubectl cannot resolve the current kubeconfig cluster"
+fi
+if ! server="$(kubectl config view --minify -o 'jsonpath={.clusters[0].cluster.server}' 2>/dev/null)" || [ -z "$server" ]; then
+  refuse "kubectl cannot resolve the current cluster server"
+fi
+if ! namespace="$(kubectl config view --minify -o 'jsonpath={.contexts[0].context.namespace}' 2>/dev/null)"; then
+  refuse "kubectl cannot resolve the current namespace"
+fi
+namespace="${namespace:-default}"
+
+[ "$context" = "$expected_context" ] || \
+  refuse "context must be exactly '$expected_context'"
+[ "$cluster" = "$expected_context" ] || \
+  refuse "kubeconfig cluster must be exactly '$expected_context'"
+printf '%s\n' "$server" | LC_ALL=C grep -Eq '^https://(127\.0\.0\.1|localhost|\[::1\]):[0-9]+$' || \
+  refuse "API server is not a loopback kind endpoint"
+printf '%s\n' "$namespace" | LC_ALL=C grep -Eq '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$' || \
+  refuse "current namespace is not a safe Kubernetes namespace name"
+if [ "$claim_marker" = true ]; then
+  [ "$namespace" = default ] || \
+    refuse "marker claim must start in the 'default' namespace"
+else
+  [ "$namespace" = "$expected_namespace" ] || \
+    refuse "current namespace must be exactly '$expected_namespace'"
+fi
+
+echo "Resolved Kubernetes target:"
+echo "  context: $context"
+echo "  cluster: $cluster"
+echo "  server: $server"
+echo "  namespace: $namespace"
+
+if ! local_clusters="$(kind get clusters 2>/dev/null)"; then
+  refuse "kind cannot enumerate local clusters"
+fi
+printf '%s\n' "$local_clusters" | grep -Fxq "$expected_cluster" || \
+  refuse "'$expected_cluster' is not a cluster owned by the local kind provider"
+
+if ! kind_kubeconfig="$(kind get kubeconfig --name "$expected_cluster" 2>/dev/null)"; then
+  refuse "kind cannot read the canonical kubeconfig for '$expected_cluster'"
+fi
+kind_server="$(printf '%s\n' "$kind_kubeconfig" | awk '$1 == "server:" { print $2; exit }')"
+[ -n "$kind_server" ] || refuse "kind kubeconfig has no API server"
+[ "$server" = "$kind_server" ] || \
+  refuse "current API server does not match kind's '$expected_cluster' kubeconfig"
+
+if ! kind_nodes="$(kind get nodes --name "$expected_cluster" 2>/dev/null)"; then
+  refuse "kind cannot resolve nodes for '$expected_cluster'"
+fi
+printf '%s\n' "$kind_nodes" | grep -Fxq "$expected_node" || \
+  refuse "kind does not report the expected control-plane node '$expected_node'"
+
+if ! node_identity="$(kubectl get node "$expected_node" -o 'jsonpath={.metadata.labels.kubernetes\.io/hostname}|{.spec.providerID}' 2>/dev/null)"; then
+  refuse "kubectl cannot read the expected kind node identity"
+fi
+case "$node_identity" in
+  "$expected_node|kind://"*"/$expected_cluster/$expected_node") ;;
+  *) refuse "node metadata does not identify the expected kind provider/cluster" ;;
+esac
+
+if ownership_cluster="$(kubectl --namespace kube-system get configmap "$marker_name" -o 'jsonpath={.data.cluster}' 2>&1)"; then
+  [ "$ownership_cluster" = "$expected_cluster" ] || \
+    refuse "ownership marker belongs to '$ownership_cluster', not '$expected_cluster'"
+else
+  expected_not_found="Error from server (NotFound): configmaps \"$marker_name\" not found"
+  [ "$ownership_cluster" = "$expected_not_found" ] || \
+    refuse "ownership marker lookup failed without the exact NotFound response"
+  [ "$claim_marker" = true ] || \
+    refuse "workshop ownership marker is missing; recreate the cluster or run this guard once with --claim"
+  kubectl create configmap "$marker_name" \
+    --namespace kube-system \
+    --from-literal="cluster=$expected_cluster" >/dev/null || \
+    refuse "could not create the workshop ownership marker"
+  echo "Ownership marker created for disposable cluster '$expected_cluster'."
+fi
+
+echo "OK: disposable workshop kind cluster identity verified — safe to proceed."
+EOF
+chmod +x context-check.sh
+
+./context-check.sh --claim
+
+export NS=escape
+kubectl create namespace "$NS"
+kubectl config set-context --current --namespace="$NS"
+kubectl get nodes
+
+./context-check.sh
+```
+
+**Task:** confirm the guard passes on your kind cluster — and understand it would **fail closed**
+anywhere else.
+
+> **⚠️ Why this guard matters.** The next step deliberately reads the node's filesystem. That's a
+> teaching move in a cluster you'll throw away; it's a **security incident** on a shared cluster.
+> The context check is the single safety rail that keeps the offensive step where it belongs.
+> Never remove it, and never widen it to match a real cluster's context name.
+
+---
+
+### Step 1 — the permissive namespace (the door is open)
+
+`restricted` is opt-in. To *show* the escape first, we explicitly mark this namespace as the
+loosest standard, `privileged` — so the API server won't stop the dangerous Pod.
+
+```bash
+./context-check.sh || { echo "guard failed — stopping"; exit 1; }
+
+kubectl label --overwrite namespace "$NS" \
+  pod-security.kubernetes.io/enforce=privileged
+kubectl get namespace "$NS" -o jsonpath='{.metadata.labels}' | tr ',' '\n' | grep pod-security
+```
+
+**Task:** confirm the namespace enforces the `privileged` standard (i.e. no restrictions).
+
+> **⚠️ Why this is dangerous in the real world.** A namespace with **no** enforced Pod Security
+> Standard is the default on many clusters. It means *any* Pod anyone can create — including one
+> with `privileged` + `hostPath` — is accepted. The very first hardening step on any cluster is to
+> stop leaving namespaces unlabelled.
+
+---
+
+### Step 2 — the escape: read the node's filesystem from a Pod
+
+Run the guard, then apply the escape Pod.
+
+```bash
+./context-check.sh || { echo "guard failed — stopping"; exit 1; }
+
+cat > pod-escape.yaml <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: escape
+  labels: { app: s25 }
+spec:
+  containers:
+    - name: shell
+      image: alpine:3.20
+      command: ["sleep", "3600"]
+      securityContext:
+        privileged: true                 # near-total power on the node
+      volumeMounts:
+        - name: host
+          mountPath: /host               # the node's / is now visible at /host
+  volumes:
+    - name: host
+      hostPath:
+        path: /                          # mount the ENTIRE host root
+EOF
+
+kubectl apply -f pod-escape.yaml
+kubectl wait --for=condition=Ready pod/escape --timeout=60s
+```
+
+**Task:** prove you're reading the **node's** filesystem — not the alpine image's — with **one
+benign read**. Compare the container's own `/etc/os-release` with the node's at `/host/etc/os-release`.
+
+```bash
+./context-check.sh || { echo "guard failed — stopping"; exit 1; }
+
+echo "== container image OS =="
+kubectl exec escape -- cat /etc/os-release | grep -E '^(NAME|PRETTY_NAME)='
+
+echo "== NODE OS (via the hostPath mount) =="
+kubectl exec escape -- cat /host/etc/os-release | grep -E '^(NAME|PRETTY_NAME)='
+
+echo "== node's kubernetes dir is right there (listing only — we read nothing sensitive) =="
+kubectl exec escape -- ls /host/etc/kubernetes 2>/dev/null || \
+  kubectl exec escape -- ls /host/etc | head
+```
+
+> **⚠️ Why this is the whole ballgame.** With `/host` = the node's `/`, this same *read-write*
+> access reaches, on a real cluster: the **kubelet's client certificate and the cluster CA**
+> (`/host/etc/kubernetes/pki`), **every Pod's projected ServiceAccount tokens and Secrets** under
+> `/host/var/lib/kubelet/pods/…`, and the **static-pod directory** `/host/etc/kubernetes/manifests`
+> — write a manifest there and the kubelet runs it **as root on the node**. `privileged` piles on
+> device access and a relaxed seccomp profile. We demonstrate the *access* with one harmless read
+> and stop; **do not** read tokens or write anything. The point is made — now we block it.
+
+**Question:** we only ran `sleep` and one `cat`. Which **single setting** most enabled this escape?
+
+> **⚠️ Why this is dangerous.** A single innocuous-looking `hostPath` line — no `privileged`
+> needed — can silently hand a Pod the node's whole disk. It's why `hostPath` is treated as a
+> `baseline`/`restricted` violation on its own: the volume type *is* the risk, regardless of what
+> the container does with it.
+
+---
+
+### Step 3 — the fix: delete first, then let `restricted` reject the same Pod
+
+**Order matters.** Pod Security Admission gates Pods at **CREATE** time only. Labelling the
+namespace `restricted` does **not** evict the already-running escape Pod — so we **delete it
+first**, then tighten the namespace, then try to re-create the *identical* Pod and watch admission
+refuse it.
+
+```bash
+./context-check.sh || { echo "guard failed — stopping"; exit 1; }
+
+# 1) remove the running escape Pod (admission won't touch what already exists)
+kubectl delete -f pod-escape.yaml
+
+# 2) tighten the SAME namespace to the restricted standard
+kubectl label --overwrite namespace "$NS" \
+  pod-security.kubernetes.io/enforce=restricted \
+  pod-security.kubernetes.io/warn=restricted
+
+# 3) re-apply the EXACT SAME escape manifest
+kubectl apply -f pod-escape.yaml
+```
+
+**Task:** the re-apply is **rejected**. Read the error — is the Pod created, and which dangerous
+settings are named?
+
+```bash
+kubectl get pod escape        # is it there?
+```
+
+> **⚠️ Why delete-then-relabel (and not relabel-first).** PSA is an **admission** controller — it
+> only runs when an object is **created or updated**, never on objects already stored. If you label
+> the namespace `restricted` while the escape Pod is running, the Pod **keeps running** — the
+> policy doesn't retroactively kill it. That's a real operational gotcha: enforcing `restricted`
+> protects you from *new* violating Pods but doesn't remediate existing ones. So we delete first,
+> then prove the gate blocks the re-create.
+
+**Question:** the escape Pod named **`privileged`** and **`hostPath`**, yet the error *also* lists
+`runAsNonRoot`, `allowPrivilegeEscalation`, `capabilities`, and `seccompProfile`. Why all six?
+
+> **⚠️ Why this matters for defence.** The escape settings (`privileged`, `hostPath`) and the
+> least-privilege settings are enforced by the **same** namespace label. You don't choose between
+> "block escapes" and "least privilege" — `restricted` gives you both, and a Pod that skips the
+> least-privilege fields is treated as just as suspect as one that mounts the host.
+
+---
+
+### Step 4 — the hardened Pod the gate admits
+
+Same workload (alpine running `sleep`), stripped of the escape levers and hardened to satisfy
+`restricted`. `alpine` runs happily at **any** UID, so `runAsUser: 1000` won't CrashLoop the way a
+root-only image would (the S17 landmine).
+
+```bash
+./context-check.sh || { echo "guard failed — stopping"; exit 1; }
+
+cat > pod-hardened.yaml <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hardened
+  labels: { app: s25 }
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000                      # explicit non-root UID (alpine runs at any UID)
+    seccompProfile: { type: RuntimeDefault }
+  containers:
+    - name: shell
+      image: alpine:3.20
+      command: ["sleep", "3600"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities: { drop: ["ALL"] }
+      # no privileged, no hostPath — the escape levers are gone
+EOF
+
+kubectl apply -f pod-hardened.yaml
+kubectl get pod hardened -w        # Ctrl-C once it's Running
+```
+
+**Task:** confirm the hardened Pod is **admitted and running**, and that it is genuinely non-root
+with no view of the host.
+
+```bash
+kubectl exec hardened -- id
+kubectl exec hardened -- ls /host 2>&1 || true
+```
+
+> **⚠️ Why `runAsUser: 1000` here.** `runAsNonRoot: true` is a *promise the image must keep* (the
+> S17 landmine): admission only checks the field, but the **kubelet** refuses to start a container
+> whose image resolves to UID 0. A root-only image would admit and then **CrashLoop** with
+> `container has runAsNonRoot and image will run as root`. `alpine` runs at **any** UID, so pinning
+> `runAsUser: 1000` guarantees a non-root user the image actually supports.
+
+**Question:** across the whole lab — which **single defence** was highest-leverage?
+
+> **⚠️ Why "highest-leverage" is the point.** Runtime detection catches an escape *after* it
+> happens; image scanning catches a *known* CVE. Admission (`restricted`) is the only layer that
+> stops the dangerous Pod from **ever existing** — it's proactive, needs no agent, and covers Pods
+> you haven't even written yet. That's why it's the first thing to turn on, not the last.
+
+## Observe
+
+- A container is a **process on the node's kernel**: `hostPath: /` handed the Pod the **node's**
+  filesystem (proved by the Debian-vs-Alpine `os-release` diff), and `privileged` handed it
+  near-total power. The escape needed **no exploit** — just two supported Pod fields.
+- **Admission gates CREATE, not existing Pods:** labelling `restricted` didn't evict the running
+  escape Pod — you had to **delete first**, which is exactly why the fix order is delete → relabel
+  → re-apply.
+- The **exact same manifest** that ran under `enforce: privileged` is **rejected** under
+  `enforce: restricted` — the error names **`privileged`** and **`hostPath`** plus the four S17
+  least-privilege gates (six rules), and the Pod is **never created**.
+- The **hardened** Pod — same workload, escape levers removed, `restricted`-compliant — is
+  **admitted** and runs as **uid 1000** with no `/host`.
+- **Highest-leverage defence:** `enforce: restricted` on the namespace, at admission. Everything
+  else is defence in depth around it.
+
+## Challenge
+
+On the disposable kind cluster only, prove that labelling a namespace restricted does
+not evict an already-running privileged hostPath Pod. Capture the order delete → enforce →
+re-apply, and show the same escape manifest is rejected afterward.
+
+**Difficulty:** Advanced
+
+**Success criteria:** Show the escape Pod status remains Running after enforce=restricted is applied, delete
+that Pod, re-apply the escape manifest, and prove admission rejects it (error output names
+privileged/hostPath) while a hardened Pod reaches Running.
+
+**Hints:** Stay inside the context-check.sh guard; use kubectl get pod -w around the label
+change; compare the restricted violation list to privileged and hostPath.
+
+[Spoiler: challenge solution](./25-pod-escape.solution.md#challenge-solution)
+
+## Verify
+
+Confirm kind-only escape lab evidence before cleanup.
+
+```bash
+./context-check.sh
+kubectl get pod -n "$NS" -l app=s25
+kubectl get namespace "$NS" --show-labels | tr ',' '\n' | grep pod-security || true
+```
+
+Expected: hardened Pod evidence and/or admission rejection context remain until you burn the
+disposable cluster.
+
+## Cleanup / reset
+
+```bash
+# scoped cleanup — everything this lab made is labelled app=s25
+./context-check.sh || { echo "guard failed — stopping"; exit 1; }
+kubectl delete pod -l app=s25 -n "$NS" --ignore-not-found
+
+./context-check.sh || { echo "guard failed — stopping"; exit 1; }
+# panic reset: remove the lab Namespace via your cluster UI / burn kind — do not use an unqualified ns delete here
+
+# PANIC RESET (recommended) — the cluster was disposable; throw the whole thing away:
+./context-check.sh || { echo "guard failed — stopping"; exit 1; }
+kind delete cluster --name "$WORKSHOP_CLUSTER_NAME"
+
+# Remove the guard only after every destructive command it protects is finished.
+rm -f context-check.sh pod-escape.yaml pod-hardened.yaml
+```
+
+> **Panic option: delete the cluster.** Because the escape Pod had the host root mounted read-write,
+> the cleanest guarantee that nothing was left behind is to **destroy the kind cluster entirely** —
+> `kind delete cluster --name escape-lab`. It was disposable by design. This is the reset to reach
+> for if anything felt off, and it's why this lab is kind-only: you can always burn it down.
+
+## Stretch (optional) — soft-launch with `warn` before you `enforce`
+
+On a real cluster you don't flip `enforce=restricted` on a busy namespace blind — you turn on
+**`warn`** first to discover what *would* break, fix it, then enforce. Prove the difference against
+the escape Pod on a fresh scratch namespace.
+
+```bash
+./context-check.sh || { echo "guard failed — stopping"; exit 1; }
+kubectl create namespace s25-warn
+kubectl label namespace s25-warn pod-security.kubernetes.io/warn=restricted
+kubectl apply -n s25-warn -f pod-escape.yaml
+kubectl get pod escape -n s25-warn
+```
+
+> **⚠️ Why the stretch stays kind-only too.** `warn` **creates** the Pod — so this scratch namespace
+> briefly runs a privileged, host-mounting Pod exactly like Step 2. That's fine in your disposable
+> kind cluster and nowhere else. Delete the namespace when done, or just `kind delete cluster`.
