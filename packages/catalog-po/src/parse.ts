@@ -323,7 +323,16 @@ export function parsePo(text: string, options: ParsePoOptions): PoFile {
     if ((keyword === 'msgctxt' || keyword === 'msgid') && complete) restart(at.line)
 
     if (base === 'msgstr' && !builder.slots.has('msgid')) {
-      throw new PoSyntaxError(at, 'msgstr before msgid')
+      // Name the entry the author is looking at, not the field the parser wanted next.
+      const context = builder.slots.has('msgctxt')
+        ? decode(builder, 'msgctxt', at.fileName)
+        : undefined
+      throw new PoSyntaxError(
+        at,
+        context === undefined
+          ? 'msgstr before msgid'
+          : `entry ${JSON.stringify(context)} has a msgctxt but no msgid`,
+      )
     }
     if (keyword === 'msgid_plural' && !builder.slots.has('msgid')) {
       throw new PoSyntaxError(at, 'msgid_plural before msgid')

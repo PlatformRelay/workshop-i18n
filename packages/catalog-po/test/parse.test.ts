@@ -208,6 +208,13 @@ describe('parsePo — hard errors name the file and line', () => {
 
   it('names the entry when a msgctxt is never followed by a msgid', () => {
     expect(() => parse(`${HEADER}\nmsgctxt "slides:a:x"\n\n`)).toThrow(/has a msgctxt but no msgid/)
+    // ...including when the entry runs straight on to its msgstr, which used to report
+    // "msgstr before msgid" and name the field rather than the entry.
+    expect(() => parse(`${HEADER}\nmsgctxt "slides:a:x"\nmsgstr "a"\n`)).toThrow(
+      /entry "slides:a:x" has a msgctxt but no msgid/,
+    )
+    // A bare msgstr with no msgctxt has no entry to name, and keeps the field message.
+    expect(() => parse(`${HEADER}\nmsgstr "a"\nmsgid "b"\n`)).toThrow(/msgstr before msgid/)
   })
 
   it('rejects a file whose first entry is not the header', () => {
