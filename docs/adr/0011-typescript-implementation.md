@@ -60,11 +60,28 @@ That trade is defensible only with evidence that the hand-rolled split agrees wi
 because a splitter that disagrees keys prose under a slide the audience never sees while
 `init-ids --check` still passes. The evidence is a differential test
 (`slidev-parser-differential.test.ts`) that resolves an already-installed `@slidev/parser` from
-outside this repo and compares slide count, body text, speaker-note text and frontmatter presence
-over the whole fixture corpus, skipping when the parser is absent. It found two real divergences
-that the corpus round-trip could not (tilde fences, and dash runs longer than three); both are
-fixed, and the scan now agrees with `@slidev/parser` 52.19.0 on 29 real consumer pages / 290
-slides with zero disagreements.
+outside this repo, skipping when it is absent.
+
+**What that evidence does and does not cover**, because "zero disagreements" was claimed once
+already on a weaker basis and was wrong twice over:
+
+- It covers slide count, body text, speaker-note text and frontmatter presence over the vendored
+  corpus *and* over a table of minimal files, one per branch and boundary of Slidev's scanner,
+  written by reading `dist/core.mjs` rather than by observing behaviour. Fixtures are real content
+  and therefore accidental about which branches they reach; two divergences (HTML-comment state,
+  the `line[3] !== "-"` guard) lived for two review rounds in shapes no fixture contained.
+- It does **not** cover Slidev's second parser layer. `parseSlide` re-reads each slice with a
+  gray-matter regex and can disagree with Slidev's own scanner — reading `k: v` out of an indented
+  fence as frontmatter the scanner never opened. Only the scanner decides slide boundaries, so
+  that is the contract compared; where the two Slidev layers disagree, only the boundary is.
+- It does **not** run in CI today: the parser is resolved from an environment variable that CI does
+  not set, so the comparison is developer-local unless a workflow provides it.
+- It does **not** cover `@slidev/parser/fs`, which resolves `src:` includes. A deck that composes
+  slides from other files renders content this package never sees unless those files are declared
+  surfaces of their own.
+
+With those bounds stated, the scan agrees with `@slidev/parser` 52.19.0 on 29 real consumer pages
+/ 290 slides and on every scanner shape, with zero disagreements.
 
 The rest of the decision stands unchanged: prose location still rests on the mdast ecosystem,
 and the compose→build verification step still runs Slidev itself.
