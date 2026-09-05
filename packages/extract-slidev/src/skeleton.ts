@@ -182,27 +182,19 @@ function splitLines(text: string): readonly string[] {
 }
 
 /**
- * The translatable text of a markdown span: the raw slice with the container prefix
- * removed from every continuation line, and line breaks normalized to `\n`.
+ * The translatable text of a markdown span: the raw slice with `prefix` removed from
+ * every continuation line, and line breaks normalized to `\n`.
  *
- * Returns `undefined` when a continuation line does not actually carry the prefix, which
- * means the locator's container reasoning was wrong for this span. The caller turns that
- * into a diagnostic and leaves the span as protected skeleton — an untranslated
- * paragraph is a visible gap, whereas a mis-stripped one is a corrupted file.
+ * `prefix` is the *common* container prefix the locator measured, so every continuation
+ * line is known to start with it; a line that somehow does not is left alone rather than
+ * cut mid-character, because losing a byte is worse than an ugly unit.
  */
-export function stripContinuationPrefix(raw: string, prefix: string): string | undefined {
+export function stripContinuationPrefix(raw: string, prefix: string): string {
   const lines = splitLines(raw)
   if (prefix === '') return lines.join('\n')
-  const stripped: string[] = []
-  for (const [index, line] of lines.entries()) {
-    if (index === 0) {
-      stripped.push(line)
-      continue
-    }
-    if (!line.startsWith(prefix)) return undefined
-    stripped.push(line.slice(prefix.length))
-  }
-  return stripped.join('\n')
+  return lines
+    .map((line, index) => (index > 0 && line.startsWith(prefix) ? line.slice(prefix.length) : line))
+    .join('\n')
 }
 
 /**

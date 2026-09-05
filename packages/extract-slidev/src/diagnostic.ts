@@ -33,8 +33,6 @@ export type DiagnosticCode =
   | 'non-scalar-text-field'
   /** A dash run Slidev may read as a slide break but this locator does not. */
   | 'ambiguous-separator'
-  /** A span's continuation lines do not share the container prefix the locator expected. */
-  | 'ragged-continuation-prefix'
   /** Prose inside a raw HTML block or Vue island, which stays protected skeleton. */
   | 'prose-in-html-block'
 

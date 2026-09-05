@@ -194,12 +194,21 @@ describe('locateProse leaves protected skeleton alone', () => {
   })
 })
 
-describe('locateProse refuses to guess', () => {
-  it('reports continuation lines that disagree rather than mangling the prefix', () => {
-    const located = locate('> quoted line\nlazy continuation\n> back inside the quote\n')
-    expect(located.spans).toEqual([])
-    expect(located.diagnostics.map((d) => d.code)).toEqual(['ragged-continuation-prefix'])
-    expect(located.diagnostics[0]?.severity).toBe('error')
+describe('locateProse and CommonMark laziness', () => {
+  it('takes the longest common prefix when a continuation line drops the marker', () => {
+    const span = spanFor('> quoted line\nlazy continuation\n> back inside\n', 'body/bq-1/p-1')
+    expect(span?.continuationPrefix).toBe('')
+    expect(span?.text).toBe('quoted line\nlazy continuation\n> back inside')
+  })
+
+  it('handles the corpus shape: a wrapped bullet that continues at column zero', () => {
+    const fragment = ['- first line wraps', '  onto an indented line', 'then a lazy one', ''].join(
+      '\n',
+    )
+    const span = spanFor(fragment, 'body/l-1/li-1/p-1')
+    expect(span?.continuationPrefix).toBe('')
+    expect(span?.text).toBe('first line wraps\n  onto an indented line\nthen a lazy one')
+    expect(locate(fragment).diagnostics).toEqual([])
   })
 })
 

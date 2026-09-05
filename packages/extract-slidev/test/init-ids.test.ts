@@ -5,17 +5,20 @@ import { checkSlideIds, collectSlideIds, planSlideIds, proposeSlideId } from '..
 
 const SECTION = 's05-pod'
 
-/** Re-derive the original by deleting exactly what the plan inserted. */
+/**
+ * Re-derive the original by deleting exactly what the plan inserted.
+ *
+ * Ascending order needs no offset arithmetic: removing insertion `j` cancels the shift
+ * it introduced, so insertion `i` sits at the offset the plan recorded when its turn
+ * comes.
+ */
 function withoutInsertions(plan: {
   text: string
   insertions: readonly { offset: number; text: string }[]
 }): string {
   let text = plan.text
-  let shift = 0
   for (const insertion of plan.insertions) {
-    const at = insertion.offset + shift
-    text = text.slice(0, at) + text.slice(at + insertion.text.length)
-    shift += insertion.text.length
+    text = text.slice(0, insertion.offset) + text.slice(insertion.offset + insertion.text.length)
   }
   return text
 }

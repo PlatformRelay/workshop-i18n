@@ -112,23 +112,34 @@ class KeyCursor {
 /** The prefix a continuation line inside a container carries before its content. */
 const CONTAINER_PREFIX = /^[ \t>]*/
 
+/** The longest string both `a` and `b` start with. */
+function commonPrefix(a: string, b: string): string {
+  let length = 0
+  while (length < a.length && length < b.length && a[length] === b[length]) length += 1
+  return a.slice(0, length)
+}
+
 /**
- * The prefix every continuation line of `raw` carries, or `undefined` when they do not
- * agree.
+ * The container prefix every continuation line of `raw` carries.
  *
- * Inside a blockquote or a list item the second and later lines of a paragraph begin
- * with `> ` or with the item's indentation — skeleton that must survive a translation
- * wrapping differently from the English. A span whose continuation lines disagree (a
- * lazy line at column 0 followed by a quoted one, say) has no single prefix to re-apply,
- * and guessing one would rewrite the markdown around the unit. That is reported instead.
+ * Inside a blockquote or a list item the second and later lines of a paragraph usually
+ * begin with `> ` or with the item's indentation — skeleton that must survive a
+ * translation wrapping differently from the English. But CommonMark's laziness rule lets
+ * any of those lines drop the marker entirely, and the consumer corpus does exactly that:
+ * a note bullet wraps once with two spaces and then continues at column 0. So the prefix
+ * taken is the *longest common* one, which is the only prefix every line demonstrably has.
+ *
+ * Re-applying the common prefix is always safe: where it is the full marker the output
+ * looks exactly like the English, and where laziness shortened it the composed lines are
+ * lazy continuations too — the same paragraph, in the same container.
  */
-function containerPrefix(raw: string): string | undefined {
+function containerPrefix(raw: string): string {
   const lines = raw.split('\n')
   let prefix: string | undefined
   for (const line of lines.slice(1)) {
     const found = CONTAINER_PREFIX.exec(line)?.[0] ?? ''
-    if (prefix === undefined) prefix = found
-    else if (prefix !== found) return undefined
+    prefix = prefix === undefined ? found : commonPrefix(prefix, found)
+    if (prefix === '') break
   }
   return prefix ?? ''
 }
@@ -191,32 +202,18 @@ class ProseLocator {
     private readonly fragment: string,
   ) {}
 
-  /** Record one leaf's inline content as a span, or say why it was skipped. */
+  /** Record one leaf's inline content as a span, unless it holds nothing to translate. */
   private emit(node: Parent, unitKey: string, depth: number): void {
     const range = inlineRange(node)
     if (range === undefined) return
     const raw = this.fragment.slice(range.start, range.end)
     if (raw.trim() === '' || !node.children.some(hasTranslatableText)) return
     const prefix = depth === 0 ? '' : containerPrefix(raw)
-    const text = prefix === undefined ? undefined : stripContinuationPrefix(raw, prefix)
-    if (prefix === undefined || text === undefined) {
-      this.diagnostics.push(
-        diagnostic(
-          this.file,
-          'ragged-continuation-prefix',
-          'error',
-          `${unitKey}: continuation lines do not share one container prefix, so the span cannot be translated without rewriting the markdown around it`,
-          this.base + range.start,
-          this.base + range.end,
-        ),
-      )
-      return
-    }
     this.spans.push({
       unitKey,
       start: this.base + range.start,
       end: this.base + range.end,
-      text,
+      text: stripContinuationPrefix(raw, prefix),
       continuationPrefix: prefix,
     })
   }
