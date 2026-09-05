@@ -39,6 +39,20 @@ export {
   SLIDE_ID_KEY,
 } from './frontmatter.js'
 export {
+  checkSlideIds,
+  collectSlideIds,
+  planSlideIds,
+  proposeSlideId,
+  type SlideIdFile,
+  type SlideIdInsertion,
+  type SlideIdIssue,
+  type SlideIdLocation,
+  type SlideIdPlan,
+  type SlideIdPlanOptions,
+  type SlideIdProposalOptions,
+  type SlideIdRecord,
+} from './init-ids.js'
+export {
   locateProse,
   type ProseLocation,
   type ProseOptions,
