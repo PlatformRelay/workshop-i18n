@@ -49,6 +49,7 @@ export {
   type StateThresholds,
   tallyUnitStates,
   type UnitStatus,
+  UnknownUnitStateError,
   type ViolatingUnit,
 } from './policy.js'
 export {

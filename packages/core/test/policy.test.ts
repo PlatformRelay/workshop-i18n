@@ -19,6 +19,7 @@ import {
   UNIT_STATES,
   type UnitState,
   type UnitStatus,
+  UnknownUnitStateError,
 } from '../src/index.js'
 
 function unit(
@@ -80,6 +81,35 @@ describe('tallyUnitStates', () => {
     expect(() => tallyUnitStates(clash)).toThrow(DuplicateUnitError)
     expect(() => tallyUnitStates(clash)).toThrow(/slides:s01-pods:body\/1/)
     expect(() => tallyUnitStates(clash)).toThrow(/01-pods-split/)
+  })
+
+  it('rejects an unrecognised state instead of counting it into NaN', () => {
+    const bogus = [
+      {
+        id: parseUnitId('slides:s01-pods:body/1'),
+        locale: 'de',
+        section: '01-pods',
+        state: 'translated',
+      } as unknown as UnitStatus,
+    ]
+    expect(() => tallyUnitStates(bogus)).toThrow(UnknownUnitStateError)
+    expect(() => tallyUnitStates(bogus)).toThrow(/translated/)
+    expect(() => tallyUnitStates(bogus)).toThrow(/slides:s01-pods:body\/1/)
+    expect(() => evaluatePolicy(bogus, 'release')).toThrow(UnknownUnitStateError)
+  })
+
+  it('produces a report that JSON round-trips with no NaN and consistent totals', () => {
+    const report = tallyUnitStates(mixed)
+    const json = JSON.stringify(report)
+    expect(json).not.toContain('null')
+    expect(json).not.toContain('NaN')
+    const sum = report.locales.reduce((total, locale) => total + locale.total, 0)
+    expect(sum).toBe(report.total)
+    for (const locale of report.locales) {
+      const sections = locale.sections.reduce((total, section) => total + section.total, 0)
+      expect(sections).toBe(locale.total)
+      expect(Object.keys(locale.counts).sort()).toEqual([...UNIT_STATES].sort())
+    }
   })
 
   it('allows the same unit id in different locales', () => {

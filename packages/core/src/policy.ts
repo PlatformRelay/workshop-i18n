@@ -95,6 +95,32 @@ export class DuplicateUnitError extends Error {
   }
 }
 
+/**
+ * Thrown when a unit carries a state this release does not know. Catalog layers map
+ * gettext flags onto {@link UnitState}, and a mapping bug must stop the run rather than
+ * pass through: an unknown state matches no ceiling, so it would be gated by nothing,
+ * and counting it would put a phantom key and a `NaN` into the report that spec 002
+ * SC-003 says both workshops' CI can consume without post-processing (`NaN` serialises
+ * to `null`). This is the same rule `definePolicy` applies to unknown threshold keys.
+ */
+export class UnknownUnitStateError extends Error {
+  readonly unitId: string
+  readonly locale: string
+  readonly state: string
+
+  constructor(unitId: string, locale: string, state: unknown) {
+    super(
+      `unit ${JSON.stringify(unitId)} in locale ${JSON.stringify(locale)} has unknown ` +
+        `translation state ${JSON.stringify(String(state))} — known states are ` +
+        `${UNIT_STATES.join(', ')}`,
+    )
+    this.name = 'UnknownUnitStateError'
+    this.unitId = unitId
+    this.locale = locale
+    this.state = String(state)
+  }
+}
+
 function bump(counts: Record<UnitState, number>, state: UnitState): void {
   counts[state] += 1
 }
@@ -135,6 +161,10 @@ export function tallyUnitStates(units: Iterable<UnitStatus>): StateReport {
       throw new DuplicateUnitError(id, unit.locale, [previousSection, unit.section])
     }
     seenInLocale.set(id, unit.section)
+
+    if (!isUnitState(unit.state)) {
+      throw new UnknownUnitStateError(id, unit.locale, unit.state)
+    }
 
     let locale = locales.get(unit.locale)
     if (locale === undefined) {
