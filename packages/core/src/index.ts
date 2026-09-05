@@ -10,6 +10,26 @@
  */
 
 export {
+  DEFAULT_LENGTH_BUDGET,
+  type LengthBudgets,
+  type LocaleSet,
+  lengthBudgetFor,
+  MANIFEST_API_GROUP,
+  type Manifest,
+  ManifestError,
+  type ManifestIssue,
+  type ManifestIssueCode,
+  type MarkdownSurfaceSpec,
+  type ParseManifestOptions,
+  parseManifest,
+  QUIZ_SCHEMA_VARIANTS,
+  type QuizSchemaVariant,
+  type QuizSurfaceSpec,
+  SUPPORTED_MANIFEST_MAJOR,
+  type SurfaceSpec,
+  surfaceSpec,
+} from './manifest.js'
+export {
   DuplicateUnitError,
   definePolicy,
   emptyStateCounts,
