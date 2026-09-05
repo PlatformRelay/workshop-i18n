@@ -89,6 +89,42 @@ describe('planLabId', () => {
     expect(plan.text).toBe('﻿<!-- labId: notes -->\n\nJust prose.\n')
   })
 
+  // A marker this run writes but the next run cannot read is worse than no marker: the
+  // codemod stops being idempotent, and every re-run leaves another dead comment behind
+  // in English source. So what is asserted here is a *second* run and a read-back, not
+  // the first run's bytes — pinning first-run output is exactly what hid this.
+  describe('a byte-order mark does not break the round trip through the marker', () => {
+    const BOM_LAB = '﻿# Lab 05 — Pod (S05)\n\nRun the pod.\n'
+
+    it('still inserts after the H1, exactly as it does without the mark', () => {
+      expect(planLabId(BOM_LAB, { pathStem: 'day-1/05-pod' }).text).toBe(
+        '﻿# Lab 05 — Pod (S05)\n\n<!-- labId: day-1-05-pod -->\n\nRun the pod.\n',
+      )
+    })
+
+    it('reads back the marker it just wrote', () => {
+      const once = planLabId(BOM_LAB, { pathStem: 'day-1/05-pod' }).text
+      expect(collectLabIds(once).map((record) => record.labId)).toEqual(['day-1-05-pod'])
+    })
+
+    it('is idempotent: the second run inserts nothing', () => {
+      const once = planLabId(BOM_LAB, { pathStem: 'day-1/05-pod' }).text
+      const twice = planLabId(once, { pathStem: 'day-1/05-pod' })
+      expect(twice.text).toBe(once)
+      expect(twice.insertion).toBeUndefined()
+      expect(twice.labId).toBe('day-1-05-pod')
+    })
+
+    it('passes --check, rather than reporting the identity it just wrote as missing', () => {
+      const once = planLabId(BOM_LAB, { pathStem: 'day-1/05-pod' }).text
+      expect(checkLabIds([{ path: 'labs/day-1/05-pod.md', source: once }])).toEqual([])
+    })
+
+    it('reads a marker sharing the first line with the mark', () => {
+      expect(collectLabIds('﻿<!-- labId: day-1-05-pod -->\n\nProse.\n')).toHaveLength(1)
+    })
+  })
+
   it('uses the line break the file already uses', () => {
     const plan = planLabId('# Lab\r\n\r\nProse.\r\n', { pathStem: 'x' })
     expect(plan.text).toBe('# Lab\r\n\r\n<!-- labId: x -->\r\n\r\nProse.\r\n')

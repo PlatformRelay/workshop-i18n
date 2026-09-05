@@ -60,8 +60,16 @@ const FALLBACK_STEM = 'lab'
 /** Room reserved for a `-2`, `-3` … disambiguating suffix. */
 const SUFFIX_HEADROOM = 8
 
-/** A whole line that is nothing but the identity marker. */
-const LAB_ID_LINE = /^[ \t]*<!--[ \t]*labId:[ \t]*(\S+)[ \t]*-->[ \t]*$/
+/**
+ * A whole line that is nothing but the identity marker.
+ *
+ * The optional leading `﻿` is not decoration. A byte-order mark is a byte of the file
+ * like any other — `decodeSource` deliberately keeps it — so on the first line it sits
+ * *before* whatever else is there. A marker `init-ids` writes but `collectLabIds` cannot
+ * read back makes the codemod non-idempotent, and every re-run leaves another dead
+ * comment behind in English source.
+ */
+const LAB_ID_LINE = /^﻿?[ \t]*<!--[ \t]*labId:[ \t]*(\S+)[ \t]*-->[ \t]*$/
 /** Fence delimiters, so a marker written inside a code sample is not an identity. */
 const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/
 /** An ATX heading, used to find the title a marker is inserted after. */
@@ -292,7 +300,9 @@ function lineBreakAt(source: string, offset: number): string {
 function insertionPoint(source: string): { offset: number; afterHeading: boolean } {
   const bom = source.startsWith('﻿') ? 1 : 0
   for (const line of unfencedLines(source)) {
-    if (line.start < bom) continue
+    // The mark shares line 0 with the heading, so it is sliced off the *text* rather
+    // than used to skip the line — skipping it hid the file's H1 from this scan, and the
+    // marker then landed above the title instead of below it.
     const text = line.start === 0 ? line.text.slice(bom) : line.text
     if (text.trim() === '') continue
     if (ATX_HEADING.test(text)) return { offset: line.next, afterHeading: true }

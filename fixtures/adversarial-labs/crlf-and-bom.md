@@ -1,7 +1,5 @@
 ﻿# CRLF and BOM
 
-<!-- labId: crlf-and-bom -->
-
 This file uses CRLF line endings throughout.
 
 > A blockquote that wraps
