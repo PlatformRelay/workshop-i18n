@@ -34,6 +34,13 @@
  * `kubectl` one-liner lives), indented code, raw HTML, images, thematic breaks and link
  * definitions are skeleton and are never emitted.
  *
+ * The GFM footnote extension is enabled for one reason beyond syntax coverage: without
+ * it, consecutive `[^a]:` / `[^b]:` definitions collapse into a single paragraph, which
+ * would put two independent footnotes behind one identity and one source hash — editing
+ * either would fuzz both (constitution II) — and would leave the `[^label]:` machinery
+ * *inside* the unit a translator edits. With it, each definition is its own node keyed
+ * `fn-<identifier>`, and every marker is skeleton by construction.
+ *
  * ## `<details>` spoilers are the one raw-HTML exception
  *
  * ADR 0012 (consumer) makes `<details><summary>…</summary>` the shape of every lab
@@ -47,7 +54,9 @@
 
 import type { Definition, Node, Nodes, Parent, RootContent } from 'mdast'
 import { fromMarkdown } from 'mdast-util-from-markdown'
+import { gfmFootnoteFromMarkdown } from 'mdast-util-gfm-footnote'
 import { gfmTableFromMarkdown } from 'mdast-util-gfm-table'
+import { gfmFootnote } from 'micromark-extension-gfm-footnote'
 import { gfmTable } from 'micromark-extension-gfm-table'
 import { type Diagnostic, diagnostic } from './diagnostic.js'
 import { type HoleEncoding, stripContinuationPrefix } from './skeleton.js'
@@ -335,6 +344,15 @@ class ProseLocator {
         case 'definition':
           this.reportDefinitionTitle(node)
           break
+        case 'footnoteDefinition': {
+          // Keyed by the footnote's own declared identifier, so two footnotes are two
+          // identities and renaming one re-keys only that one. The `[^label]:` marker
+          // sits outside every child's range, which makes it protected skeleton by
+          // construction rather than by a guard on the translation.
+          const path = `${cursor.scopePath()}/fn-${node.identifier}`
+          this.walk(node.children, new KeyCursor(path), depth + 1)
+          break
+        }
         case 'heading':
           this.emit(node, cursor.openHeading(node.depth), depth)
           break
@@ -396,8 +414,8 @@ export function locateProse(file: string, options: ProseOptions): ProseLocation 
   const bom = raw.startsWith('﻿') ? 1 : 0
   const fragment = raw.slice(bom)
   const tree = fromMarkdown(fragment, {
-    extensions: [gfmTable()],
-    mdastExtensions: [gfmTableFromMarkdown()],
+    extensions: [gfmTable(), gfmFootnote()],
+    mdastExtensions: [gfmTableFromMarkdown(), gfmFootnoteFromMarkdown()],
   })
   const locator = new ProseLocator(file, options.start + bom, fragment)
   locator.walk(tree.children, new KeyCursor(options.root), 0)

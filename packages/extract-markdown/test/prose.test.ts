@@ -181,6 +181,50 @@ describe('locateProse', () => {
     expect(located.diagnostics).toEqual([])
   })
 
+  describe('footnote definitions', () => {
+    const source = [
+      'A claim.[^cve] And another.[^nist]',
+      '',
+      '[^cve]: First body.',
+      '[^nist]: Second body.',
+      '',
+    ].join('\n')
+
+    it('gives each definition its own unit, so two footnotes are two identities', () => {
+      // Consecutive definitions are one paragraph to a parser without the footnote
+      // extension, which puts two independent footnotes behind one msgctxt and one
+      // source hash — editing either would fuzz both, and a translation only has to
+      // keep the first label to be accepted (constitution II).
+      expect(texts(source)).toEqual([
+        'A claim.[^cve] And another.[^nist]',
+        'First body.',
+        'Second body.',
+      ])
+    })
+
+    it('keys them by their declared label, not by position', () => {
+      expect(keys(source)).toEqual(['body/p-1', 'body/fn-cve/p-1', 'body/fn-nist/p-1'])
+    })
+
+    it('leaves the [^label]: marker outside the unit entirely', () => {
+      for (const span of locate(source)) {
+        expect(span.text).not.toContain('[^cve]:')
+        expect(span.text).not.toContain('[^nist]:')
+        expect(source.slice(span.start, span.end)).toBe(span.text)
+      }
+    })
+
+    it('renaming one footnote re-keys only that footnote', () => {
+      const renamed = source.replace(/nist/g, 'iso')
+      expect(keys(renamed)).toEqual(['body/p-1', 'body/fn-cve/p-1', 'body/fn-iso/p-1'])
+    })
+
+    it('handles a multi-paragraph footnote body', () => {
+      const long = ['[^cve]: First paragraph.', '', '    Second paragraph.', ''].join('\n')
+      expect(keys(long)).toEqual(['body/fn-cve/p-1', 'body/fn-cve/p-2'])
+    })
+  })
+
   describe('link reference definitions', () => {
     it('reports a definition title, which renders but is not extracted', () => {
       const source = '[docs]: https://kubernetes.io/docs/ "Kubernetes documentation"\n'

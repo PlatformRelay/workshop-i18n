@@ -23,7 +23,9 @@
   "dependencies": {
     "@workshop-i18n/core": "workspace:*",
     "mdast-util-from-markdown": "^2.0.3",
+    "mdast-util-gfm-footnote": "^2.1.0",
     "mdast-util-gfm-table": "^2.0.0",
+    "micromark-extension-gfm-footnote": "^2.1.0",
     "micromark-extension-gfm-table": "^2.1.1"
   },
   "devDependencies": {
