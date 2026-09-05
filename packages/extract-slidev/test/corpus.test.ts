@@ -14,12 +14,13 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { formatUnitId } from '@workshop-i18n/core'
 import { describe, expect, it } from 'vitest'
+import { parse as parseYaml } from 'yaml'
 import { parseSlidevDeck } from '../src/deck.js'
 import type { DiagnosticCode } from '../src/diagnostic.js'
 import { extractSlidevFile, locateSlidevFile, SlidevExtractionError } from '../src/extract.js'
 import { locateFrontmatter } from '../src/frontmatter.js'
 import { planSlideIds, type SlideIdPlan } from '../src/init-ids.js'
-import { CompositionError, composeSkeleton } from '../src/skeleton.js'
+import { CompositionError, composeSkeleton, type Hole, type Skeleton } from '../src/skeleton.js'
 import { decodeSource } from '../src/source.js'
 
 const FIXTURE_ROOT = fileURLToPath(new URL('../../../fixtures/', import.meta.url))
@@ -56,6 +57,7 @@ const REJECTED: readonly (readonly [string, DiagnosticCode])[] = [
   ['malformed-frontmatter.md', 'malformed-frontmatter'],
   ['dash-run-opens-no-block.md', 'missing-slide-id'],
   ['missing-slide-id.md', 'missing-slide-id'],
+  ['phantom-frontmatter.md', 'phantom-frontmatter'],
   ['separator-in-tilde-fence.md', 'separator-in-tilde-fence'],
   ['unclosed-frontmatter.md', 'unclosed-frontmatter'],
   ['unsafe-slide-id.md', 'unsafe-slide-id'],
@@ -151,7 +153,82 @@ const HOSTILE_TRANSLATIONS: readonly string[] = [
   'Erste --- Zweite',
   'eins <!-- zwei',
   'eins --> zwei',
+  'eins\n\u0060\u0060\u0060yaml\nlayout: cover\nzwei',
+  '\u0060\u0060\u0060',
+  '--',
 ]
+
+/**
+ * A hole's splice context, which is what decides how its first and last lines are judged.
+ * Bucketing by it is what makes the hostile sweep reach the interesting holes: a bare
+ * fence is harmless spliced after `# ` and a fence opener spliced after two spaces.
+ */
+function contextBucket(source: string, hole: Hole): string {
+  const prefix = source.slice(source.lastIndexOf('\n', hole.start - 1) + 1, hole.start)
+  const shape = prefix === '' ? 'start' : prefix.trim() === '' ? 'blank' : 'text'
+  const kind = hole.encoding.kind === 'markdown' ? hole.encoding.context : hole.encoding.kind
+  return `${kind}/${shape}`
+}
+
+/**
+ * One hole per distinct splice context.
+ *
+ * Translating *every* unit at once looked like a stronger sweep and was a weaker one:
+ * every fixture has a frontmatter hole, whose `---` guard threw before a single markdown
+ * hole was ever composed, so five of the hostile strings never reached the code they
+ * were written to test. Stubbing out the separator check left this file entirely green.
+ */
+function representativeHoles(skeleton: Skeleton, source: string): readonly Hole[] {
+  const byBucket = new Map<string, Hole>()
+  for (const hole of skeleton.holes) {
+    const bucket = contextBucket(source, hole)
+    if (!byBucket.has(bucket)) byBucket.set(bucket, hole)
+  }
+  return [...byBucket.values()]
+}
+
+/**
+ * An independent transcription of Slidev's `RE_FRONTMATTER` — lazy, and with a close that
+ * is not line-anchored — applied to each slide the way `matter()` applies it.
+ *
+ * The comparison is on the *keys* the capture yields, not its text: translating a value
+ * changes the text legitimately, while a `---` inside a value truncates the block and
+ * drops every key after it. This is the only oracle that can see that — every line-based
+ * reading, this package's included, still sees a well-formed block — so without it the
+ * guard could be deleted with the suite staying green.
+ */
+function slidevFrontmatterKeys(text: string): readonly (readonly string[] | null)[] {
+  return parseSlidevDeck(text).slides.map((slide) => {
+    const raw = text.slice(slide.frontmatter?.start ?? slide.bodyStart, slide.end)
+    const captured = /^---.*\r?\n([\s\S]*?)---/.exec(raw)?.[1]
+    if (captured === undefined) return null
+    try {
+      const parsed: unknown = parseYaml(captured)
+      return typeof parsed === 'object' && parsed !== null
+        ? Object.keys(parsed as Record<string, unknown>).sort()
+        : []
+    } catch {
+      // A truncated block usually stops parsing; either way the extent changed.
+      return null
+    }
+  })
+}
+
+/**
+ * An independent reading of Slidev's line rules, deliberately *not* the package's own
+ * predicates: the shared definition is the subject here, so using it as the oracle too
+ * would move both together when it is weakened.
+ */
+function structuralLines(text: string): { separators: number; fences: number } {
+  let separators = 0
+  let fences = 0
+  for (const line of text.split(/\r?\n/)) {
+    const trimmedEnd = line.replace(/\s+$/u, '')
+    if (trimmedEnd.startsWith('---')) separators += 1
+    if (/^[ \t]*(?:`{3,}|~{3,})/.test(trimmedEnd)) fences += 1
+  }
+  return { separators, fences }
+}
 
 /** The deck's shape: how many slides, and which identity each one declares. */
 function structureOf(text: string): unknown {
@@ -226,8 +303,9 @@ describe.each(CORPUS.map((fixture) => [fixture.name, fixture] as const))(
     it('leaves the deck structure untouched when every unit is translated', () => {
       // The render-time half of fence identity: composition may change words, never the
       // number of slides or which identity each one carries. Asserted against this
-      // package's own parse so it runs in CI; the differential re-asserts it against
-      // Slidev when a parser is available.
+      // package's own parse, which shares the line predicates with the code under test,
+      // so the sweep below adds an independent reading of those rules; the differential
+      // re-asserts everything against Slidev itself when a parser is available.
       const translations = Object.fromEntries(
         extraction.units.map((unit, index) => [formatUnitId(unit.id), `de-${index} — Ü "3" ✓`]),
       )
@@ -236,20 +314,27 @@ describe.each(CORPUS.map((fixture) => [fixture.name, fixture] as const))(
     })
 
     it('either refuses hostile translator text or leaves the structure untouched', () => {
+      const baseline = structureOf(adopted)
+      const baselineLines = structuralLines(adopted)
+      const baselineFrontmatter = slidevFrontmatterKeys(adopted)
       for (const text of HOSTILE_TRANSLATIONS) {
-        const translations = Object.fromEntries(
-          extraction.units.map((unit) => [formatUnitId(unit.id), text]),
-        )
-        let composed: string
-        try {
-          composed = composeSkeleton(extraction.skeleton, translations)
-        } catch (error) {
-          expect(error).toBeInstanceOf(CompositionError)
-          continue
+        // One hole at a time: a single refusal anywhere would otherwise stand in for
+        // every hole, and the guard under test would never be reached.
+        for (const hole of representativeHoles(extraction.skeleton, adopted)) {
+          const where = `${formatUnitId(hole.id)} <- ${JSON.stringify(text)}`
+          let composed: string
+          try {
+            composed = composeSkeleton(extraction.skeleton, { [formatUnitId(hole.id)]: text })
+          } catch (error) {
+            expect(error).toBeInstanceOf(CompositionError)
+            continue
+          }
+          expect(structureOf(composed), where).toEqual(baseline)
+          // Checked against independent readings of Slidev's rules, so weakening the
+          // package's own predicate cannot move the subject and the oracle together.
+          expect(structuralLines(composed), where).toEqual(baselineLines)
+          expect(slidevFrontmatterKeys(composed), where).toEqual(baselineFrontmatter)
         }
-        expect(structureOf(composed), `accepted ${JSON.stringify(text)}`).toEqual(
-          structureOf(adopted),
-        )
       }
     })
 

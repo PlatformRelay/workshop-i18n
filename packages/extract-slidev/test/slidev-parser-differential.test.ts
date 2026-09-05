@@ -39,7 +39,7 @@ import { describe, expect, it } from 'vitest'
 import { findSpeakerNote, parseSlidevDeck } from '../src/deck.js'
 import { extractSlidevFile } from '../src/extract.js'
 import { planSlideIds } from '../src/init-ids.js'
-import { CompositionError, composeSkeleton } from '../src/skeleton.js'
+import { CompositionError, composeSkeleton, type Hole, type Skeleton } from '../src/skeleton.js'
 import { decodeSource } from '../src/source.js'
 
 const FIXTURE_ROOT = fileURLToPath(new URL('../../../fixtures/', import.meta.url))
@@ -144,6 +144,10 @@ const SCANNER_SHAPES: readonly Sample[] = [
     name: 'separator immediately after a fence close',
     source: '```\na\n```\n---\nlayout: x\n---\n\nb\n',
   },
+  {
+    name: 'leading separator with a dash run hidden in a note',
+    source: '---\n\n# A\n\nprose\n\n<!--\nSpeaker: note\n---\n-->\n',
+  },
 ]
 
 /**
@@ -189,7 +193,25 @@ const HOSTILE_TRANSLATIONS: readonly (readonly [string, string])[] = [
   ['an HTML comment opener', 'eins <!-- zwei'],
   ['an HTML comment terminator', 'eins --> zwei'],
   ['a yaml code block opener', 'eins\n\u0060\u0060\u0060yaml\nlayout: cover\nzwei'],
+  ['a bare fence with nothing else', '\u0060\u0060\u0060'],
+  ['a trailing double hyphen', '--'],
 ]
+
+/**
+ * A hole's splice context — what sits before it on its line — bucketed, so the sweep
+ * reaches one hole of each kind rather than only the first one that refuses.
+ */
+function representativeHoles(skeleton: Skeleton, source: string): readonly Hole[] {
+  const byBucket = new Map<string, Hole>()
+  for (const hole of skeleton.holes) {
+    const prefix = source.slice(source.lastIndexOf('\n', hole.start - 1) + 1, hole.start)
+    const shape = prefix === '' ? 'start' : prefix.trim() === '' ? 'blank' : 'text'
+    const kind = hole.encoding.kind === 'markdown' ? hole.encoding.context : hole.encoding.kind
+    const bucket = `${kind}/${shape}`
+    if (!byBucket.has(bucket)) byBucket.set(bucket, hole)
+  }
+  return [...byBucket.values()]
+}
 
 /** What Slidev sees: the slides, their frontmatter keys, and their identities. */
 function structureOf(parse: ParseSync, source: string): unknown {
@@ -227,9 +249,15 @@ function expectAgreement(parse: ParseSync, name: string, source: string): void {
     // text is compared only where both layers agree — and the exemption asserts *why* it
     // applies rather than trusting the shape of the disagreement.
     if (theirKeys && slide.frontmatter === undefined) {
-      expect({ where, yamlCodeblockFrontmatter: true }).toEqual({
+      // Both ways `matter()` can find a block the scanner never opened. Each is refused by
+      // extraction, so the exemption names which one applies rather than waving the slide
+      // through on the shape of the disagreement alone.
+      const raw = source.slice(slide.separator?.start ?? slide.start, slide.end)
+      expect({ where, secondLayerFrontmatter: true }).toEqual({
         where,
-        yamlCodeblockFrontmatter: /^\s*```ya?ml/.test(source.slice(slide.bodyStart, slide.end)),
+        secondLayerFrontmatter:
+          /^\s*```ya?ml/.test(source.slice(slide.bodyStart, slide.end)) ||
+          /^---.*\r?\n[\s\S]*?---/.test(raw),
       })
       continue
     }
@@ -329,20 +357,21 @@ describe.skipIf(parseSync === undefined)('slide splitting agrees with @slidev/pa
         ).text
         const extraction = extractSlidevFile(adopted)
         if (extraction.units.length === 0) continue
-        const translations = Object.fromEntries(
-          extraction.units.map((unit) => [formatUnitId(unit.id), text]),
-        )
-        let composed: string
-        try {
-          composed = composeSkeleton(extraction.skeleton, translations)
-        } catch (error) {
-          expect(error).toBeInstanceOf(CompositionError)
-          continue
+        const baseline = structureOf(parse, adopted)
+        // One hole at a time, one per splice context. Translating everything at once let a
+        // single refusal — always the frontmatter `---` guard — stand in for every hole,
+        // so five of these strings never reached the markdown guards they were written for.
+        for (const hole of representativeHoles(extraction.skeleton, adopted)) {
+          const where = `${sample.name} ${formatUnitId(hole.id)} <- ${JSON.stringify(text)}`
+          let composed: string
+          try {
+            composed = composeSkeleton(extraction.skeleton, { [formatUnitId(hole.id)]: text })
+          } catch (error) {
+            expect(error).toBeInstanceOf(CompositionError)
+            continue
+          }
+          expect(structureOf(parse, composed), where).toEqual(baseline)
         }
-        expect(
-          structureOf(parse, composed),
-          `${sample.name} accepted ${JSON.stringify(text)}`,
-        ).toEqual(structureOf(parse, adopted))
       }
     },
   )
