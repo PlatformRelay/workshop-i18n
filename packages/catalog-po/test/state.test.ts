@@ -76,6 +76,59 @@ describe('unitStateOf', () => {
     expect([...seen].sort()).toEqual([...UNIT_STATES].sort())
   })
 
+  /**
+   * **The promotion invariant** (constitution V, ADR 0009).
+   *
+   * Human acceptance is expressed by the *absence* of a gating flag, and by nothing
+   * else. No flag a TMS, a seeding pass, or a machine translation pass can write may
+   * promote an entry past `needs-review` or `fuzzy` — those are exactly the surfaces
+   * unreviewed prose arrives on, so a flag that promotes is a path for it to ship.
+   *
+   * This is defended rather than asserted because the totality test above cannot see it:
+   * that test pins *that* a valid state comes out, not *which*. Inserting
+   * `if (entry.flags.includes('approved')) return 'reviewed'` into `unitStateOf` leaves
+   * the whole rest of the suite green and makes a machine translation shipping-grade.
+   */
+  it('lets no TMS flag promote a gated entry — acceptance is the absence of a flag', () => {
+    const promotionish = ['approved', 'reviewed', 'accepted', 'no-review', 'signed-off', 'verified']
+    const translated = ['Ein Pod.']
+
+    for (let mask = 0; mask < 1 << promotionish.length; mask += 1) {
+      const claim = promotionish.filter((_, index) => (mask & (1 << index)) !== 0)
+      const label = claim.length === 0 ? '(none)' : claim.join(',')
+
+      expect(
+        unitStateOf(entry({ msgstr: translated, flags: [...claim, NEEDS_REVIEW_FLAG] })),
+        label,
+      ).toBe('needs-review')
+      expect(
+        unitStateOf(entry({ msgstr: translated, flags: [NEEDS_REVIEW_FLAG, ...claim] })),
+        label,
+      ).toBe('needs-review')
+      expect(unitStateOf(entry({ msgstr: translated, flags: [...claim, FUZZY_FLAG] })), label).toBe(
+        'fuzzy',
+      )
+      expect(
+        unitStateOf(
+          entry({ msgstr: translated, flags: [...claim, NEEDS_REVIEW_FLAG, FUZZY_FLAG] }),
+        ),
+        label,
+      ).toBe('fuzzy')
+      expect(
+        unitStateOf(entry({ msgstr: [''], flags: [...claim, NEEDS_REVIEW_FLAG] })),
+        label,
+      ).toBe('missing')
+    }
+  })
+
+  it('reaches reviewed only when no gating flag is present at all', () => {
+    expect(unitStateOf(entry({ msgstr: ['Ein Pod.'], flags: ['approved'] }))).toBe('reviewed')
+    expect(unitStateOf(entry({ msgstr: ['Ein Pod.'], flags: [] }))).toBe('reviewed')
+    expect(unitStateOf(entry({ msgstr: ['Ein Pod.'], flags: [NEEDS_REVIEW_FLAG] }))).not.toBe(
+      'reviewed',
+    )
+  })
+
   it('never lets a flag or comment speak to requiredness — it maps state only', () => {
     const loaded = entry({
       msgstr: ['Ein Pod.'],
