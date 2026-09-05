@@ -183,6 +183,17 @@ describe('assertSafeUnitId', () => {
   it('escapes hostile characters in the error message instead of echoing them raw', () => {
     expect(() => assertSafeUnitId({ ...safe, containerId: 'a\u001bb' })).toThrow(/\\u001b/)
   })
+
+  it('neutralises bidi overrides so a rejected id cannot reorder the line reporting it', () => {
+    let message = ''
+    try {
+      assertSafeUnitId({ ...safe, containerId: 'a\u202eb' })
+    } catch (error) {
+      message = (error as Error).message
+    }
+    expect(message).not.toContain('\u202e')
+    expect(message).toContain('u202e')
+  })
 })
 
 describe('formatUnitId', () => {
@@ -202,6 +213,21 @@ describe('formatUnitId', () => {
         ...{ containerId: 'a', unitKey: 'b' },
       }),
     ).toThrow(UnitIdError)
+  })
+
+  it('reads each segment once, so a getter cannot swap it after the check', () => {
+    let reads = 0
+    const flipping = {
+      surface: 'slides' as const,
+      get containerId() {
+        reads += 1
+        return reads === 1 ? 'ok' : ({ toString: () => '../../etc/passwd' } as unknown as string)
+      },
+      unitKey: 'k',
+    }
+    const formatted = formatUnitId(flipping)
+    expect(formatted).toBe('slides:ok:k')
+    expect(formatted).not.toContain('etc/passwd')
   })
 
   it('still formats a well-formed id', () => {

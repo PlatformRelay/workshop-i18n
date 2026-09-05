@@ -14,6 +14,7 @@
  * code that merely re-reads an id the tool itself wrote does not pay the cost twice.
  */
 
+import { describeValue } from './render-value.js'
 import { isReservedFileName } from './reserved-names.js'
 
 /**
@@ -83,20 +84,6 @@ export class UnitIdError extends Error {
     super(message)
     this.name = 'UnitIdError'
     this.issues = issues
-  }
-}
-
-/**
- * Render an arbitrary value for an error message without letting it print itself:
- * `JSON.stringify` escapes control characters, and anything it cannot serialize (a
- * cycle, a bigint) falls back to its type name rather than throwing inside validation.
- */
-function describeValue(value: unknown): string {
-  if (typeof value === 'string') return JSON.stringify(value)
-  try {
-    return JSON.stringify(value) ?? String(value)
-  } catch {
-    return typeof value
   }
 }
 
@@ -218,20 +205,24 @@ export function assertSafeUnitId(id: UnitId): void {
 
 /** Render a unit id as the `<surface>:<containerId>:<unitKey>` string used as PO `msgctxt`. */
 export function formatUnitId(id: UnitId): string {
-  // Template interpolation would call a content-supplied `toString`, and this runs on
-  // ids read back from catalogs before anything has validated them (`tallyUnitStates`
-  // formats first, checks later). Three typeof checks keep that from being a way in.
+  // Each segment is read exactly once, into a local, and the template formats the locals.
+  // Checking `id.containerId` and then interpolating `id.containerId` are two reads: a
+  // getter or Proxy can pass a string to the check and hand an object to the template,
+  // whose `toString` then runs and splices its result into the id. This runs on ids read
+  // back from catalogs before anything has validated them (`tallyUnitStates` formats
+  // first, checks after), so the read has to be the thing that is guarded.
+  const { surface, containerId, unitKey } = id
   if (
-    typeof id.surface !== 'string' ||
-    typeof id.containerId !== 'string' ||
-    typeof id.unitKey !== 'string'
+    typeof surface !== 'string' ||
+    typeof containerId !== 'string' ||
+    typeof unitKey !== 'string'
   ) {
     throw new UnitIdError(
       'invalid unit id: surface, containerId and unitKey must all be strings',
-      validateUnitId(id),
+      validateUnitId({ surface, containerId, unitKey }),
     )
   }
-  return `${id.surface}:${id.containerId}:${id.unitKey}`
+  return `${surface}:${containerId}:${unitKey}`
 }
 
 /**

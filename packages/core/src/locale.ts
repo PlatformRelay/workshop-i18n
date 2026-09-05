@@ -9,6 +9,7 @@
  * of them agree.
  */
 
+import { describeValue } from './render-value.js'
 import { isReservedFileName } from './reserved-names.js'
 
 /**
@@ -89,11 +90,5 @@ const LOCALE_REJECTION_DETAIL: Readonly<Record<LocaleRejection, string>> = Objec
 export function assertSafeLocale(value: unknown): string {
   const reason = localeRejection(value)
   if (reason === undefined) return value as string
-  let rendered: string
-  try {
-    rendered = JSON.stringify(value) ?? String(value)
-  } catch {
-    rendered = typeof value
-  }
-  throw new LocaleError(reason, rendered)
+  throw new LocaleError(reason, describeValue(value))
 }

@@ -75,6 +75,17 @@ describe('assertSafeLocale', () => {
     expect((error as LocaleError).message).toContain('../etc')
   })
 
+  it('neutralises bidi overrides in the message it throws', () => {
+    let message = ''
+    try {
+      assertSafeLocale('de\u202e/etc')
+    } catch (error) {
+      message = (error as Error).message
+    }
+    expect(message).not.toContain('\u202e')
+    expect(message).toContain('u202e')
+  })
+
   it('does not run a content-supplied toString', () => {
     const hostile = {
       toString() {
