@@ -12,6 +12,18 @@
  */
 
 export {
+  type FrontmatterBlock,
+  parseSlidevDeck,
+  type SlideRange,
+  type SlidevDeck,
+} from './deck.js'
+export {
+  type Diagnostic,
+  type DiagnosticCode,
+  type DiagnosticSeverity,
+  hasErrors,
+} from './diagnostic.js'
+export {
   CompositionError,
   type CompositionIssue,
   composeSkeleton,
