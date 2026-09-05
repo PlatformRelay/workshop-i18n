@@ -1,7 +1,14 @@
-import { isUnitState, type UnitState } from '@workshop-i18n/core'
+import {
+  formatUnitId,
+  isUnitState,
+  parseUnitId,
+  UNIT_STATES,
+  type UnitState,
+} from '@workshop-i18n/core'
 import { describe, expect, it } from 'vitest'
 import type { CatalogIdentity, PoComment, PoEntry } from '../src/index.js'
 import {
+  catalogStatuses,
   FUZZY_FLAG,
   NEEDS_REVIEW_FLAG,
   parseCatalog,
@@ -58,6 +65,11 @@ const FLAG_POOL = [
   'python-brace-format',
   'max-length:80',
   'ignore-check',
+  // The gating flags belong in the noise too. Without them the entry-level property
+  // below reached only `missing` and `reviewed` across every generated case — it never
+  // built a gated entry, so it could not have caught a promotion of one.
+  NEEDS_REVIEW_FLAG,
+  FUZZY_FLAG,
 ]
 
 const COMMENT_POOL: readonly PoComment[] = [
@@ -96,15 +108,29 @@ function randomComments(random: () => number): PoComment[] {
   ).filter((comment): comment is PoComment => comment !== undefined)
 }
 
+/**
+ * `msgctxt` is catalog content, so it must vary: pinning it to one literal let a
+ * promotion keyed on the identity itself (`msgctxt.startsWith('labs:')`) pass every
+ * property. Surfaces, container ids and unit keys all move.
+ */
+function randomContext(random: () => number): string {
+  const surface = (['slides', 'labs', 'quiz'] as const)[Math.floor(random() * 3)] ?? 'slides'
+  const container = `${surface[0] ?? 's'}${Math.floor(random() * 900) + 100}-${randomToken(random)}`
+  const key =
+    (['body', 'note', 'stem', 'step', 'title'] as const)[Math.floor(random() * 5)] ?? 'body'
+  return `${surface}:${container}:${key}/${Math.floor(random() * 40)}`
+}
+
 function entry(
   flags: readonly string[],
   msgstr: readonly string[],
   comments: PoComment[],
+  msgctxt = 'slides:s01:body/1',
 ): PoEntry {
   return {
     comments,
     flags,
-    msgctxt: 'slides:s01:body/1',
+    msgctxt,
     msgid: 'A Pod.',
     msgstr,
     obsolete: false,
@@ -136,8 +162,9 @@ describe('unitStateOf — the promotion invariant, as a property', () => {
       const noise = randomNoise(random).filter((flag) => flag !== FUZZY_FLAG)
       const flags = shuffled([...noise, NEEDS_REVIEW_FLAG], random)
       const comments = randomComments(random)
-      const state = unitStateOf(entry(flags, ['Eine Übersetzung.'], comments))
-      expect(state, `flags [${flags.join(', ')}]`).toBe('needs-review')
+      const context = randomContext(random)
+      const state = unitStateOf(entry(flags, ['Eine Übersetzung.'], comments, context))
+      expect(state, `${context} flags [${flags.join(', ')}]`).toBe('needs-review')
     }
   })
 
@@ -146,8 +173,9 @@ describe('unitStateOf — the promotion invariant, as a property', () => {
     for (let index = 0; index < CASES; index += 1) {
       const flags = shuffled([...randomNoise(random), FUZZY_FLAG], random)
       const comments = randomComments(random)
-      const state = unitStateOf(entry(flags, ['Eine Übersetzung.'], comments))
-      expect(state, `flags [${flags.join(', ')}]`).toBe('fuzzy')
+      const context = randomContext(random)
+      const state = unitStateOf(entry(flags, ['Eine Übersetzung.'], comments, context))
+      expect(state, `${context} flags [${flags.join(', ')}]`).toBe('fuzzy')
     }
   })
 
@@ -155,8 +183,9 @@ describe('unitStateOf — the promotion invariant, as a property', () => {
     const random = makeRandom(31337)
     for (let index = 0; index < CASES; index += 1) {
       const flags = shuffled(randomNoise(random), random)
-      const state = unitStateOf(entry(flags, [''], randomComments(random)))
-      expect(state, `flags [${flags.join(', ')}]`).toBe('missing')
+      const context = randomContext(random)
+      const state = unitStateOf(entry(flags, [''], randomComments(random), context))
+      expect(state, `${context} flags [${flags.join(', ')}]`).toBe('missing')
     }
   })
 
@@ -167,8 +196,11 @@ describe('unitStateOf — the promotion invariant, as a property', () => {
         randomNoise(random).filter((flag) => flag !== FUZZY_FLAG && flag !== NEEDS_REVIEW_FLAG),
         random,
       )
-      const state = unitStateOf(entry(flags, ['Eine Übersetzung.'], randomComments(random)))
-      expect(state, `flags [${flags.join(', ')}]`).toBe('reviewed')
+      const context = randomContext(random)
+      const state = unitStateOf(
+        entry(flags, ['Eine Übersetzung.'], randomComments(random), context),
+      )
+      expect(state, `${context} flags [${flags.join(', ')}]`).toBe('reviewed')
       expect(isUnitState(state)).toBe(true)
     }
   })
@@ -183,17 +215,26 @@ describe('toCatalogEntry — the second state producer', () => {
    */
   it('never disagrees with unitStateOf, for any entry', () => {
     const random = makeRandom(9001)
+    const reached = new Set<UnitState>()
     for (let index = 0; index < 400; index += 1) {
-      const flags = shuffled(randomNoise(random), random)
-      const msgstr = random() < 0.5 ? [''] : ['Eine Übersetzung.']
-      const po = entry(flags, msgstr, randomComments(random))
-      const view = toCatalogEntry(po, {
-        surface: 'slides',
-        containerId: 's01',
-        unitKey: 'body/1',
-      })
-      expect(view.state, `flags [${flags.join(', ')}]`).toBe(unitStateOf(po))
+      const gate = random()
+      const flags = shuffled(
+        [
+          ...randomNoise(random),
+          ...(gate < 0.3 ? [NEEDS_REVIEW_FLAG] : gate < 0.6 ? [FUZZY_FLAG] : []),
+        ],
+        random,
+      )
+      const msgstr = random() < 0.4 ? [''] : ['Eine Übersetzung.']
+      const context = randomContext(random)
+      const po = entry(flags, msgstr, randomComments(random), context)
+      const view = toCatalogEntry(po, parseUnitId(context))
+      expect(view.state, `${context} flags [${flags.join(', ')}]`).toBe(unitStateOf(po))
+      reached.add(view.state)
     }
+    // Without this the property was silently vacuous: the pool carried no gating flag,
+    // so 400/400 cases were `missing` or `reviewed` and no gated entry was ever built.
+    expect([...reached].sort()).toEqual([...UNIT_STATES].sort())
   })
 
   it('agrees with unitStateOf for every entry of a catalog read from bytes', () => {
@@ -237,5 +278,90 @@ describe('toCatalogEntry — the second state producer', () => {
     // The corpus must actually exercise the gated states, or the equality is vacuous.
     expect(states.has('needs-review')).toBe(true)
     expect(states.has('fuzzy')).toBe(true)
+  })
+})
+
+describe('catalogStatuses — the third state producer, and the one a gate reads', () => {
+  /**
+   * `catalogStatuses` is the projection `status` and `compose --strict` actually consume:
+   * its output goes to core's `statusesForLocale`, then to `tallyUnitStates` and
+   * `evaluatePolicy`. So a promotion here is worse than a promotion in either producer
+   * below it — nothing downstream re-derives the state, and a release gate would read the
+   * promoted value directly.
+   *
+   * Two earlier rounds pinned this rule in `unitStateOf` and then in `toCatalogEntry`,
+   * and both times the layer above went unguarded. Returning `state: 'reviewed'` for
+   * every entry left all 309 tests green.
+   */
+  function mixedCatalog(seed: number, size: number) {
+    const random = makeRandom(seed)
+    const header: PoEntry = {
+      comments: [],
+      flags: [],
+      msgctxt: undefined,
+      msgid: '',
+      msgstr: ['Language: de\nContent-Type: text/plain; charset=UTF-8\n'],
+      obsolete: false,
+      line: 0,
+    }
+    const entries: PoEntry[] = [header]
+    const used = new Set<string>()
+    for (let index = 0; index < size; index += 1) {
+      let context = randomContext(random)
+      while (used.has(context)) context = randomContext(random)
+      used.add(context)
+      const gate = random()
+      const flags = shuffled(
+        [
+          ...randomNoise(random),
+          ...(gate < 0.34 ? [NEEDS_REVIEW_FLAG] : gate < 0.67 ? [FUZZY_FLAG] : []),
+        ],
+        random,
+      )
+      entries.push({
+        comments: randomComments(random),
+        flags,
+        msgctxt: context,
+        msgid: `English ${index}`,
+        msgstr: random() < 0.35 ? [''] : [`Deutsch ${index}`],
+        obsolete: false,
+        line: 0,
+      })
+    }
+    return parseCatalog(serializePo({ entries }), {
+      identity: { locale: 'de', name: '03-pods' } satisfies CatalogIdentity,
+      fileName: 'i18n/de/03-pods.po',
+    })
+  }
+
+  it('reports each entry’s own state, never a state of its own invention', () => {
+    const catalog = mixedCatalog(2718, 80)
+    const statuses = catalogStatuses(catalog)
+    expect(statuses).toHaveLength(catalog.entries.length)
+
+    const reached = new Set<UnitState>()
+    for (const [index, status] of statuses.entries()) {
+      const entry = catalog.entries[index]
+      expect(entry).toBeDefined()
+      if (entry === undefined) continue
+      expect(status.state, `entry ${formatUnitId(entry.id)}`).toBe(entry.state)
+      // ...and the same value the mapping itself would produce, so agreement cannot be
+      // achieved by two layers drifting together.
+      expect(status.state, `entry ${formatUnitId(entry.id)}`).toBe(unitStateOf(entry.po))
+      expect(formatUnitId(status.id)).toBe(formatUnitId(entry.id))
+      reached.add(status.state)
+    }
+    // A corpus that never reaches a gated state cannot catch a promotion of one.
+    expect([...reached].sort()).toEqual([...UNIT_STATES].sort())
+  })
+
+  it('carries the catalog’s own locale and section, not anything read from its content', () => {
+    const catalog = mixedCatalog(161803, 40)
+    for (const status of catalogStatuses(catalog)) {
+      expect(status.locale).toBe('de')
+      expect(status.section).toBe('03-pods')
+      expect(Object.hasOwn(status, 'required')).toBe(false)
+      expect(Object.keys(status).sort()).toEqual(['id', 'locale', 'section', 'state'])
+    }
   })
 })
