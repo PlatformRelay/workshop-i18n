@@ -16,8 +16,14 @@ const source = (relative: string): string => fileURLToPath(new URL(relative, imp
 
 export default defineConfig({
   resolve: {
-    alias: {
-      '@workshop-i18n/core': source('./packages/core/src/index.ts'),
-    },
+    // Exact matches only. A bare string alias matches by *prefix*, so the object form
+    // pins the whole specifier and a future `@workshop-i18n/core-something` cannot be
+    // silently rewritten into core's entry point.
+    alias: [
+      {
+        find: /^@workshop-i18n\/core$/,
+        replacement: source('./packages/core/src/index.ts'),
+      },
+    ],
   },
 })

@@ -1,0 +1,19 @@
+# A catalog wrapped the way GNU gettext wraps: broken at column ~77 on word
+# boundaries, with no newline anywhere in the string values. Our writer re-flows
+# these onto one line (ADR 0013: we own wrapping), so this fixture exists to pin
+# that we READ it correctly and that the re-flow is a deliberate, one-time diff.
+msgid ""
+msgstr ""
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#. workshop-i18n-source: sections/03-pods.md
+msgctxt "slides:s01:body/1"
+msgid ""
+"A Pod is the smallest deployable unit in Kubernetes, and it wraps one or more "
+"containers that share a network namespace and a set of storage volumes."
+msgstr ""
+"Ein Pod ist die kleinste im Cluster einsetzbare Einheit und umschliesst einen "
+"oder mehrere Container."

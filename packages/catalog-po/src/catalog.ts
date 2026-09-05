@@ -228,11 +228,22 @@ export function readCatalog(file: PoFile, options: ReadCatalogOptions): Catalog 
   const obsolete: CatalogEntry[] = []
   const seen = new Map<string, number>()
 
+  // An empty file is a catalog that does not exist yet, and gets a fresh header. A file
+  // with entries but no header is a broken catalog, not an implicit one: `parsePo`
+  // already refuses it, and `readCatalog` refuses it too so both entry points into this
+  // layer agree, rather than one of them quietly inventing a header for a file whose
+  // real one somebody deleted.
   const first = file.entries[0]
+  if (first !== undefined && !isHeaderEntry(first)) {
+    throw new CatalogError(
+      { fileName, line: first.line },
+      'catalog has entries but no header entry (msgid "")',
+    )
+  }
   const header =
-    first !== undefined && isHeaderEntry(first)
-      ? ensureHeader(first, identity.locale, { fileName, line: first.line })
-      : headerEntry(HEADER_LINES(identity.locale))
+    first === undefined
+      ? headerEntry(HEADER_LINES(identity.locale))
+      : ensureHeader(first, identity.locale, { fileName, line: first.line })
 
   let headerLine: number | undefined
   for (const po of file.entries) {

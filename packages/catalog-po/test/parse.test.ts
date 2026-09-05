@@ -193,6 +193,23 @@ describe('parsePo — hard errors name the file and line', () => {
     expect((thrown as PoSyntaxError).line).toBe(4)
   })
 
+  it('says what the author did when a comment block belongs to no entry', () => {
+    expect(() => parse(`${HEADER}\nmsgid "a"\nmsgstr ""\n\n#. dangling\n`)).toThrow(
+      /comment block is not followed by an entry/,
+    )
+  })
+
+  it('names the entry when it is truncated before its msgstr', () => {
+    expect(() => parse(`${HEADER}\nmsgctxt "slides:a:x"\nmsgid "A"\n`)).toThrow(
+      /entry "slides:a:x" is truncated/,
+    )
+    expect(() => parse(`${HEADER}\nmsgid "A"\n`)).toThrow(/entry msgid "A" is truncated/)
+  })
+
+  it('names the entry when a msgctxt is never followed by a msgid', () => {
+    expect(() => parse(`${HEADER}\nmsgctxt "slides:a:x"\n\n`)).toThrow(/has a msgctxt but no msgid/)
+  })
+
   it('rejects a file whose first entry is not the header', () => {
     expect(() => parse('msgctxt "slides:a:x"\nmsgid "a"\nmsgstr ""\n')).toThrow(PoSyntaxError)
   })

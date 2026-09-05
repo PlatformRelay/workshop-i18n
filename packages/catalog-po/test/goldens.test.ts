@@ -157,14 +157,14 @@ describe('golden scenario — spec 002 User Story 1', () => {
 describe('golden fixtures — input this tool did not write', () => {
   const read = (name: string) => readFileSync(join(FIXTURES, name), 'utf8')
 
-  it('round-trips a Weblate-annotated catalog without losing an annotation', () => {
-    const text = read('tms-annotated.po')
-    expect(serializePo(parsePo(text, { fileName: 'tms-annotated.po' }))).toBe(text)
+  it('round-trips a heavily annotated catalog without losing an annotation', () => {
+    const text = read('foreign-annotated.po')
+    expect(serializePo(parsePo(text, { fileName: 'foreign-annotated.po' }))).toBe(text)
   })
 
   it('carries every foreign annotation through a no-change update (FR-001, FR-005)', () => {
-    const text = read('tms-annotated.po')
-    const previous = parseCatalog(text, { identity: IDENTITY, fileName: 'tms-annotated.po' })
+    const text = read('foreign-annotated.po')
+    const previous = parseCatalog(text, { identity: IDENTITY, fileName: 'foreign-annotated.po' })
     const units = [
       unit('slides:s01:body/1', 'A Pod is a group of containers.'),
       unit('slides:s02:body/1', 'A Service gives Pods a stable address.'),
@@ -173,12 +173,39 @@ describe('golden fixtures — input this tool did not write', () => {
     expect(updated).toBe(text)
   })
 
-  it('reads the review states the TMS expressed through flags', () => {
-    const catalog = parseCatalog(read('tms-annotated.po'), {
+  it('reads the review states expressed through flags', () => {
+    const catalog = parseCatalog(read('foreign-annotated.po'), {
       identity: IDENTITY,
-      fileName: 'tms-annotated.po',
+      fileName: 'foreign-annotated.po',
     })
     expect(catalog.entries.map((entry) => entry.state)).toEqual(['reviewed', 'needs-review'])
+  })
+
+  /**
+   * GNU wraps at a column; we wrap only at newlines (ADR 0013). Reading a GNU-wrapped
+   * catalog must therefore recover the *unwrapped* value exactly, and writing it back
+   * re-flows it onto one line. That re-flow is a real whole-file diff the first time a
+   * catalog produced by GNU tools or a TMS is adopted, so it is pinned here rather than
+   * discovered by a maintainer staring at a 400-line diff.
+   */
+  it('reads GNU column wrapping and re-flows it onto one line on write', () => {
+    const text = read('gnu-wrapped.po')
+    const catalog = parseCatalog(text, { identity: IDENTITY, fileName: 'gnu-wrapped.po' })
+
+    expect(catalog.entries[0]?.source).toBe(
+      'A Pod is the smallest deployable unit in Kubernetes, and it wraps one or more ' +
+        'containers that share a network namespace and a set of storage volumes.',
+    )
+    expect(catalog.entries[0]?.source).not.toContain('\n')
+
+    const written = serializeCatalog(catalog)
+    expect(written).not.toBe(text)
+    expect(written).toContain(
+      'msgid "A Pod is the smallest deployable unit in Kubernetes, and it wraps one or ' +
+        'more containers that share a network namespace and a set of storage volumes."',
+    )
+    // ...and the re-flow happens once: the second pass is a fixed point.
+    expect(serializePo(parsePo(written, { fileName: 'gnu-wrapped.po' }))).toBe(written)
   })
 
   it('round-trips plural forms and obsolete entries it will not translate', () => {
