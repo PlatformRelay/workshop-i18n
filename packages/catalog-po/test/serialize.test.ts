@@ -104,6 +104,22 @@ describe('serializePo — canonical spelling', () => {
     expect(out).toContain('msgstr[1] "viele"')
   })
 
+  it('preserves flag order and collapses duplicates onto one line', () => {
+    const text = [
+      HEADER,
+      '#, fuzzy, c-format',
+      '#, max-length:80, fuzzy',
+      'msgctxt "slides:a:x"',
+      'msgid "A"',
+      'msgstr "B"',
+      '',
+    ].join('\n')
+    // Order is the order first seen, so a real catalog's flag line is not reshuffled and
+    // its zero-byte diff holds; the repeated `fuzzy` collapses rather than doubling.
+    expect(canonical(text)).toContain('#, fuzzy, c-format, max-length:80\n')
+    expect(canonical(canonical(text))).toBe(canonical(text))
+  })
+
   it('carries no timestamp of its own — the zero-byte-diff property (FR-005)', () => {
     const out = canonical(`${HEADER}\nmsgctxt "slides:a:x"\nmsgid "A"\nmsgstr ""\n`)
     expect(out).not.toMatch(/POT-Creation-Date|PO-Revision-Date/)

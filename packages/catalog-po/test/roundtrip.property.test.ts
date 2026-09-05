@@ -67,7 +67,10 @@ function randomEntry(random: () => number, index: number): PoEntry {
       text: ` c${commentIndex} ${randomString(random, 3).replace(/[\n\r]/g, ' ')}`,
     }),
   )
-  const flags = random() < 0.4 ? ['fuzzy'] : []
+  // Multi-flag entries matter: a real catalog carries `#, fuzzy, c-format`, and the
+  // zero-byte diff depends on flag order surviving a round trip unchanged.
+  const flagPool = ['fuzzy', 'needs-review', 'c-format', 'no-c-format', 'max-length:80']
+  const flags = flagPool.filter(() => random() < 0.35)
   const entry: {
     -readonly [K in keyof PoEntry]: PoEntry[K]
   } = {
