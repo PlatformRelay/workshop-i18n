@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { JsonScanError, type JsonString, memberOf, scanJson } from '../src/json-scan.js'
+import {
+  JsonScanError,
+  type JsonString,
+  MAX_NESTING_DEPTH,
+  memberOf,
+  scanJson,
+} from '../src/json-scan.js'
 
 function scanString(json: string): JsonString {
   const root = scanJson(json)
@@ -93,9 +99,24 @@ describe('scanJson', () => {
     expect((caught as JsonScanError).message).toContain('quiz/questions.json')
   })
 
-  it('accepts anything JSON.parse accepts, and rejects a deep structure gracefully', () => {
-    const deep = `${'['.repeat(200)}1${']'.repeat(200)}`
+  it('accepts nesting far deeper than any real bank', () => {
+    const deep = `${'['.repeat(MAX_NESTING_DEPTH)}1${']'.repeat(MAX_NESTING_DEPTH)}`
     expect(() => scanJson(deep)).not.toThrow()
+  })
+
+  it('refuses hostile nesting with a named error instead of exhausting the stack', () => {
+    // Without the depth limit this is an unhandled RangeError: a crash with no file, no
+    // line and no diagnostic code, on input SECURITY.md says to treat as hostile.
+    const tooDeep = `${'['.repeat(MAX_NESTING_DEPTH + 1)}1${']'.repeat(MAX_NESTING_DEPTH + 1)}`
+    expect(() => scanJson(tooDeep, 'quiz/questions.json')).toThrow(JsonScanError)
+    expect(() => scanJson(tooDeep)).toThrow(/nested deeper than/)
+    const wayTooDeep = `${'['.repeat(50_000)}1${']'.repeat(50_000)}`
+    expect(() => scanJson(wayTooDeep)).toThrow(JsonScanError)
+  })
+
+  it('counts nesting per branch, not cumulatively across siblings', () => {
+    const wide = `[${Array.from({ length: 2_000 }, () => '[1]').join(',')}]`
+    expect(() => scanJson(wide)).not.toThrow()
   })
 })
 

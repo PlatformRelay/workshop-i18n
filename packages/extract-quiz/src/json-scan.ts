@@ -127,8 +127,21 @@ const SHORT_ESCAPES: Readonly<Record<string, string>> = Object.freeze({
 
 const NUMBER = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/
 
+/**
+ * How deeply objects and arrays may nest.
+ *
+ * The scanner is recursive descent, so without a limit a bank nesting a few thousand
+ * arrays exhausts the JavaScript stack and surfaces as an unhandled `RangeError` — a
+ * crash with no file, no line and no diagnostic code, on input SECURITY.md tells us to
+ * treat as hostile. The limit turns that into the same named failure as any other
+ * malformed document. Both consumer banks nest four levels deep, so the ceiling is three
+ * orders of magnitude above anything real.
+ */
+export const MAX_NESTING_DEPTH = 500
+
 class Scanner {
   private at = 0
+  private depth = 0
 
   constructor(
     private readonly text: string,
@@ -137,6 +150,14 @@ class Scanner {
 
   private fail(detail: string, offset = this.at): never {
     throw new JsonScanError(detail, this.text, offset, this.label)
+  }
+
+  /** Enter one nesting level, refusing to go deeper than {@link MAX_NESTING_DEPTH}. */
+  private enter(): void {
+    this.depth += 1
+    if (this.depth > MAX_NESTING_DEPTH) {
+      this.fail(`JSON nested deeper than ${MAX_NESTING_DEPTH} levels`)
+    }
   }
 
   private skipWhitespace(): void {
@@ -250,10 +271,12 @@ class Scanner {
   private array(): JsonNode {
     const start = this.at
     this.expect('[')
+    this.enter()
     const items: JsonNode[] = []
     this.skipWhitespace()
     if (this.text[this.at] === ']') {
       this.at += 1
+      this.depth -= 1
       return { kind: 'array', start, end: this.at, items }
     }
     for (;;) {
@@ -266,6 +289,7 @@ class Scanner {
       }
       if (character === ']') {
         this.at += 1
+        this.depth -= 1
         return { kind: 'array', start, end: this.at, items }
       }
       this.fail('expected "," or "]"')
@@ -275,11 +299,13 @@ class Scanner {
   private object(): JsonNode {
     const start = this.at
     this.expect('{')
+    this.enter()
     const members: JsonMember[] = []
     const seen = new Set<string>()
     this.skipWhitespace()
     if (this.text[this.at] === '}') {
       this.at += 1
+      this.depth -= 1
       return { kind: 'object', start, end: this.at, members }
     }
     for (;;) {
@@ -304,6 +330,7 @@ class Scanner {
       }
       if (character === '}') {
         this.at += 1
+        this.depth -= 1
         return { kind: 'object', start, end: this.at, members }
       }
       this.fail('expected "," or "}"')

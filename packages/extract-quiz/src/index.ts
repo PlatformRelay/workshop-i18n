@@ -34,6 +34,7 @@ export {
   type JsonNode,
   JsonScanError,
   type JsonString,
+  MAX_NESTING_DEPTH,
   memberOf,
   scanJson,
 } from './json-scan.js'
