@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { PoEntry } from '../src/index.js'
 import { parsePo, serializePo } from '../src/index.js'
 
 const FILE = 'i18n/de/slides.po'
@@ -102,6 +103,33 @@ describe('serializePo — canonical spelling', () => {
     expect(out).toContain('msgid_plural "%d files"')
     expect(out).toContain('msgstr[0] "eine"')
     expect(out).toContain('msgstr[1] "viele"')
+  })
+
+  it('collapses a duplicated flag the serializer is handed directly', () => {
+    // Feeding duplicates through `parsePo` proves nothing about the serializer: the
+    // parser already de-duplicates, so the writer's own collapse was never exercised and
+    // could be deleted with the suite still green. Build the entry by hand instead.
+    const header: PoEntry = {
+      comments: [],
+      flags: [],
+      msgctxt: undefined,
+      msgid: '',
+      msgstr: ['Language: de\n'],
+      obsolete: false,
+      line: 0,
+    }
+    const entry: PoEntry = {
+      comments: [],
+      flags: ['fuzzy', 'c-format', 'fuzzy', 'c-format'],
+      msgctxt: 'slides:a:x',
+      msgid: 'A',
+      msgstr: ['B'],
+      obsolete: false,
+      line: 0,
+    }
+    const out = serializePo({ entries: [header, entry] })
+    expect(out).toContain('#, fuzzy, c-format\n')
+    expect(out).not.toContain('fuzzy, c-format, fuzzy')
   })
 
   it('preserves flag order and collapses duplicates onto one line', () => {
