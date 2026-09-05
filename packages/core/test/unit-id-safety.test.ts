@@ -25,6 +25,10 @@ describe('identity safety — container ids', () => {
       '..',
       '../../etc/passwd',
       'a/../b',
+      // `a..b` and `a...b` satisfy the charset, so the traversal clause is the only
+      // thing rejecting them. Pinned explicitly: dropping that clause must go red.
+      'a..b',
+      'a...b',
       'slides/evil',
       'a\\b',
       '/etc/hosts',
@@ -77,7 +81,9 @@ describe('identity safety — unit keys', () => {
   })
 
   it('rejects traversal, backslashes and malformed separators', () => {
-    for (const hostile of ['../etc', 'body//1', 'body/', 'a\\b', '..']) {
+    // `a..b` and `a/../b` pass the unit-key charset, so the traversal clause is the only
+    // thing rejecting them. Pinned explicitly: removing that clause must go red.
+    for (const hostile of ['../etc', 'a..b', 'a/../b', 'body//1', 'body/', 'a\\b', '..']) {
       expect(isSafeUnitKey(hostile)).toBe(false)
     }
   })

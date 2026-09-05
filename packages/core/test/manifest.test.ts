@@ -5,6 +5,7 @@ import {
   MANIFEST_API_GROUP,
   type Manifest,
   ManifestError,
+  type MarkdownSurfaceSpec,
   parseManifest,
   QUIZ_SCHEMA_VARIANTS,
   SUPPORTED_MANIFEST_MAJOR,
@@ -96,6 +97,23 @@ describe('parseManifest — a well-formed manifest', () => {
     expect(lengthBudgetFor(manifest, 'statement')).toBe(1.1)
     expect(lengthBudgetFor(manifest, 'two-cols')).toBe(1.4)
     expect(lengthBudgetFor(manifest)).toBe(1.4)
+  })
+
+  it('is frozen — the config the gates read cannot be edited in place', () => {
+    expect(Object.isFrozen(manifest)).toBe(true)
+    expect(Object.isFrozen(manifest.locales)).toBe(true)
+    expect(Object.isFrozen(manifest.locales.targets)).toBe(true)
+    expect(Object.isFrozen(manifest.surfaces)).toBe(true)
+    expect(Object.isFrozen(manifest.protectedTerms)).toBe(true)
+    expect(Object.isFrozen(manifest.lengthBudgets)).toBe(true)
+    expect(Object.isFrozen(manifest.lengthBudgets.byLayout)).toBe(true)
+    const slides = surfaceSpec(manifest, 'slides') as MarkdownSurfaceSpec
+    expect(Object.isFrozen(slides)).toBe(true)
+    expect(Object.isFrozen(slides.include)).toBe(true)
+    expect(() => {
+      ;(manifest.locales.targets as string[]).push('EVIL')
+    }).toThrow(TypeError)
+    expect(manifest.locales.targets).toEqual(['de', 'pt-BR'])
   })
 
   it('is deterministic — the same text parses to the same manifest', () => {

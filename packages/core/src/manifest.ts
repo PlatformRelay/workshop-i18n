@@ -239,7 +239,7 @@ function readGlobList(
     const glob = checkGlob(issues, `${path}[${index}]`, entry)
     if (glob !== undefined) globs.push(glob)
   })
-  return globs
+  return Object.freeze(globs)
 }
 
 function readSurfaces(issues: IssueList, value: unknown): readonly SurfaceSpec[] {
@@ -292,10 +292,10 @@ function readSurfaces(issues: IssueList, value: unknown): readonly SurfaceSpec[]
 
     if (surface === 'quiz') {
       const schema = readQuizSchema(issues, `${path}.schema`, raw.schema)
-      if (schema !== undefined) specs.push({ surface, include, exclude, schema })
+      if (schema !== undefined) specs.push(Object.freeze({ surface, include, exclude, schema }))
       continue
     }
-    specs.push({ surface, include, exclude })
+    specs.push(Object.freeze({ surface, include, exclude }))
   }
   return specs
 }
@@ -327,11 +327,11 @@ function readQuizSchema(
 function readLocales(issues: IssueList, value: unknown): LocaleSet {
   if (value === undefined) {
     issues.add('locales', 'missing', 'is required — declare the target locales')
-    return { source: 'en', targets: [] }
+    return Object.freeze({ source: 'en', targets: Object.freeze([]) })
   }
   if (!isRecord(value)) {
     issues.add('locales', 'invalid', 'must be a mapping with source and targets')
-    return { source: 'en', targets: [] }
+    return Object.freeze({ source: 'en', targets: Object.freeze([]) })
   }
   for (const key of Object.keys(value)) {
     if (key !== 'source' && key !== 'targets') {
@@ -356,15 +356,15 @@ function readLocales(issues: IssueList, value: unknown): LocaleSet {
   const rawTargets = value.targets
   if (rawTargets === undefined) {
     issues.add('locales.targets', 'missing', 'is required — declare at least one target locale')
-    return { source, targets: [] }
+    return Object.freeze({ source, targets: Object.freeze([]) })
   }
   if (!Array.isArray(rawTargets)) {
     issues.add('locales.targets', 'invalid', 'must be a list of locale tags')
-    return { source, targets: [] }
+    return Object.freeze({ source, targets: Object.freeze([]) })
   }
   if (rawTargets.length === 0) {
     issues.add('locales.targets', 'invalid', 'must list at least one target locale')
-    return { source, targets: [] }
+    return Object.freeze({ source, targets: Object.freeze([]) })
   }
 
   const targets: string[] = []
@@ -405,7 +405,7 @@ function readLocales(issues: IssueList, value: unknown): LocaleSet {
     foldedTargets.add(folded)
     targets.push(entry)
   })
-  return { source, targets }
+  return Object.freeze({ source, targets: Object.freeze(targets) })
 }
 
 function readProtectedTerms(issues: IssueList, value: unknown): readonly string[] {
@@ -427,7 +427,7 @@ function readProtectedTerms(issues: IssueList, value: unknown): readonly string[
     }
     terms.push(entry)
   })
-  return terms
+  return Object.freeze(terms)
 }
 
 function readLengthBudgets(issues: IssueList, value: unknown): LengthBudgets {
@@ -438,7 +438,7 @@ function readLengthBudgets(issues: IssueList, value: unknown): LengthBudgets {
       'invalid',
       'must be a mapping of layout name to a target/source length ratio',
     )
-    return { default: DEFAULT_LENGTH_BUDGET, byLayout: {} }
+    return Object.freeze({ default: DEFAULT_LENGTH_BUDGET, byLayout: Object.freeze({}) })
   }
 
   let fallback = DEFAULT_LENGTH_BUDGET
@@ -462,7 +462,7 @@ function readLengthBudgets(issues: IssueList, value: unknown): LengthBudgets {
     if (key === 'default') fallback = raw
     else byLayout[key] = raw
   }
-  return { default: fallback, byLayout }
+  return Object.freeze({ default: fallback, byLayout: Object.freeze(byLayout) })
 }
 
 function readApiVersion(
@@ -579,7 +579,17 @@ export function parseManifest(yamlText: string, opts?: ParseManifestOptions): Ma
 
   if (!issues.empty) throw new ManifestError(issues.issues, source)
 
-  return { apiVersion: version, apiMajor: major, locales, surfaces, protectedTerms, lengthBudgets }
+  // Frozen for the reason `StateReport` and `POLICIES` are: this is the configuration
+  // the gates read — which paths are scanned, which terms are protected, which locales
+  // ship — and a consumer that can edit it in place can move a gate after it was parsed.
+  return Object.freeze({
+    apiVersion: version,
+    apiMajor: major,
+    locales,
+    surfaces: Object.freeze(surfaces),
+    protectedTerms: Object.freeze(protectedTerms),
+    lengthBudgets,
+  })
 }
 
 /** The spec for one surface, or `undefined` when the manifest does not declare it. */
