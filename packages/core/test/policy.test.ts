@@ -4,6 +4,9 @@ import {
   definePolicy,
   emptyStateCounts,
   evaluatePolicy,
+  formatUnitId,
+  gatedUnits,
+  isGated,
   isPolicyName,
   isSurface,
   OPTIONAL_EXEMPT_STATES,
@@ -13,9 +16,11 @@ import {
   parseUnitId,
   QUIZ_SCHEMA_VARIANTS,
   resolvePolicy,
+  type SourceUnit,
   type StateThresholds,
   SURFACES,
   type Surface,
+  statusesForLocale,
   tallyUnitStates,
   UNIT_STATES,
   type UnitState,
@@ -359,5 +364,115 @@ describe('tamper resistance', () => {
 
   it('freezes the quiz schema variants the manifest validates against', () => {
     expect(Object.isFrozen(QUIZ_SCHEMA_VARIANTS)).toBe(true)
+  })
+})
+
+describe('gatedUnits / isGated (the predicate compose and status must share)', () => {
+  const units: UnitStatus[] = [
+    unit('slides:a:body/1', 'de', 's', 'missing'),
+    unit('slides:a:note/1', 'de', 's', 'missing', false),
+    unit('slides:a:note/2', 'de', 's', 'needs-review', false),
+    unit('slides:a:body/2', 'de', 's', 'reviewed'),
+  ]
+
+  it('answers for one unit, by policy name or policy object', () => {
+    expect(isGated(units[0] as UnitStatus, 'release')).toBe(true)
+    expect(isGated(units[1] as UnitStatus, 'release')).toBe(false)
+    expect(isGated(units[2] as UnitStatus, 'release')).toBe(true)
+    expect(isGated(units[1] as UnitStatus, POLICIES.release)).toBe(false)
+    expect(
+      isGated(units[1] as UnitStatus, definePolicy('s', {}, { gateOptionalUnits: true })),
+    ).toBe(true)
+  })
+
+  it('returns the gated units deterministically', () => {
+    expect(gatedUnits(units, 'release').map((u) => formatUnitId(u.id))).toEqual([
+      'slides:a:body/1',
+      'slides:a:body/2',
+      'slides:a:note/2',
+    ])
+    expect(gatedUnits([...units].reverse(), 'release')).toEqual(gatedUnits(units, 'release'))
+  })
+
+  it('agrees with evaluatePolicy — every violating unit is a gated unit (SC-003)', () => {
+    const gated = new Set(gatedUnits(mixed, 'release').map((u) => formatUnitId(u.id)))
+    for (const violation of evaluatePolicy(mixed, 'release').violations) {
+      for (const offender of violation.units) expect(gated.has(offender.id)).toBe(true)
+    }
+  })
+
+  it('rejects an unrecognised state like the tally does', () => {
+    const bogus = [{ ...(units[0] as UnitStatus), state: 'translated' } as unknown as UnitStatus]
+    expect(() => gatedUnits(bogus, 'release')).toThrow(UnknownUnitStateError)
+  })
+})
+
+describe('violation kinds', () => {
+  it('discriminates violations by kind so new kinds are not a breaking change', () => {
+    for (const violation of evaluatePolicy(mixed, 'release').violations) {
+      expect(violation.kind).toBe('state')
+    }
+  })
+})
+
+describe('statusesForLocale', () => {
+  const source: SourceUnit[] = [
+    { id: parseUnitId('slides:s01:body/1'), section: '01-pods' },
+    { id: parseUnitId('slides:s01:note/1'), section: '01-pods', required: false },
+    { id: parseUnitId('slides:s02:body/1'), section: '02-nodes' },
+  ]
+
+  it('reports every English unit as missing when the locale has no catalog at all', () => {
+    const statuses = statusesForLocale(source, [], 'de')
+    expect(statuses.map((s) => s.state)).toEqual(['missing', 'missing', 'missing'])
+    expect(evaluatePolicy(statuses, 'release').satisfied).toBe(false)
+  })
+
+  it('applies the states the catalog does know', () => {
+    const known: UnitStatus[] = [unit('slides:s01:body/1', 'de', 'whatever', 'reviewed')]
+    const statuses = statusesForLocale(source, known, 'de')
+    expect(statuses.map((s) => [formatUnitId(s.id), s.state])).toEqual([
+      ['slides:s01:body/1', 'reviewed'],
+      ['slides:s01:note/1', 'missing'],
+      ['slides:s02:body/1', 'missing'],
+    ])
+  })
+
+  it('takes section and required from the English source, never from the catalog', () => {
+    const known = [
+      {
+        id: parseUnitId('slides:s01:body/1'),
+        locale: 'de',
+        section: 'attacker-section',
+        state: 'needs-review',
+        required: false,
+      } as UnitStatus,
+    ]
+    const status = statusesForLocale(source, known, 'de')[0] as UnitStatus
+    expect(status.section).toBe('01-pods')
+    expect(status.required).toBeUndefined()
+    expect(evaluatePolicy(statusesForLocale(source, known, 'de'), 'release').satisfied).toBe(false)
+  })
+
+  it('ignores catalog entries for other locales and units no longer in the source', () => {
+    const known: UnitStatus[] = [
+      unit('slides:s01:body/1', 'pt-BR', '01-pods', 'reviewed'),
+      unit('slides:deleted:body/1', 'de', 'gone', 'reviewed'),
+    ]
+    const statuses = statusesForLocale(source, known, 'de')
+    expect(statuses).toHaveLength(3)
+    expect(statuses.every((s) => s.state === 'missing')).toBe(true)
+    expect(statuses.every((s) => s.locale === 'de')).toBe(true)
+  })
+
+  it('rejects a duplicated source unit and a duplicated catalog entry', () => {
+    expect(() => statusesForLocale([...source, source[0] as SourceUnit], [], 'de')).toThrow(
+      DuplicateUnitError,
+    )
+    const twice: UnitStatus[] = [
+      unit('slides:s01:body/1', 'de', 'a', 'reviewed'),
+      unit('slides:s01:body/1', 'de', 'b', 'fuzzy'),
+    ]
+    expect(() => statusesForLocale(source, twice, 'de')).toThrow(DuplicateUnitError)
   })
 })

@@ -9,7 +9,7 @@
  */
 
 import { isUnitState, UNIT_STATES, type UnitState } from './unit.js'
-import { formatUnitId, type UnitId } from './unit-id.js'
+import { compareUnitIds, formatUnitId, type UnitId } from './unit-id.js'
 
 /** One unit's translation state in one locale, as read from a catalog. */
 export interface UnitStatus {
@@ -135,6 +135,12 @@ function compareStrings(a: string, b: string): number {
  * back in code-unit order regardless of input order, so `status --json` is diffable
  * (spec 002 SC-003).
  *
+ * **It tallies what it is handed, and cannot see what it is not.** A locale whose
+ * catalogs are empty — or absent, or filtered out by a bad glob — produces no rows here,
+ * so it reports zero of everything and satisfies `release`: an untranslated locale
+ * looks finished. The fix is to build the input from the English unit set rather than
+ * from the catalog, which is what {@link statusesForLocale} does. Call that first.
+ *
  * @throws {DuplicateUnitError} when a unit id repeats within one locale.
  */
 export function tallyUnitStates(units: Iterable<UnitStatus>): StateReport {
@@ -201,6 +207,83 @@ export function tallyUnitStates(units: Iterable<UnitStatus>): StateReport {
           })),
       })),
   }
+}
+
+/**
+ * An English unit as extraction knows it: identity, the section it reports under, and
+ * whether a locale must translate it.
+ *
+ * `section` and `required` live on this side of the boundary on purpose. They describe
+ * the *source*, so they come from extraction and the manifest — operator-owned, PR-
+ * reviewed inputs — and never from a catalog, where a translator, a TMS or a seeding
+ * pass could set them (see {@link UnitStatus.required}).
+ */
+export interface SourceUnit {
+  readonly id: UnitId
+  readonly section: string
+  readonly required?: boolean
+}
+
+/**
+ * Project the English unit set onto one locale's known states — the input
+ * {@link tallyUnitStates} and {@link evaluatePolicy} actually want.
+ *
+ * Every English unit appears in the result. A unit the catalog has no entry for is
+ * `missing`, which is what makes an empty or absent catalog fail `release` instead of
+ * passing it (see the note on {@link tallyUnitStates}). An entry whose id is no longer
+ * in the English set is dropped: spec 002 FR-004 keeps those in the PO as obsolete
+ * entries so the translation survives, but they describe content that no longer exists
+ * and must not count toward a gate.
+ *
+ * Only `state` is taken from the catalog. `section` and `required` come from the source
+ * unit, so a catalog cannot relabel a unit into another section or mark itself optional.
+ *
+ * This lives in core, and is pure, because `status` and `compose --strict` both need it:
+ * spec 003 SC-003 only holds if they agree on the unit set, and two lanes synthesising
+ * "what should exist in this locale" separately is the obvious way for them to disagree.
+ *
+ * @throws {DuplicateUnitError} when an id repeats in `source` or in `known`.
+ * @throws {UnknownUnitStateError} when a known entry carries an unrecognised state.
+ */
+export function statusesForLocale(
+  source: Iterable<SourceUnit>,
+  known: Iterable<UnitStatus>,
+  locale: string,
+): readonly UnitStatus[] {
+  const states = new Map<string, UnitState>()
+  const sections = new Map<string, string>()
+  for (const entry of known) {
+    if (entry.locale !== locale) continue
+    const id = formatUnitId(entry.id)
+    const previous = sections.get(id)
+    if (previous !== undefined) {
+      throw new DuplicateUnitError(id, locale, [previous, entry.section])
+    }
+    if (!isUnitState(entry.state)) {
+      throw new UnknownUnitStateError(id, locale, entry.state)
+    }
+    sections.set(id, entry.section)
+    states.set(id, entry.state)
+  }
+
+  const seen = new Map<string, string>()
+  const statuses: UnitStatus[] = []
+  for (const unit of source) {
+    const id = formatUnitId(unit.id)
+    const previous = seen.get(id)
+    if (previous !== undefined) {
+      throw new DuplicateUnitError(id, locale, [previous, unit.section])
+    }
+    seen.set(id, unit.section)
+    statuses.push({
+      id: unit.id,
+      locale,
+      section: unit.section,
+      state: states.get(id) ?? 'missing',
+      ...(unit.required === undefined ? {} : { required: unit.required }),
+    })
+  }
+  return statuses.sort((a, b) => compareUnitIds(a.id, b.id))
 }
 
 /** Maximum number of gated units allowed in each state. An absent state is ungated. */
@@ -329,7 +412,9 @@ export interface ViolatingUnit {
 }
 
 /** One locale exceeding one state's ceiling. */
-export interface PolicyViolation {
+export interface StatePolicyViolation {
+  /** Discriminator — see {@link PolicyViolation}. */
+  readonly kind: 'state'
   readonly locale: string
   readonly state: UnitState
   /** The policy's ceiling for this state. */
@@ -339,6 +424,20 @@ export interface PolicyViolation {
   /** Every offending unit, ordered by id — the review queue, not a sample. */
   readonly units: readonly ViolatingUnit[]
 }
+
+/**
+ * Why a policy was not satisfied.
+ *
+ * A discriminated union with one member today. The discriminator exists now because
+ * spec 002 FR-006 wants `status` to report override staleness and spec 003 FR-005 makes
+ * `--strict` fail on it, and an override is stale independently of any `UnitState` — so
+ * a violation that is not keyed by state has to be expressible. Adding
+ * `{ kind: 'override-stale', ... }` later must not be a breaking change for the five
+ * lanes coding against this type, and it will not be if consumers switch on `kind` and
+ * treat an unrecognised kind as a violation rather than ignoring it. Narrow before
+ * reading `state`.
+ */
+export type PolicyViolation = StatePolicyViolation
 
 /** The machine-readable verdict. Carries no exit code by design. */
 export interface PolicyEvaluation {
@@ -367,10 +466,48 @@ export interface PolicyEvaluation {
  */
 export const OPTIONAL_EXEMPT_STATES: readonly UnitState[] = Object.freeze(['missing', 'fuzzy'])
 
-function isGated(unit: UnitStatus, policy: Policy): boolean {
+function gatedBy(unit: UnitStatus, policy: Policy): boolean {
   if (unit.required !== false) return true
   if (policy.gateOptionalUnits) return true
   return !OPTIONAL_EXEMPT_STATES.includes(unit.state)
+}
+
+/**
+ * Whether `policy` holds this unit to its ceilings.
+ *
+ * Exported because spec 003 SC-003 requires `compose --strict` and
+ * `status --policy release` to gate on the *same* units: if compose re-derives "does
+ * this unit block a release" from `state` and `required` itself, the two answers drift
+ * the first time either rule changes, and the guarantee dies quietly. Both lanes call
+ * this — or {@link gatedUnits} — instead of reimplementing it.
+ *
+ * @throws {UnknownUnitStateError} when the unit carries a state this release does not know.
+ */
+export function isGated(unit: UnitStatus, policy: Policy | PolicyName): boolean {
+  if (!isUnitState(unit.state)) {
+    throw new UnknownUnitStateError(formatUnitId(unit.id), unit.locale, unit.state)
+  }
+  return gatedBy(unit, resolvePolicy(policy))
+}
+
+/**
+ * The units `policy` gates, ordered by locale then unit id. The set `compose --strict`
+ * must consider, and the set every {@link PolicyViolation} draws from.
+ *
+ * @throws {UnknownUnitStateError} when a unit carries a state this release does not know.
+ */
+export function gatedUnits(
+  units: Iterable<UnitStatus>,
+  policy: Policy | PolicyName,
+): readonly UnitStatus[] {
+  const resolved = resolvePolicy(policy)
+  return [...units]
+    .filter((unit) => isGated(unit, resolved))
+    .sort(
+      (a, b) =>
+        compareStrings(a.locale, b.locale) ||
+        compareStrings(formatUnitId(a.id), formatUnitId(b.id)),
+    )
 }
 
 /**
@@ -397,7 +534,7 @@ export function evaluatePolicy(
 
   const gated = new Map<string, Map<UnitState, ViolatingUnit[]>>()
   for (const unit of all) {
-    if (!isGated(unit, resolved)) continue
+    if (!gatedBy(unit, resolved)) continue
     let byState = gated.get(unit.locale)
     if (byState === undefined) {
       byState = new Map()
@@ -419,6 +556,7 @@ export function evaluatePolicy(
       const offenders = byState.get(state) ?? []
       if (offenders.length <= limit) continue
       violations.push({
+        kind: 'state',
         locale,
         state,
         limit,
