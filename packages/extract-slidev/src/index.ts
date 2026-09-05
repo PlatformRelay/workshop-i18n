@@ -24,6 +24,12 @@ export {
   hasErrors,
 } from './diagnostic.js'
 export {
+  locateProse,
+  type ProseLocation,
+  type ProseOptions,
+  type ProseSpan,
+} from './prose.js'
+export {
   CompositionError,
   type CompositionIssue,
   composeSkeleton,
