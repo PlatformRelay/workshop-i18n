@@ -16,8 +16,8 @@ import { formatUnitId } from '@workshop-i18n/core'
 import { describe, expect, it } from 'vitest'
 import type { DiagnosticCode } from '../src/diagnostic.js'
 import { extractLabFile, LabExtractionError, locateLabFile } from '../src/extract.js'
-import { type LabIdPlan, planLabId } from '../src/lab-id.js'
-import { composeSkeleton } from '../src/skeleton.js'
+import { checkLabIds, collectLabIds, type LabIdPlan, planLabId } from '../src/lab-id.js'
+import { composeSkeleton, stripContinuationPrefix } from '../src/skeleton.js'
 import { decodeSource } from '../src/source.js'
 
 const FIXTURE_ROOT = fileURLToPath(new URL('../../../fixtures/', import.meta.url))
@@ -142,6 +142,35 @@ describe.each(CORPUS.map((fixture) => [fixture.name, fixture] as const))(
     it('adopts an identity by insertion only', () => {
       const plan = planLabId(fixture.source, { pathStem: fixture.pathStem })
       expect(undoInsertion(plan)).toBe(fixture.source)
+    })
+
+    it('adopts idempotently, reading back the marker it wrote (FR-001, AS-2)', () => {
+      // Run twice and read back, rather than pinning the first run's bytes. A marker
+      // init-ids writes but collectLabIds cannot read is not a cosmetic defect: the
+      // codemod stops being idempotent and every re-run leaves a dead comment behind in
+      // English source. Pinning first-run output is what let exactly that through.
+      const again = planLabId(adopted, { pathStem: fixture.pathStem })
+      expect(again.text).toBe(adopted)
+      expect(again.insertion).toBeUndefined()
+      expect(collectLabIds(adopted).map((record) => record.labId)).toEqual([
+        again.labId ?? extraction.labId,
+      ])
+      expect(checkLabIds([{ path: fixture.name, source: adopted }])).toEqual([])
+    })
+
+    it('anchors every hole on the bytes it claims (the offset invariant)', () => {
+      // Losslessness cannot see a misplaced hole: an untranslated hole is filled with
+      // source.slice(start, end) either way, so a skew round-trips green and only shows
+      // up once something is actually translated. This is the assertion that sees it —
+      // and it is the one that caught micromark dropping a leading byte-order mark.
+      for (const hole of extraction.skeleton.holes) {
+        const raw = adopted.slice(hole.start, hole.end)
+        const expected =
+          hole.encoding.kind === 'markdown'
+            ? stripContinuationPrefix(raw, hole.encoding.continuationPrefix)
+            : raw
+        expect(expected).toBe(hole.source)
+      }
     })
 
     it('reproduces the source byte-for-byte from an empty catalog (SC-002)', () => {
