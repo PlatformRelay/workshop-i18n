@@ -33,9 +33,11 @@
  * into a setext heading; one containing a fence opener would swallow the rest of the
  * file; one containing `<!--` would comment out the skeleton that follows it. A
  * `<summary>` hole whose replacement closes the tag would end the spoiler early and
- * leak the answer. The bytes would survive all of it — the damage is at render time —
- * so composition fails closed (constitution III/V) rather than emitting them and hoping
- * a later gate notices.
+ * leak the answer. One that opens `[docs]:` turns the paragraph into a link reference
+ * definition, which renders as nothing at all — the paragraph simply disappears from
+ * that locale. The bytes would survive all of it, the damage is at render time, so
+ * composition fails closed (constitution III/V) rather than emitting them and hoping a
+ * later gate notices.
  */
 
 import {
@@ -94,6 +96,7 @@ export class SkeletonError extends Error {
 export type ReplacementRejection =
   | 'thematic-break'
   | 'footnote-label'
+  | 'link-definition'
   | 'setext-underline'
   | 'fence-opener'
   | 'comment-terminator'
@@ -175,14 +178,18 @@ function lookup(translations: TranslationLookup, id: string): string | undefined
  *
  * The span itself is the best evidence, but a *single-line* span carries none — and most
  * spans are single-line, while a translation is very often longer than its English and
- * wraps. Asking only the span there would emit LF into a CRLF file, so the file is the
- * fallback. `init-ids` already derives its insertion's break from the file this way; the
- * two must not disagree, or one composed lab ends up with mixed endings.
+ * wraps. The fallback is the break ending the span's **own line**, not "does the file
+ * contain a CRLF anywhere": one stray CR inside a fenced sample would otherwise make
+ * every single-line span in an LF file emit CRLF, which is the same defect in the
+ * opposite direction. This is the rule `init-ids` uses for its insertion, so the two
+ * agree by construction rather than by coincidence.
  */
-function lineBreakOf(raw: string, file: string): string {
+function lineBreakOf(raw: string, file: string, end: number): string {
   if (raw.includes('\r\n')) return '\r\n'
   if (raw.includes('\n')) return '\n'
-  return file.includes('\r\n') ? '\r\n' : '\n'
+  const next = file.indexOf('\n', end)
+  if (next === -1) return file.includes('\r\n') ? '\r\n' : '\n'
+  return file.charAt(next - 1) === '\r' ? '\r\n' : '\n'
 }
 
 /**
@@ -212,7 +219,7 @@ export function stripContinuationPrefix(raw: string, prefix: string): string {
 function encodeReplacement(hole: Hole, raw: string, file: string, text: string): string {
   if (hole.encoding.kind === 'html-inline') return text
   const prefix = hole.encoding.continuationPrefix
-  return splitLines(text).join(lineBreakOf(raw, file) + prefix)
+  return splitLines(text).join(lineBreakOf(raw, file, hole.end) + prefix)
 }
 
 /** `---`, `***`, `___` runs: a thematic break, or a setext H2 under a paragraph. */
@@ -222,16 +229,33 @@ const SETEXT_UNDERLINE = /^ {0,3}=+[ \t]*$/
 const FENCE_OPENER = /^ {0,3}(?:`{3,}|~{3,})/
 /** Anything that would close the `<details>`/`<summary>` a spoiler label sits inside. */
 const TAG_ESCAPE = /<\/?\s*(?:summary|details)\b/i
+
 /**
- * The `[^label]:` a footnote definition opens with.
- *
- * The label is machinery that happens to sit *inside* a unit: the parser scopes a
- * footnote definition as a paragraph, so the whole line — marker included — is what a
- * translator is handed. A translation that renames `[^cve]` to `[^quelle]` is perfectly
- * good prose and silently orphans every reference to it, so the marker has to survive
- * even though the sentence after it does not.
+ * A line opening a reference definition: `[label]:` for a link, `[^label]:` for a
+ * footnote. The label is captured raw, empty labels included.
  */
-const FOOTNOTE_LABEL = /^ {0,3}\[\^([^\]\s]+)\]:/
+const REFERENCE_DEFINITION = /^ {0,3}(\[\^?[^\]]*\]:)/
+
+/**
+ * Every reference-definition opener in `text`, in the order they appear.
+ *
+ * The locator normally keeps these outside units — a link definition is its own mdast
+ * node, and so is a footnote definition now that the footnote extension is enabled — so
+ * a *correct* unit has none of them. That is exactly what makes the comparison cheap and
+ * total: whatever set the English opens with, the translation must open with the same
+ * one. It covers a renamed or dropped footnote label, a label the parser could not scope
+ * (an empty `[^]:`, which stays a paragraph), a *second* label in a unit that collapsed
+ * two definitions, and a translation that *introduces* a definition — a link definition
+ * renders as nothing at all, so a paragraph that gains one silently disappears.
+ */
+function referenceDefinitions(text: string): readonly string[] {
+  const found: string[] = []
+  for (const line of splitLines(text)) {
+    const label = REFERENCE_DEFINITION.exec(line)?.[1]
+    if (label !== undefined) found.push(label)
+  }
+  return found
+}
 
 /**
  * True when `text` carries a control character. Tab, line feed and carriage return are
@@ -272,12 +296,14 @@ function rejectReplacement(hole: Hole, replacement: string): CompositionIssue | 
     }
     return undefined
   }
-  const label = FOOTNOTE_LABEL.exec(hole.source)?.[1]
-  if (label !== undefined && FOOTNOTE_LABEL.exec(replacement)?.[1] !== label) {
-    return reject(
-      'footnote-label',
-      `translation must keep the footnote label "[^${label}]:" it opens with; renaming or dropping it orphans every reference to the footnote`,
-    )
+  const before = referenceDefinitions(hole.source)
+  const after = referenceDefinitions(replacement)
+  if (before.join('\u0000') !== after.join('\u0000')) {
+    const detail =
+      before.length === 0
+        ? `translation opens a reference definition (${after.join(', ')}) the English does not; a link definition renders as nothing, so the paragraph would disappear`
+        : `translation must keep every reference definition the English opens with (${before.join(', ')}), unchanged and in order; it has ${after.length === 0 ? 'none' : after.join(', ')}`
+    return reject(before.length === 0 ? 'link-definition' : 'footnote-label', detail)
   }
   for (const line of splitLines(replacement)) {
     if (THEMATIC_BREAK.test(line)) {

@@ -135,6 +135,19 @@ describe('planLabId', () => {
     expect(planLabId(source, { pathStem: 'x' }).text).toBe(`<!-- labId: x -->\n\n${source}`)
   })
 
+  it('reads the whole H1 when the file has no trailing newline', () => {
+    // The title was derived as slice(0, offset - 1), which assumed the heading line ended
+    // with a newline; on the last line of a file without one it lost the final character
+    // (`# Lab Zero Five` proposed `lab-zero-fiv`). Only reachable through the title
+    // fallback, so the path stem is made to slugify to nothing on purpose.
+    expect(planLabId('# Lab Zero Five', { pathStem: '///' }).labId).toBe('lab-zero-five')
+    expect(planLabId('# Lab Zero Five\n', { pathStem: '///' }).labId).toBe('lab-zero-five')
+  })
+
+  it('strips a closing hash run from the title', () => {
+    expect(planLabId('# Lab Zero Five #\n', { pathStem: '///' }).labId).toBe('lab-zero-five')
+  })
+
   it('refuses to overwrite an identity a human already wrote, even an unsafe one', () => {
     const source = '# Lab\n\n<!-- labId: ../escape -->\n\nProse.\n'
     const plan = planLabId(source, { pathStem: 'x' })

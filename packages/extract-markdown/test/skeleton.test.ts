@@ -192,10 +192,32 @@ describe('composeSkeleton', () => {
     expect(composed).not.toMatch(/[^\r]\n/)
   })
 
-  describe('footnote definitions', () => {
-    // The parser scopes a footnote definition as a paragraph, so its `[^label]:` marker
-    // sits inside the unit a translator is handed. Renaming it is good prose and silently
-    // orphans every reference to it, so the marker has to survive the translation.
+  it('takes the break from the span own line, not from anywhere in the file', () => {
+    // "Does the file contain a CRLF" is the wrong question: one stray CR inside a fenced
+    // sample would make every single-line span in an otherwise-LF file emit CRLF — the
+    // same defect as the one above, in the opposite direction.
+    const mixed = 'Eine Zeile.\n\n```text\nwindows output\r\n```\n'
+    const skel = createSkeleton(mixed, [
+      {
+        id: id('body/p-1'),
+        start: 0,
+        end: 11,
+        source: 'Eine Zeile.',
+        encoding: { kind: 'markdown', continuationPrefix: '' },
+      },
+    ])
+    const composed = composeSkeleton(skel, { 'labs:day-1-05-pod:body/p-1': 'erste\nzweite' })
+    expect(composed.startsWith('erste\nzweite\n')).toBe(true)
+    expect(composed).toContain('windows output\r\n')
+  })
+
+  describe('reference definitions', () => {
+    // With the footnote extension enabled the locator keeps a `[^label]:` marker outside
+    // every unit, so a *correct* unit opens no reference definition at all. This guard is
+    // what covers the cases where one still ends up inside a unit — an empty `[^]:` the
+    // parser cannot scope, or a locator regression — and, symmetrically, a translation
+    // that *introduces* one. An introduced link definition renders as nothing, so the
+    // paragraph it opens simply disappears from the locale.
     const source = 'A claim.[^cve]\n\n[^cve]: The footnote body.\n'
     const start = source.indexOf('[^cve]: ')
     const skeleton = createSkeleton(source, [
@@ -230,6 +252,79 @@ describe('composeSkeleton', () => {
         'footnote-label',
       ])
       expect((caught as CompositionError).issues[0]?.message).toContain('[^cve]:')
+    })
+
+    it('enforces every label in a unit, not only the first', () => {
+      // Two definitions collapse into one paragraph for any parser without the footnote
+      // extension. A guard that checked only the anchored first label accepted a
+      // translation that deleted the second one outright.
+      const two = '[^cve]: First body.\n[^nist]: Second body.'
+      const pair = createSkeleton(two, [
+        {
+          id: id('body/p-1'),
+          start: 0,
+          end: two.length,
+          source: two,
+          encoding: { kind: 'markdown', continuationPrefix: '' },
+        },
+      ])
+      const key = 'labs:day-1-05-pod:body/p-1'
+      expect(composeSkeleton(pair, { [key]: '[^cve]: Erster Text.\n[^nist]: Zweiter Text.' })).toBe(
+        '[^cve]: Erster Text.\n[^nist]: Zweiter Text.',
+      )
+      for (const bad of [
+        '[^cve]: Erster Text.\nZweiter Text ohne Label.',
+        '[^cve]: Erster Text.',
+        '[^nist]: Zweiter Text.\n[^cve]: Erster Text.',
+        '[^cve]: Erster Text.\n[^cve]: Zweiter Text.',
+      ]) {
+        expect(() => composeSkeleton(pair, { [key]: bad })).toThrow(CompositionError)
+      }
+    })
+
+    it('enforces an empty label, which the parser cannot scope into its own node', () => {
+      const empty = '[^]: A body behind a label nothing can reference.'
+      const skel = createSkeleton(empty, [
+        {
+          id: id('body/p-1'),
+          start: 0,
+          end: empty.length,
+          source: empty,
+          encoding: { kind: 'markdown', continuationPrefix: '' },
+        },
+      ])
+      expect(() =>
+        composeSkeleton(skel, { 'labs:day-1-05-pod:body/p-1': 'Ein Text ohne Label.' }),
+      ).toThrow(CompositionError)
+      expect(composeSkeleton(skel, { 'labs:day-1-05-pod:body/p-1': '[^]: Ein Text.' })).toBe(
+        '[^]: Ein Text.',
+      )
+    })
+
+    it.each([
+      ['a link reference definition', '[docs]: https://example.invalid/'],
+      ['a footnote definition', '[^neu]: Eine neue Fußnote.'],
+      ['one on a later line', 'Erste Zeile.\n[docs]: https://example.invalid/'],
+    ])('refuses a translation that introduces %s', (_label, translation) => {
+      const plain = createSkeleton(source, [
+        {
+          id: id('body/p-1'),
+          start: 0,
+          end: 14,
+          source: 'A claim.[^cve]',
+          encoding: { kind: 'markdown', continuationPrefix: '' },
+        },
+      ])
+      let caught: unknown
+      try {
+        composeSkeleton(plain, { 'labs:day-1-05-pod:body/p-1': translation })
+      } catch (error) {
+        caught = error
+      }
+      expect(caught).toBeInstanceOf(CompositionError)
+      expect((caught as CompositionError).issues.map((issue) => issue.reason)).toEqual([
+        'link-definition',
+      ])
     })
 
     it('leaves an ordinary paragraph that merely mentions a footnote alone', () => {

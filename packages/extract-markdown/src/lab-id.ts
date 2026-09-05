@@ -300,7 +300,7 @@ function lineBreakAt(source: string, offset: number): string {
  * Where the marker goes: after the file's opening H1 when it has one, otherwise at the
  * very top — but always *after* a byte-order mark, which must stay the first bytes.
  */
-function insertionPoint(source: string): { offset: number; afterHeading: boolean } {
+function insertionPoint(source: string): { offset: number; heading: string | undefined } {
   const bom = source.startsWith('﻿') ? 1 : 0
   for (const line of unfencedLines(source)) {
     // The mark shares line 0 with the heading, so it is sliced off the *text* rather
@@ -308,10 +308,10 @@ function insertionPoint(source: string): { offset: number; afterHeading: boolean
     // marker then landed above the title instead of below it.
     const text = line.start === 0 ? line.text.slice(bom) : line.text
     if (text.trim() === '') continue
-    if (ATX_HEADING.test(text)) return { offset: line.next, afterHeading: true }
+    if (ATX_HEADING.test(text)) return { offset: line.next, heading: headingTextOf(text) }
     break
   }
-  return { offset: bom, afterHeading: false }
+  return { offset: bom, heading: undefined }
 }
 
 /**
@@ -334,8 +334,9 @@ export function planLabId(source: string, options: LabIdPlanOptions): LabIdPlan 
     }
   }
 
-  const { offset, afterHeading } = insertionPoint(source)
-  const title = afterHeading ? headingTextAt(source, offset) : undefined
+  const { offset, heading } = insertionPoint(source)
+  const afterHeading = heading !== undefined
+  const title = heading
   const labId = proposeLabId(title, {
     pathStem: options.pathStem,
     taken: new Set(options.taken ?? []),
@@ -351,15 +352,17 @@ export function planLabId(source: string, options: LabIdPlanOptions): LabIdPlan 
   }
 }
 
-/** The text of the heading immediately before `offset`, with its `#` run removed. */
-function headingTextAt(source: string, offset: number): string | undefined {
-  const line = source
-    .slice(0, Math.max(0, offset - 1))
-    .split('\n')
-    .at(-1)
+/**
+ * The prose of an ATX heading line, with its `#` run and any closing run removed.
+ *
+ * Takes the line's text rather than an offset into the file: deriving it as
+ * `slice(0, offset - 1)` assumed the heading ended with a newline, so an H1 on the last
+ * line of a file without a trailing one silently lost its final character.
+ */
+function headingTextOf(text: string): string | undefined {
   return (
-    line
-      ?.replace(/^ {0,3}#{1,6}[ \t]*/, '')
+    text
+      .replace(/^ {0,3}#{1,6}[ \t]*/, '')
       .replace(/[ \t]*#*[ \t]*$/, '')
       .trim() || undefined
   )
