@@ -33,6 +33,8 @@ export type DiagnosticCode =
   | 'non-scalar-text-field'
   /** A dash run Slidev may read as a slide break but this locator does not. */
   | 'ambiguous-separator'
+  /** A `---` inside a tilde fence: Slidev splits the slide there, cutting the code in half. */
+  | 'separator-in-tilde-fence'
   /** Prose inside a raw HTML block or Vue island, which stays protected skeleton. */
   | 'prose-in-html-block'
 

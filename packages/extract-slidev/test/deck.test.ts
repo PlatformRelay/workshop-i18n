@@ -120,9 +120,58 @@ describe('parseSlidevDeck fence awareness', () => {
     expect(source.slice(deck.slides[1]?.bodyStart ?? 0)).toBe('\n# After\n')
   })
 
-  it('ignores a separator inside a tilde fence', () => {
-    const source = ['~~~text', '---', '~~~', '', '---', '', '# After', ''].join('\n')
-    expect(parseSlidevDeck(source).slides).toHaveLength(2)
+  it('agrees with Slidev that a tilde fence does not protect a separator, and says so', () => {
+    // Slidev 52 tracks backtick fences only, so it splits at the `---` and then reads the
+    // rest of the code block as the next slide's frontmatter — two slides, one of them
+    // nonsense. Agreeing silently would key prose under a slide nobody sees, so the split
+    // matches the renderer and the file is refused.
+    const source = [
+      '~~~yaml',
+      'kind: Role',
+      '---',
+      'kind: Binding',
+      '~~~',
+      '',
+      '---',
+      '',
+      '# After',
+      '',
+    ].join('\n')
+    const deck = parseSlidevDeck(source)
+    expect(deck.slides).toHaveLength(2)
+    expect(source.slice(deck.slides[0]?.bodyStart, deck.slides[0]?.bodyEnd)).toBe(
+      '~~~yaml\nkind: Role\n',
+    )
+    expect(deck.diagnostics.map((d) => d.code)).toEqual(['separator-in-tilde-fence'])
+    expect(deck.diagnostics[0]?.severity).toBe('error')
+    expect(deck.diagnostics[0]?.line).toBe(3)
+  })
+
+  it('leaves a tilde fence with no separator in it alone', () => {
+    const source = ['~~~text', 'kind: Role', '~~~', '', '---', '', '# After', ''].join('\n')
+    const deck = parseSlidevDeck(source)
+    expect(deck.slides).toHaveLength(2)
+    expect(deck.diagnostics).toEqual([])
+  })
+
+  it('lets an outer backtick fence protect a tilde fence nested inside it', () => {
+    const source = [
+      '````md magic-move',
+      '~~~yaml',
+      'kind: Role',
+      '---',
+      'kind: Binding',
+      '~~~',
+      '````',
+      '',
+      '---',
+      '',
+      '# After',
+      '',
+    ].join('\n')
+    const deck = parseSlidevDeck(source)
+    expect(deck.slides).toHaveLength(2)
+    expect(deck.diagnostics).toEqual([])
   })
 
   it('does not let an indented closing fence leave the block open forever', () => {
@@ -140,15 +189,39 @@ describe('parseSlidevDeck diagnostics', () => {
     expect(deck.slides[0]?.frontmatter).toBeUndefined()
   })
 
-  it('warns about a longer dash run rather than silently disagreeing with Slidev', () => {
+  it('splits on a longer dash run, as Slidev does, and warns that it did', () => {
     const source = ['---', 'layout: cover', '---', '', '# One', '', '----', '', '# Two', ''].join(
       '\n',
     )
     const deck = parseSlidevDeck(source)
-    expect(deck.slides).toHaveLength(1)
+    expect(deck.slides).toHaveLength(2)
     expect(deck.diagnostics.map((d) => d.code)).toEqual(['ambiguous-separator'])
     expect(deck.diagnostics[0]?.severity).toBe('warning')
     expect(deck.diagnostics[0]?.line).toBe(7)
+  })
+
+  it('splits at a setext level-two underline, which is the trap the warning exists for', () => {
+    const source = ['---', 'layout: cover', '---', '', 'Heading', '-------', '', 'body', ''].join(
+      '\n',
+    )
+    const deck = parseSlidevDeck(source)
+    expect(deck.slides).toHaveLength(2)
+    expect(deck.diagnostics.map((d) => d.code)).toEqual(['ambiguous-separator'])
+  })
+
+  it('splits at a separator carrying trailing text, as Slidev does', () => {
+    const source = ['# One', '', '--- and some text', '', '# Two', ''].join('\n')
+    const deck = parseSlidevDeck(source)
+    expect(deck.slides).toHaveLength(2)
+    expect(deck.diagnostics.map((d) => d.code)).toEqual(['ambiguous-separator'])
+  })
+
+  it('refuses a frontmatter block whose closing delimiter is not exactly three dashes', () => {
+    // Slidev consumes three dashes and leaks the rest of the line into the slide body.
+    const source = ['---', 'layout: cover', '----', '', '# One', ''].join('\n')
+    const deck = parseSlidevDeck(source)
+    expect(deck.diagnostics.map((d) => d.code)).toContain('malformed-frontmatter')
+    expect(deck.diagnostics.find((d) => d.code === 'malformed-frontmatter')?.severity).toBe('error')
   })
 
   it('does not warn about a dash run inside a fence', () => {

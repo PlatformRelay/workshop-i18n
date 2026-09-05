@@ -54,6 +54,7 @@ const REJECTED: readonly (readonly [string, DiagnosticCode])[] = [
   ['duplicate-slide-id.md', 'duplicate-slide-id'],
   ['malformed-frontmatter.md', 'malformed-frontmatter'],
   ['missing-slide-id.md', 'missing-slide-id'],
+  ['separator-in-tilde-fence.md', 'separator-in-tilde-fence'],
   ['unclosed-frontmatter.md', 'unclosed-frontmatter'],
   ['unsafe-slide-id.md', 'unsafe-slide-id'],
 ]

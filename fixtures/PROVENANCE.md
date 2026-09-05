@@ -48,3 +48,12 @@ byte-identically.
 Files that extraction must **refuse**, each with the diagnostic it must raise. They exist
 so that "unsupported" stays a tested behaviour rather than a silent mangle; composition
 must still reproduce them byte-for-byte.
+
+| Fixture | Diagnostic |
+| --- | --- |
+| `duplicate-slide-id.md` | `duplicate-slide-id` |
+| `malformed-frontmatter.md` | `malformed-frontmatter` |
+| `missing-slide-id.md` | `missing-slide-id` |
+| `separator-in-tilde-fence.md` | `separator-in-tilde-fence` — Slidev tracks backtick fences only, so it splits the slide inside this code block; agreeing silently would leave the second rendered slide with no identity while `--check` passed |
+| `unclosed-frontmatter.md` | `unclosed-frontmatter` |
+| `unsafe-slide-id.md` | `unsafe-slide-id` |

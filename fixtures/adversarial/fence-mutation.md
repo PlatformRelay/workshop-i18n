@@ -19,14 +19,13 @@ kind: Secret
 
 ~~~yaml
 kind: Tilde
----
+# a bare "---" inside a tilde fence is a hard error: see adversarial-rejected/
 kind: AlsoTilde
 ~~~
 
 ~~~~text
 ~~~
 still inside the longer tilde fence
----
 ~~~
 ~~~~
 

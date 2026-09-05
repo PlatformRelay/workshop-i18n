@@ -5,8 +5,9 @@
  * this is the one place the package reads structure itself rather than asking a parser.
  * The rules it implements, mirroring Slidev's parser:
  *
- * - A **separator** is a line whose content, ignoring trailing whitespace, is exactly
- *   `---`, at column 0.
+ * - A **separator** is a line at column 0 beginning with a run of three or more dashes.
+ *   Slidev splits on `----`, on `--- anything`, and therefore on a setext level-two
+ *   heading underline; only an exact `---` is reported without a warning.
  * - The first separator of a slide doubles as the **opening delimiter of that slide's
  *   frontmatter** when the line after it is non-blank; the block then runs to the next
  *   separator, which is its closing delimiter and belongs to no slide body.
@@ -22,12 +23,32 @@
  * of the same character, at least as long, with no info string), which handles nesting
  * for free: the inner ``` is not long enough to close the outer ````.
  *
- * Indented code blocks are deliberately *not* tracked: Slidev does not track them
- * either, so recognizing them here would make this splitter disagree with the renderer,
- * which is worse than agreeing with it about an unlikely construct.
+ * ## Where this scan follows Slidev rather than CommonMark
  *
- * A dash run longer than three (`----`) is where this scan and Slidev's may disagree, so
- * it is reported as a warning rather than guessed at.
+ * The contract is agreement with the renderer, not with the spec, because a splitter
+ * that disagrees with Slidev keys prose under a slide the audience never sees. Verified
+ * against `@slidev/parser` 52.19.0 (see `slidev-parser-differential.test.ts`):
+ *
+ * - **Tilde fences do not protect a separator.** Slidev tracks backtick fences only, so
+ *   it splits at a bare `---` inside `~~~ … ~~~`, cutting the code block in half. This
+ *   scan splits there too — and raises an *error*, because agreeing silently would give
+ *   the second rendered slide no identity while `--check` still passed. The file has to
+ *   be fixed, not guessed at.
+ * - **Any run of three or more dashes splits**, whatever follows it on the line. That
+ *   makes a setext level-two underline (`Heading` over `-------`) a slide break, which is
+ *   a trap authors fall into, so every separator that is not exactly `---` also raises a
+ *   warning saying so.
+ * - **Indented code blocks are not tracked**, because Slidev does not track them either.
+ * - **A byte-order mark is ignored when matching the first line.** Slidev does not strip
+ *   it, so a BOM'd file loses its headmatter there; this scan reads the headmatter and
+ *   copies the mark through untouched. A deliberate divergence in the consumer's favour:
+ *   the alternative is refusing to see a frontmatter block that is plainly written.
+ *
+ * One divergence is closed by refusing instead of matching: Slidev accepts `----` or
+ * `--- x` as a frontmatter *closing* delimiter, consumes three dashes and leaks the rest
+ * of the line into the slide body. Reproducing that would mean starting a body mid-line
+ * to preserve a typo's debris, so a closing delimiter that is not exactly `---` is an
+ * error instead.
  */
 
 import { type Diagnostic, diagnostic } from './diagnostic.js'
@@ -105,8 +126,10 @@ function scanLines(source: string): readonly Line[] {
 
 const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})(.*)$/
 const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/
-const SEPARATOR = /^---[ \t]*$/
-const LONGER_DASH_RUN = /^-{4,}[ \t]*$/
+/** What Slidev splits on: three or more dashes at column 0, whatever follows them. */
+const SEPARATOR = /^-{3,}/
+/** What an author almost certainly meant when they wrote one. */
+const EXACT_SEPARATOR = /^---[ \t]*$/
 
 /**
  * Strip a leading byte-order mark from the first line only. The mark stays in the
@@ -138,12 +161,29 @@ function scanSeparators(
   for (const [index, line] of lines.entries()) {
     const text = lineContent(line, index)
     if (fence !== undefined) {
-      separators.push(false)
       const close = FENCE_CLOSE.exec(text)
       const run = close?.[1]
       if (run !== undefined && run[0] === fence.marker && run.length >= fence.length) {
         fence = undefined
+        separators.push(false)
+        continue
       }
+      // Slidev tracks backtick fences only, so inside a tilde fence it splits here.
+      if (fence.marker === '~' && SEPARATOR.test(text)) {
+        separators.push(true)
+        diagnostics.push(
+          diagnostic(
+            source,
+            'separator-in-tilde-fence',
+            'error',
+            'Slidev splits the slide at this "---" because it does not track tilde fences, cutting the code block in half — use a backtick fence, or indent the "---"',
+            line.start,
+            line.end,
+          ),
+        )
+        continue
+      }
+      separators.push(false)
       continue
     }
     const open = FENCE_OPEN.exec(text)
@@ -159,21 +199,21 @@ function scanSeparators(
     }
     if (SEPARATOR.test(text)) {
       separators.push(true)
+      if (!EXACT_SEPARATOR.test(text)) {
+        diagnostics.push(
+          diagnostic(
+            source,
+            'ambiguous-separator',
+            'warning',
+            'Slidev splits the slide at this line because it starts with three or more dashes; if it was meant as a setext heading underline or a horizontal rule, it is not one — use exactly "---" to break a slide, or "***" for a rule',
+            line.start,
+            line.end,
+          ),
+        )
+      }
       continue
     }
     separators.push(false)
-    if (LONGER_DASH_RUN.test(text)) {
-      diagnostics.push(
-        diagnostic(
-          source,
-          'ambiguous-separator',
-          'warning',
-          `line ${index + 1}: a run of more than three dashes is not treated as a slide break here, but Slidev may split the slide at it — use exactly "---"`,
-          line.start,
-          line.end,
-        ),
-      )
-    }
   }
   return separators
 }
@@ -210,13 +250,25 @@ export function parseSlidevDeck(source: string): SlidevDeck {
             source,
             'unclosed-frontmatter',
             'error',
-            `line ${openSeparator + 1}: frontmatter block is never closed by a "---" line; Slidev would read the rest of the file as YAML`,
+            'frontmatter block is never closed by a "---" line; Slidev would read the rest of the file as YAML',
             openLine.start,
             openLine.end,
           ),
         )
       } else {
         const closeLine = lines[close] as Line
+        if (!EXACT_SEPARATOR.test(lineContent(closeLine, close))) {
+          diagnostics.push(
+            diagnostic(
+              source,
+              'malformed-frontmatter',
+              'error',
+              'frontmatter block is closed by a line that is not exactly "---"; Slidev consumes three dashes here and leaks the rest of the line into the slide',
+              closeLine.start,
+              closeLine.end,
+            ),
+          )
+        }
         frontmatter = {
           start: openLine.start,
           end: closeLine.end,
