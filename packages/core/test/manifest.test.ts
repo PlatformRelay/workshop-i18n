@@ -293,6 +293,20 @@ describe('parseManifest — locales', () => {
     })
   })
 
+  it('rejects targets that differ only by case — one directory on macOS', () => {
+    const error = issuesOf(minimal.replace('[de]', '[de, DE]'))
+    expect(error.issues[0]).toMatchObject({ path: 'locales.targets[1]', code: 'duplicate' })
+    expect(error.message).toMatch(/case/i)
+  })
+
+  it('rejects a target that differs from the source locale only by case', () => {
+    const withSource = minimal.replace('locales:\n', 'locales:\n  source: en\n')
+    expect(issuesOf(withSource.replace('[de]', '[EN]')).issues[0]).toMatchObject({
+      path: 'locales.targets[0]',
+      code: 'invalid',
+    })
+  })
+
   it('rejects the source locale appearing among the targets', () => {
     expect(issuesOf(minimal.replace('[de]', '[de, en]')).issues[0]).toMatchObject({
       path: 'locales.targets[1]',

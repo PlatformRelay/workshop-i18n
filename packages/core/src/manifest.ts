@@ -370,6 +370,10 @@ function readLocales(issues: IssueList, value: unknown): LocaleSet {
   }
 
   const targets: string[] = []
+  // Compared case-folded, because `i18n/<locale>/` is a directory: `de` and `DE` are two
+  // entries here and one directory on macOS or Windows, where whichever locale composes
+  // second silently overwrites the first.
+  const foldedTargets = new Set<string>()
   rawTargets.forEach((entry, index) => {
     const path = `locales.targets[${index}]`
     if (
@@ -384,14 +388,25 @@ function readLocales(issues: IssueList, value: unknown): LocaleSet {
       )
       return
     }
-    if (entry === source) {
-      issues.add(path, 'invalid', `is the source locale ${JSON.stringify(source)}, not a target`)
+    const folded = entry.toLowerCase()
+    if (folded === source.toLowerCase()) {
+      issues.add(
+        path,
+        'invalid',
+        `is the source locale ${JSON.stringify(source)} (compared without case), not a target`,
+      )
       return
     }
-    if (targets.includes(entry)) {
-      issues.add(path, 'duplicate', `locale ${JSON.stringify(entry)} is listed more than once`)
+    if (foldedTargets.has(folded)) {
+      issues.add(
+        path,
+        'duplicate',
+        `locale ${JSON.stringify(entry)} is listed more than once — locales are compared ` +
+          'without case, because they become directory names',
+      )
       return
     }
+    foldedTargets.add(folded)
     targets.push(entry)
   })
   return { source, targets }

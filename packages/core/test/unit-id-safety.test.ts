@@ -49,6 +49,26 @@ describe('identity safety — container ids', () => {
   })
 })
 
+describe('identity safety — filesystem-hostile container ids', () => {
+  it('rejects Windows reserved device names, whatever their case or extension', () => {
+    for (const reserved of ['con', 'NUL', 'Prn', 'aux', 'com1', 'LPT9', 'con.md']) {
+      expect(isSafeContainerId(reserved)).toBe(false)
+    }
+    expect(isSafeContainerId('console')).toBe(true)
+    expect(isSafeContainerId('aux-services')).toBe(true)
+  })
+
+  it('rejects a trailing dot, which Windows silently strips into a collision', () => {
+    expect(isSafeContainerId('s01-pods.')).toBe(false)
+    expect(isSafeContainerId('s01-pods')).toBe(true)
+  })
+
+  it('names the reason so the init-ids codemod can explain itself', () => {
+    const issues = validateUnitId({ surface: 'slides', containerId: 'con', unitKey: 'body/1' })
+    expect(issues[0]).toMatchObject({ field: 'containerId', reason: 'reserved-name' })
+  })
+})
+
 describe('identity safety — unit keys', () => {
   it('accepts position-independent structural keys', () => {
     expect(isSafeUnitKey('body/1')).toBe(true)

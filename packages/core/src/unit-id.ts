@@ -51,12 +51,44 @@ export const MAX_UNIT_KEY_LENGTH = 256
 /** Container ids double as file names, so no separators at all — letters, digits, `.`, `_`, `-`. */
 const CONTAINER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
+/**
+ * Names Windows cannot give a file, in any case and with any extension. A container id
+ * becomes `i18n/<locale>/overrides/<containerId>.md`, so a slide legitimately called
+ * `con` would produce a file that cannot be created or checked out on Windows — a
+ * corpus that fails to clone, reported as a git error rather than as an id problem.
+ */
+const WINDOWS_RESERVED_NAMES = new Set([
+  'con',
+  'prn',
+  'aux',
+  'nul',
+  'com1',
+  'com2',
+  'com3',
+  'com4',
+  'com5',
+  'com6',
+  'com7',
+  'com8',
+  'com9',
+  'lpt1',
+  'lpt2',
+  'lpt3',
+  'lpt4',
+  'lpt5',
+  'lpt6',
+  'lpt7',
+  'lpt8',
+  'lpt9',
+])
+
 /** Unit keys additionally allow `/` and `:` as structure separators (`body/3`, `note:speaker:2`). */
 const UNIT_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/
 
 /** Why an identity was rejected. Machine-readable so the CLI can group failures. */
 export type UnitIdRejection =
   | 'not-a-string'
+  | 'reserved-name'
   | 'empty'
   | 'too-long'
   | 'path-traversal'
@@ -133,6 +165,19 @@ function checkContainerId(value: string): UnitIdIssue | undefined {
       'illegal-character',
       value,
       'must start with a letter or digit and use only letters, digits, ".", "_" and "-"',
+    )
+  }
+  if (value.endsWith('.')) {
+    // Windows strips a trailing dot, so `s01.` and `s01` become the same override file.
+    return issue('containerId', 'reserved-name', value, 'must not end with "."')
+  }
+  const stem = value.split('.')[0]?.toLowerCase() ?? ''
+  if (WINDOWS_RESERVED_NAMES.has(stem)) {
+    return issue(
+      'containerId',
+      'reserved-name',
+      value,
+      `must not be a reserved device name (${stem}) — it cannot be a file on Windows`,
     )
   }
   return undefined
@@ -238,7 +283,17 @@ export function parseSafeUnitId(raw: string): UnitId {
 /**
  * Total order over identities, by formatted id. The catalog layer sorts entries with
  * this so PO output is stably ordered (spec 002 FR-005) without a locale-sensitive
- * comparison: plain code-unit ordering, identical on every machine.
+ * comparison: plain code-unit ordering, identical on every machine and every ICU build.
+ *
+ * Two caveats worth knowing before relying on it as a key:
+ *
+ * - It is a *strict* total order only over ids that pass {@link assertSafeUnitId}.
+ *   `parseUnitId` deliberately admits unsafe ids, and two of those can format to the
+ *   same string while differing structurally, so they compare equal here.
+ * - It is case-sensitive, as a code-unit comparison must be. Container ids that differ
+ *   only by case therefore sort as distinct while colliding as override file names on a
+ *   case-insensitive filesystem — a duplicate-id lint (spec 001 FR-002) must fold case
+ *   rather than reuse this comparison.
  */
 export function compareUnitIds(a: UnitId, b: UnitId): number {
   const left = formatUnitId(a)
