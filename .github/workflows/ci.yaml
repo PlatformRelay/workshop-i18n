@@ -28,4 +28,5 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm build
+      - run: sudo apt-get update && sudo apt-get install -y gettext
       - run: pnpm test
