@@ -136,8 +136,10 @@ describe('planSlideIds', () => {
     // body text, so the separator has to be corrected first.
     const source = ['# One', '', '----', '', '# Two', ''].join('\n')
     const plan = planSlideIds(source, { sectionId: SECTION })
-    expect(plan.insertions).toHaveLength(1)
-    expect(plan.insertions[0]?.slideIndex).toBe(0)
+    // One slide it cannot name means the whole file goes back untouched: a half-adopted
+    // deck still fails `--check` and leaves a diff nobody can review in one pass.
+    expect(plan.insertions).toEqual([])
+    expect(plan.text).toBe(source)
     const refusal = plan.diagnostics.find((d) => d.code === 'missing-slide-id')
     expect(refusal?.severity).toBe('error')
     expect(refusal?.message).toContain('four or more dashes')
@@ -164,10 +166,43 @@ describe('planSlideIds', () => {
     expect(plan.diagnostics.map((d) => d.code)).toContain('missing-slide-id')
   })
 
-  it('carries a deck diagnostic through instead of editing a file it cannot read', () => {
-    const source = ['---', 'layout: cover', '', '# Never closed', ''].join('\n')
+  it('hands back the file untouched when it cannot read it, rather than a poisoned copy', () => {
+    // The returned `text` is what a CLI writes. On an unclosed block the insertion turns
+    // the author's own `slideId:` and `layout:` lines into body prose, the slide quietly
+    // takes a new id, and that text then extracts *cleanly* — offering the real
+    // frontmatter to a translator as a msgid. Only the diagnostics stood between a caller
+    // and that, so there is nothing to write back now but the original bytes.
+    const source = ['---', 'slideId: keeps-id', 'layout: cover', '', '# Never closed', ''].join(
+      '\n',
+    )
     const plan = planSlideIds(source, { sectionId: SECTION })
     expect(plan.diagnostics.map((d) => d.code)).toContain('unclosed-frontmatter')
+    expect(plan.insertions).toEqual([])
+    expect(plan.text).toBe(source)
+  })
+
+  it('is idempotent on frontmatter that is not valid YAML but already names the slide', () => {
+    // `locateFrontmatter` returns before reading `slideId` when the YAML does not parse,
+    // so the id looked missing and a second `slideId:` line was inserted on every run —
+    // unbounded, and each run made the YAML less parseable.
+    const source = [
+      '---',
+      'slideId: rej-malformed',
+      'heading: "unterminated',
+      '---',
+      '',
+      '# X',
+      '',
+    ].join('\n')
+    const once = planSlideIds(source, { sectionId: SECTION })
+    expect(once.text).toBe(source)
+    expect(planSlideIds(once.text, { sectionId: SECTION }).text).toBe(source)
+  })
+
+  it('is idempotent on a frontmatter block that is a sequence', () => {
+    const source = ['---', '- one', '- two', '---', '', '# X', ''].join('\n')
+    const once = planSlideIds(source, { sectionId: SECTION })
+    expect(planSlideIds(once.text, { sectionId: SECTION }).text).toBe(once.text)
   })
 })
 

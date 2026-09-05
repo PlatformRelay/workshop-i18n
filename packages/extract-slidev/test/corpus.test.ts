@@ -230,6 +230,23 @@ function structuralLines(text: string): { separators: number; fences: number } {
   return { separators, fences }
 }
 
+/**
+ * A marker translation that keeps whatever comment delimiters the English unit carried.
+ *
+ * A unit spans a whole paragraph, so an inline `<!-- aside -->` is part of the msgid.
+ * Dropping a delimiter is refused — correctly, since the comment would swallow the slides
+ * after it — so a sweep that replaces a unit wholesale has to carry them across, exactly
+ * as a translator must.
+ */
+function markerFor(source: string, index: number): string {
+  const count = (token: string): number => source.split(token).length - 1
+  return [
+    `de-${index}`,
+    ...Array.from({ length: count('<!--') }, () => '<!--'),
+    ...Array.from({ length: count('-->') }, () => '-->'),
+  ].join(' ')
+}
+
 /** The deck's shape: how many slides, and which identity each one declares. */
 function structureOf(text: string): unknown {
   return parseSlidevDeck(text).slides.map((slide) => {
@@ -292,7 +309,10 @@ describe.each(CORPUS.map((fixture) => [fixture.name, fixture] as const))(
     // Group 2 — fence identity and protected skeleton.
     it('keeps every fenced block and machinery key byte-identical when everything is translated', () => {
       const translations = Object.fromEntries(
-        extraction.units.map((unit, index) => [formatUnitId(unit.id), `de-${index}`]),
+        extraction.units.map((unit, index) => [
+          formatUnitId(unit.id),
+          markerFor(unit.source, index),
+        ]),
       )
       const translated = composeSkeleton(extraction.skeleton, translations)
       expect(fenceBlocks(translated)).toEqual(fenceBlocks(adopted))
@@ -307,7 +327,10 @@ describe.each(CORPUS.map((fixture) => [fixture.name, fixture] as const))(
       // so the sweep below adds an independent reading of those rules; the differential
       // re-asserts everything against Slidev itself when a parser is available.
       const translations = Object.fromEntries(
-        extraction.units.map((unit, index) => [formatUnitId(unit.id), `de-${index} — Ü "3" ✓`]),
+        extraction.units.map((unit, index) => [
+          formatUnitId(unit.id),
+          `${markerFor(unit.source, index)} — Ü "3" ✓`,
+        ]),
       )
       const composed = composeSkeleton(extraction.skeleton, translations)
       expect(structureOf(composed)).toEqual(structureOf(adopted))
@@ -456,5 +479,17 @@ describe.each(REJECTED)('fixtures/adversarial-rejected/%s', (name, code) => {
   it('still reproduces the file byte-for-byte, because refusing is not mangling', () => {
     const located = locateSlidevFile(source)
     expect(composeSkeleton(located.skeleton, {})).toBe(source)
+  })
+
+  it('reaches a fixed point under init-ids, however many runs', () => {
+    // The idempotence property ran only over files that extract cleanly, which is exactly
+    // where this class of bug cannot live: a file extraction refuses is the one whose
+    // insertions nothing was checking. `missing-slide-id.md` is *meant* to gain an id
+    // here — what must never happen is gaining another one on every run.
+    const sectionId = name.replace(/\.md$/, '')
+    const once = planSlideIds(source, { sectionId })
+    const twice = planSlideIds(once.text, { sectionId })
+    expect(twice.insertions).toEqual([])
+    expect(twice.text).toBe(once.text)
   })
 })

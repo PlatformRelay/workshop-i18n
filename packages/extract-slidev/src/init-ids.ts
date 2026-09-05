@@ -24,7 +24,7 @@
 
 import { isSafeContainerId, MAX_CONTAINER_ID_LENGTH } from '@workshop-i18n/core'
 import { isSlideSeparatorLine, parseSlidevDeck, type SlideRange } from './deck.js'
-import { type Diagnostic, diagnostic } from './diagnostic.js'
+import { type Diagnostic, diagnostic, hasErrors } from './diagnostic.js'
 import { locateFrontmatter, SLIDE_ID_KEY } from './frontmatter.js'
 import { locateProse } from './prose.js'
 import { positionAt } from './source.js'
@@ -69,7 +69,13 @@ export interface SlideIdInsertion {
 
 /** The result of an `init-ids` run over one file. */
 export interface SlideIdPlan {
-  /** The source with every insertion applied. Equal to the input when nothing is missing. */
+  /**
+   * The source with every insertion applied — safe to write back as it stands.
+   *
+   * Equal to the input when nothing is missing, and *also* equal to it when any diagnostic
+   * is an error: a file this package could not fully read is one it must not codemod, so
+   * the plan is empty rather than partial.
+   */
   readonly text: string
   /** Insertions in ascending offset order. Empty means the file is already adopted. */
   readonly insertions: readonly SlideIdInsertion[]
@@ -286,6 +292,14 @@ export function planSlideIds(source: string, options: SlideIdPlanOptions): Slide
           : `${line}---${eol}`
     insertions.push({ slideIndex: slide.index, slideId, offset, text })
   }
+
+  // Fail closed on the *file*, not the slide. `text` is what a CLI writes back, and an
+  // insertion into a file this package could not fully read is worse than no insertion:
+  // on an unclosed block it turns the author's own `slideId:` and `layout:` lines into
+  // body prose, the slide quietly takes a new id, and the result then extracts cleanly —
+  // offering the real frontmatter to a translator as a msgid. A half-adopted deck also
+  // still fails `--check`, so there is nothing to gain by writing part of one.
+  if (hasErrors(diagnostics)) return { text: source, insertions: [], diagnostics }
 
   let text = source
   for (let index = insertions.length - 1; index >= 0; index -= 1) {
