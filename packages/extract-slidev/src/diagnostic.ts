@@ -37,6 +37,8 @@ export type DiagnosticCode =
   | 'separator-in-tilde-fence'
   /** A fence with no closing line, which makes later slide boundaries depend on later content. */
   | 'unclosed-fence'
+  /** Slidev's frontmatter regex reads a block on a slide whose scanner opened none. */
+  | 'phantom-frontmatter'
   /** Prose inside a raw HTML block or Vue island, which stays protected skeleton. */
   | 'prose-in-html-block'
 

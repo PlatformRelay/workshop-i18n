@@ -26,6 +26,10 @@ heading: Blockquotes, nested lists and wrapped prose
   > quoted inside a list item
   > wrapping too
 
+- an item with a second block
+
+  which is a paragraph of its own, indented, starting its own line
+
 A top-level paragraph that wraps
 across three lines
 without any container prefix at all.

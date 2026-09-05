@@ -144,6 +144,9 @@ function scanLines(source: string): readonly Line[] {
 /** Slidev's `RE_LEADING_BACKTICKS`: the fence level includes its own indentation. */
 const LEADING_BACKTICKS = /^\s*`+/
 
+/** A tilde run. Not a fence to Slidev's scanner; a fence to the renderer behind it. */
+const LEADING_TILDES = /^\s*~{3,}/
+
 /**
  * True when Slidev would break a slide at this line.
  *
@@ -172,12 +175,54 @@ export function isSlideSeparatorLine(line: string): boolean {
 export function isFenceOpenerLine(line: string): boolean {
   return line.trimEnd().trimStart().startsWith('```')
 }
-/** A tilde run, tracked for diagnostics only — Slidev does not treat these as fences. */
-const LEADING_TILDES = /^\s*~{3,}/
+
+/**
+ * True when the markdown renderer behind Slidev would open a fenced block here.
+ *
+ * Slidev's *scanner* does not know tildes exist, so this is not consulted when deciding
+ * where slides break — but markdown-it does, so a line like this still turns the rest of
+ * a slide into a code block on screen. Exported so composition and the scan's
+ * `separator-in-tilde-fence` diagnostic share one definition.
+ */
+export function isTildeFenceOpenerLine(line: string): boolean {
+  return LEADING_TILDES.test(line.trimEnd())
+}
+
+/**
+ * True when a separator line would open a frontmatter block, given the line after it.
+ *
+ * Slidev's `line[3] !== "-" && next?.trim()`: a run of four or more dashes splits a slide
+ * but opens nothing. Exported so `init-ids` asks this rather than restating it — a second
+ * copy is how the fence and separator rules drifted apart in the first place.
+ */
+export function opensFrontmatterBlock(
+  separatorLine: string,
+  nextLine: string | undefined,
+): boolean {
+  const trimmed = separatorLine.trimEnd()
+  return (
+    isSlideSeparatorLine(trimmed) &&
+    trimmed[3] !== '-' &&
+    nextLine !== undefined &&
+    nextLine.trim() !== ''
+  )
+}
 /** What an author almost certainly meant when they wrote a separator. */
 const EXACT_SEPARATOR = /^---[ \t]*$/
 /** A column-0 dash run, which is what Slidev's `startsWith("---")` accepts. */
 const DASH_RUN = /^-{3,}/
+
+/**
+ * Slidev's `RE_FRONTMATTER`, transcribed: anchored at the slide's first byte, lazy, and
+ * with a close that is not line-anchored.
+ *
+ * It runs on the slide slice *after* the scanner has chosen boundaries, so it can find a
+ * block the scanner never opened — a slide whose raw happens to begin `---` and which
+ * contains any later `---`, including one hidden inside a speaker note or a fence where
+ * the scanner could not see it. Slidev then renders everything after that dash run and
+ * nothing before it, which loses the whole slide.
+ */
+const SLIDEV_FRONTMATTER_REGEX = /^---.*\r?\n[\s\S]*?---/
 
 /**
  * Strip a leading byte-order mark from the first line only. The mark stays in the
@@ -240,6 +285,29 @@ export function parseSlidevDeck(source: string): SlidevDeck {
     if (startLine === endLine) return false
     const separator = openSeparator
     const close = frontmatterClose
+    const rawStart = lineStart(startLine)
+    const rawText = source.slice(rawStart, lineStart(endLine))
+    const frontmatterBlock =
+      separator === undefined || close === undefined
+        ? undefined
+        : {
+            start: at(separator).start,
+            end: at(close).end,
+            bodyStart: at(separator).end,
+            bodyEnd: at(close).start,
+          }
+    if (frontmatterBlock === undefined && SLIDEV_FRONTMATTER_REGEX.test(rawText)) {
+      diagnostics.push(
+        diagnostic(
+          source,
+          'phantom-frontmatter',
+          'error',
+          'this slide begins with "---" without opening a frontmatter block, and contains a later "---" that Slidev\'s frontmatter regex closes on — the renderer would swallow everything between them; put a blank line after the leading "---", or remove the later one',
+          rawStart,
+          lineStart(endLine),
+        ),
+      )
+    }
     slides.push({
       index: slides.length,
       start: separator === undefined ? lineStart(startLine) : at(separator).end,
@@ -248,15 +316,7 @@ export function parseSlidevDeck(source: string): SlidevDeck {
           ? undefined
           : { start: at(separator).start, end: at(separator).end },
       end: lineStart(endLine),
-      frontmatter:
-        separator === undefined || close === undefined
-          ? undefined
-          : {
-              start: at(separator).start,
-              end: at(close).end,
-              bodyStart: at(separator).end,
-              bodyEnd: at(close).start,
-            },
+      frontmatter: frontmatterBlock,
       bodyStart: lineStart(contentLine),
       bodyEnd: lineStart(endLine),
       // Headmatter is the file's leading frontmatter *block*; a `----` opens none.
@@ -401,7 +461,9 @@ function advanceTildeState(
   trimmed: string,
   open: number | undefined,
 ): number | undefined {
-  const run = LEADING_TILDES.exec(trimmed)?.[0].trimStart()
+  const run = isTildeFenceOpenerLine(trimmed)
+    ? (LEADING_TILDES.exec(trimmed)?.[0].trimStart() ?? '~~~')
+    : undefined
   if (run === undefined) return open
   if (open !== undefined) return run.length >= open ? undefined : open
   for (let close = index + 1; close < lines.length; close += 1) {

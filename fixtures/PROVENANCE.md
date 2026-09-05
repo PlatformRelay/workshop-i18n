@@ -58,5 +58,6 @@ must still reproduce them byte-for-byte.
 | `missing-slide-id.md` | `missing-slide-id` |
 | `separator-in-tilde-fence.md` | `separator-in-tilde-fence` — Slidev tracks backtick fences only, so it splits the slide inside this code block; agreeing silently would leave the second rendered slide with no identity while `--check` passed |
 | `dash-run-opens-no-block.md` | `missing-slide-id` — a `----` separator splits the slide but opens no frontmatter block, so `init-ids` has nowhere to write an identity and refuses rather than emitting YAML the renderer shows as prose |
+| `phantom-frontmatter.md` | `phantom-frontmatter` — the slide opens no block, but its text begins with `---` and Slidev's lazy frontmatter regex closes on a later dash run hidden inside a speaker note, swallowing the whole slide |
 | `unclosed-frontmatter.md` | `unclosed-frontmatter` |
 | `unsafe-slide-id.md` | `unsafe-slide-id` |

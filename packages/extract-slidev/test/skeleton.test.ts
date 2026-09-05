@@ -143,6 +143,22 @@ describe('composeSkeleton refuses a replacement that would break out of its hole
     )
   })
 
+  it('rejects a lone surrogate, which UTF-8 encoding would replace on the way out', () => {
+    // `decodeSource` refuses invalid UTF-8 coming in; a lone surrogate is the same loss on
+    // the way out, silently substituted as U+FFFD when the composed file is written.
+    for (const lone of ['eins \ud800 zwei', 'eins \udc00 zwei', 'eins \ud83d zwei']) {
+      expect(() => composeSkeleton(skeleton, { 'slides:s1:body/p-1': lone })).toThrow(
+        CompositionError,
+      )
+    }
+  })
+
+  it('accepts a well-formed surrogate pair', () => {
+    expect(composeSkeleton(skeleton, { 'slides:s1:body/p-1': 'eins 🧑‍🚀 zwei' })).toContain(
+      'eins 🧑‍🚀 zwei',
+    )
+  })
+
   it('rejects a control byte', () => {
     expect(() => composeSkeleton(skeleton, { 'slides:s1:body/p-1': 'eins\u0000zwei' })).toThrow(
       CompositionError,
@@ -199,6 +215,45 @@ describe('composeSkeleton refuses a replacement that would break out of its hole
         composeSkeleton(skeleton, { 'slides:s1:body/p-1': `eins\n${line}\nzwei` }),
       ).toThrow(CompositionError)
     }
+  })
+
+  it('rejects a fence that only the text before the hole indents into one', () => {
+    // A paragraph inside a list item starts after two spaces of indentation, so the hole
+    // does not begin at column 0 — but its line does, and Slidev opens a fence at any
+    // indent. Judging the first line without the text in front of it applies the
+    // separator's column-0 reasoning to a predicate that has no column-0 rule.
+    const source = '- item\n\n  A second paragraph.\n'
+    const indented = createSkeleton(source, [
+      hole('slides:s1:body/l-1/li-1/p-2', 10, 29, 'A second paragraph.', markdown('  ')),
+    ])
+    expect(() =>
+      composeSkeleton(indented, { 'slides:s1:body/l-1/li-1/p-2': '\u0060\u0060\u0060yaml' }),
+    ).toThrow(CompositionError)
+    expect(() => composeSkeleton(indented, { 'slides:s1:body/l-1/li-1/p-2': '~~~yaml' })).toThrow(
+      CompositionError,
+    )
+  })
+
+  it('rejects a comment delimiter synthesised across the edge of a hole', () => {
+    // Nothing the translator wrote is a delimiter; the `>` already sat after the hole.
+    const source = '<!--\nSpeaker: text> tail\n-->\n'
+    const seam = createSkeleton(source, [
+      hole('slides:s1:note/p-1', 5, 18, 'Speaker: text', markdown('', 'note')),
+    ])
+    expect(() => composeSkeleton(seam, { 'slides:s1:note/p-1': 'Sprecher: --' })).toThrow(
+      CompositionError,
+    )
+  })
+
+  it('still allows a hole whose line already contains a comment delimiter', () => {
+    // A one-line speaker note is wrapped in delimiters the translator did not add.
+    const source = '<!-- Speaker: eine Zeile. -->\n'
+    const inline = createSkeleton(source, [
+      hole('slides:s1:note/p-1', 5, 25, 'Speaker: eine Zeile.', markdown('', 'note')),
+    ])
+    expect(composeSkeleton(inline, { 'slides:s1:note/p-1': 'Sprecher: kurz.' })).toBe(
+      '<!-- Sprecher: kurz. -->\n',
+    )
   })
 
   it('allows a dash run that is not at the start of its line', () => {

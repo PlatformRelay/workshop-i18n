@@ -269,6 +269,35 @@ describe('parseSlidevDeck follows Slidev through the shapes fixtures do not cont
     expect(parseSlidevDeck('# One\n\n---').slides).toHaveLength(1)
   })
 
+  it('reports frontmatter Slidev reads from a slide the scanner opened no block for', () => {
+    // `slice()` emits nothing at the top of the file and the next line is blank, so Slidev
+    // leaves `start` on the separator: the slide's raw begins `---\n`, and `RE_FRONTMATTER`
+    // then runs lazily to the next `---` *anywhere* — here one hidden inside a speaker
+    // note. Slidev renders `-->` and nothing else; the whole slide is gone.
+    const source = [
+      '---',
+      '',
+      '# A',
+      '',
+      'Some prose.',
+      '',
+      '<!--',
+      'Speaker: note',
+      '---',
+      '-->',
+      '',
+    ].join('\n')
+    const deck = parseSlidevDeck(source)
+    expect(deck.slides).toHaveLength(1)
+    expect(deck.slides[0]?.frontmatter).toBeUndefined()
+    expect(deck.diagnostics.map((d) => d.code)).toEqual(['phantom-frontmatter'])
+    expect(deck.diagnostics[0]?.severity).toBe('error')
+  })
+
+  it('stays quiet when the leading separator has no second dash run to close on', () => {
+    expect(parseSlidevDeck('---\n\n# A\n\nprose\n').diagnostics).toEqual([])
+  })
+
   it('treats a separator that opens nothing as the slide content it is', () => {
     // A file that is only `---` renders as a slide whose content is `---`. Recording it
     // as an opening delimiter instead left `init-ids` inserting at the end of the file,

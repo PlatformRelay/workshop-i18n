@@ -50,7 +50,7 @@ import {
   type TranslationUnit,
   type UnitId,
 } from '@workshop-i18n/core'
-import { isFenceOpenerLine, isSlideSeparatorLine } from './deck.js'
+import { isFenceOpenerLine, isSlideSeparatorLine, isTildeFenceOpenerLine } from './deck.js'
 
 /** Where a markdown hole sits, which decides what a replacement may not contain. */
 export type HoleContext = 'body' | 'note'
@@ -222,38 +222,82 @@ function encodeReplacement(hole: Hole, raw: string, text: string): string {
 }
 
 /**
- * A tilde run. Slidev's *scanner* does not know tildes exist, but the markdown renderer
- * behind it does, so a translation that opens one still turns the rest of the slide into
- * a code block on screen. The scanner's rules come from `deck.ts`; this one is the
- * renderer's.
+ * True when `text` carries a character that must not reach a composed file.
+ *
+ * Two kinds. Control characters — everything below 0x20 except tab, line feed and
+ * carriage return, plus DEL — end up in a generated deck as invisible bytes that make it
+ * undiffable. And **lone surrogates**: a high or low surrogate without its partner has no
+ * UTF-8 encoding, so writing the file silently substitutes U+FFFD. `decodeSource` refuses
+ * exactly that loss on the way in; this is the same rule at the other end of the trip.
  */
-const TILDE_FENCE_OPENER = /^\s*~{3,}/
-/**
- * True when `text` carries a control character. Tab, line feed and carriage return are
- * the only ones prose needs; anything else in a translation would end up in a generated
- * deck as an invisible byte that makes the file undiffable.
- */
-function hasControlCharacter(text: string): boolean {
+function hasUnsafeCharacter(text: string): boolean {
   for (let index = 0; index < text.length; index += 1) {
     const code = text.charCodeAt(index)
     if (code === 0x09 || code === 0x0a || code === 0x0d) continue
     if (code < 0x20 || code === 0x7f) return true
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = text.charCodeAt(index + 1)
+      if (Number.isNaN(next) || next < 0xdc00 || next > 0xdfff) return true
+      index += 1
+      continue
+    }
+    if (code >= 0xdc00 && code <= 0xdfff) return true
   }
   return false
+}
+
+/** The text before and after a hole on the lines it occupies. */
+interface SpliceContext {
+  /** Everything from the start of the hole's first line up to the hole. */
+  readonly prefix: string
+  /** Everything from the end of the hole to the end of its last line. */
+  readonly suffix: string
+  /** The bytes the hole currently holds, for comparing what a replacement introduces. */
+  readonly original: string
+}
+
+/** Read the text sharing a line with the hole, which decides how its edges are judged. */
+function spliceContextOf(source: string, hole: Hole): SpliceContext {
+  const lineStart = source.lastIndexOf('\n', hole.start - 1) + 1
+  const lineEnd = source.indexOf('\n', hole.end)
+  return {
+    prefix: source.slice(lineStart, hole.start),
+    suffix: source.slice(hole.end, lineEnd === -1 ? source.length : lineEnd),
+    original: source.slice(hole.start, hole.end),
+  }
+}
+
+function countOccurrences(text: string, token: string): number {
+  let count = 0
+  let index = text.indexOf(token)
+  while (index !== -1) {
+    count += 1
+    index = text.indexOf(token, index + token.length)
+  }
+  return count
 }
 
 /**
  * Reject a replacement that would change the deck's structure rather than its words.
  *
- * `atLineStart` says whether the hole begins at column 0. A hole spliced mid-line — a
- * heading after its `# `, a list item after its bullet — cannot make its *first* line a
- * separator or a fence, so checking it there would reject `# --- x` for no reason. Every
- * continuation line does start at column 0 once the container prefix is applied.
+ * Judged **in context**, on the lines as they will actually appear. A hole does not
+ * usually start at column 0 — a heading begins after its `# `, a list item after its
+ * bullet, a paragraph inside a list item after its indentation — and what sits in front
+ * of it on that line decides what the line becomes. Waving the first line through for
+ * not starting at column 0 was true for separators, whose rule is column-anchored, and
+ * false for fences, which Slidev opens at *any* indent: a bare fence spliced after two
+ * spaces of list indentation is an indented fence opener, and a second one gives it a
+ * close for the renderer to skip to.
+ *
+ * The same reasoning applies at the far edge: a replacement ending in `--` in front of a
+ * `>` already on the line synthesises a comment terminator neither side contains. So
+ * comment delimiters are counted across the whole reconstructed region and compared with
+ * what it holds today — one that was already there is fine, one that appears is not.
  */
 function rejectReplacement(
   hole: Hole,
   replacement: string,
-  atLineStart: boolean,
+  context: SpliceContext,
 ): CompositionIssue | undefined {
   const id = formatUnitId(hole.id)
   const reject = (reason: ReplacementRejection, detail: string): CompositionIssue => ({
@@ -261,8 +305,11 @@ function rejectReplacement(
     reason,
     message: `${id}: ${detail}`,
   })
-  if (hasControlCharacter(replacement)) {
-    return reject('control-byte', 'translation contains a control character')
+  if (hasUnsafeCharacter(replacement)) {
+    return reject(
+      'control-byte',
+      'translation contains a control character or an unpaired surrogate, which cannot survive being written as UTF-8 — remove it from the translation',
+    )
   }
   if (hole.encoding.kind === 'yaml-scalar') {
     // Slidev's frontmatter regex is lazy and its close is not line-anchored, so the first
@@ -272,25 +319,34 @@ function rejectReplacement(
     return replacement.includes('---')
       ? reject(
           'slide-separator',
-          'translation contains "---", which truncates the frontmatter block and renders the rest of it as slide text',
+          'translation contains "---", which truncates the frontmatter block and renders the rest of it as slide text — use an em dash "—" or an en dash pair instead',
         )
       : undefined
   }
-  if (/<!--|-->/.test(replacement)) {
-    return reject(
-      'comment-terminator',
-      hole.encoding.context === 'note'
-        ? 'translation contains "<!--" or "-->", which would break out of the speaker-note comment'
-        : 'translation contains "<!--" or "-->", which would open or close an HTML comment and hide the skeleton after it',
-    )
-  }
-  for (const [index, line] of splitLines(replacement).entries()) {
-    if (index === 0 && !atLineStart) continue
-    if (isSlideSeparatorLine(line)) {
-      return reject('slide-separator', 'translation contains a line Slidev reads as a slide break')
+  const composed = context.prefix + replacement + context.suffix
+  const current = context.prefix + context.original + context.suffix
+  for (const token of ['<!--', '-->']) {
+    if (countOccurrences(composed, token) > countOccurrences(current, token)) {
+      return reject(
+        'comment-terminator',
+        hole.encoding.context === 'note'
+          ? `translation introduces "${token}", which would break out of the speaker-note comment — remove it from the translation`
+          : `translation introduces "${token}", which would open or close an HTML comment and hide the skeleton after it — remove it from the translation`,
+      )
     }
-    if (isFenceOpenerLine(line) || TILDE_FENCE_OPENER.test(line)) {
-      return reject('fence-opener', 'translation contains a line that opens a fenced code block')
+  }
+  for (const line of splitLines(composed)) {
+    if (isSlideSeparatorLine(line)) {
+      return reject(
+        'slide-separator',
+        'translation starts a line with "---", which Slidev reads as a slide break — use an em dash "—" or an en dash pair instead',
+      )
+    }
+    if (isFenceOpenerLine(line) || isTildeFenceOpenerLine(line)) {
+      return reject(
+        'fence-opener',
+        'translation opens a fenced code block, which makes the renderer skip to the next matching fence — use single backticks for inline code instead',
+      )
     }
   }
   return undefined
@@ -314,8 +370,7 @@ export function composeSkeleton(skeleton: Skeleton, translations: TranslationLoo
     const translation = lookup(translations, formatUnitId(hole.id))
     if (translation === undefined || translation === hole.source) continue
     const replacement = encodeReplacement(hole, source.slice(hole.start, hole.end), translation)
-    const atLineStart = hole.start === 0 || source.charAt(hole.start - 1) === '\n'
-    const issue = rejectReplacement(hole, replacement, atLineStart)
+    const issue = rejectReplacement(hole, replacement, spliceContextOf(source, hole))
     if (issue) {
       issues.push(issue)
       continue
