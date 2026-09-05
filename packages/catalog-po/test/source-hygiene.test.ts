@@ -12,9 +12,13 @@ import { describe, expect, it } from 'vitest'
  *
  * The fixtures are covered too: a golden nobody can read a diff of is not a golden.
  */
-const DIRECTORIES = ['../src', '../test', '../../../fixtures/catalogs'].map((relative) =>
-  fileURLToPath(new URL(relative, import.meta.url)),
-)
+const DIRECTORIES = [
+  '../src',
+  '../test',
+  '../../../fixtures/catalogs',
+  '../../../fixtures/catalogs/gnu-generated',
+  '../../../fixtures/catalogs/gnu-generated/refused',
+].map((relative) => fileURLToPath(new URL(relative, import.meta.url)))
 
 function scannedFiles(): readonly string[] {
   return DIRECTORIES.flatMap((directory) =>

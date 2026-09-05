@@ -1,0 +1,67 @@
+# German translations for workshop-i18n package.
+# Copyright (C) 2026 THE workshop-i18n'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the workshop-i18n package.
+# Automatically generated, 2026.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: workshop-i18n 0.1.0\n"
+"Report-Msgid-Bugs-To: i18n@example.org\n"
+"POT-Creation-Date: 2026-01-15 09:00+0000\n"
+"PO-Revision-Date: 2026-01-15 10:30+0000\n"
+"Last-Translator: Automatically generated\n"
+"Language-Team: none\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#. TRANSLATORS: heading above the pod list; keep the word "Pod" untranslated.
+#: src-v2.c:3
+#, fuzzy
+#| msgid "A Pod is a group of containers."
+msgid "A Pod is a group of one or more containers."
+msgstr "Ein Pod ist eine Gruppe von Containern."
+
+#: src-v2.c:4
+msgid "A Service gives Pods a stable address."
+msgstr "Ein Service gibt Pods eine stabile Adresse."
+
+#: src-v2.c:5
+msgctxt "slides:s02:title"
+msgid "Services"
+msgstr "Dienste"
+
+#: src-v2.c:6
+#, c-format
+msgid "%d pod is running."
+msgid_plural "%d pods are running."
+msgstr[0] "%d Pod läuft."
+msgstr[1] "%d Pods laufen."
+
+#: src-v2.c:7
+msgid ""
+"A Pod is the smallest deployable unit in Kubernetes, and it wraps one or "
+"more containers that share a network namespace and a set of storage volumes."
+msgstr ""
+"Ein Pod ist die kleinste in Kubernetes einsetzbare Einheit und umschließt "
+"einen oder mehrere Container, die sich einen Netzwerk-Namensraum und eine "
+"Menge von Speicher-Volumes teilen."
+
+#: src-v2.c:8
+msgid ""
+"Grüße, 日本語 — first line\n"
+"and a second line.\n"
+msgstr ""
+"Grüße, 日本語 — erste Zeile\n"
+"und eine zweite Zeile.\n"
+
+#: src-v2.c:9
+msgid "A brand new unit nobody has translated yet."
+msgstr ""
+
+# Translator note: wording taken from the 2024 glossary.
+#, no-c-format
+#~ msgid "This unit is about to be deleted."
+#~ msgstr "Diese Einheit wird gleich gelöscht."

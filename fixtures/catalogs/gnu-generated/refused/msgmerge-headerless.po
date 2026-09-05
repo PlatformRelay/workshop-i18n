@@ -1,0 +1,36 @@
+#. TRANSLATORS: heading above the pod list; keep the word "Pod" untranslated.
+#: src-v2.c:3
+msgid "A Pod is a group of one or more containers."
+msgstr ""
+
+#: src-v2.c:4
+msgid "A Service gives Pods a stable address."
+msgstr ""
+
+#: src-v2.c:5
+msgctxt "slides:s02:title"
+msgid "Services"
+msgstr ""
+
+#: src-v2.c:6
+#, c-format
+msgid "%d pod is running."
+msgid_plural "%d pods are running."
+msgstr[0] ""
+msgstr[1] ""
+
+#: src-v2.c:7
+msgid ""
+"A Pod is the smallest deployable unit in Kubernetes, and it wraps one or "
+"more containers that share a network namespace and a set of storage volumes."
+msgstr ""
+
+#: src-v2.c:8
+msgid ""
+"Gre,   first line\n"
+"and a second line.\n"
+msgstr ""
+
+#: src-v2.c:9
+msgid "A brand new unit nobody has translated yet."
+msgstr ""

@@ -27,6 +27,10 @@ import {
  *   dependency that drops what it does not model.
  * - **Generated** files pinning the four stages of the spec 002 User Story 1 scenario.
  *   Regenerate with `UPDATE_GOLDENS=1 pnpm test`; the diff *is* the review.
+ *
+ * A hand-written fixture can only evidence what we *believe* another tool writes, so the
+ * third kind lives one directory down and is covered by `gnu-fixtures.test.ts`:
+ * `fixtures/catalogs/gnu-generated/` is byte-for-byte GNU gettext output.
  */
 const FIXTURES = fileURLToPath(new URL('../../../fixtures/catalogs/', import.meta.url))
 const UPDATE = process.env.UPDATE_GOLDENS === '1'
