@@ -1,6 +1,15 @@
 /**
  * Locale tags, and the gate that keeps them safe as path segments.
  *
+ * ## The four rejected languages, and what to write instead
+ *
+ * `con`, `aux`, `nul` and `prn` are ISO 639-3 codes (Cofan, Aura, Nusa Laut, Prasuni)
+ * *and* Windows device names, so `i18n/con/` is a directory that cannot be created or
+ * checked out on Windows. They are rejected, and the rejection message says the
+ * workaround because that message is all a facilitator typing `--locale con` will read:
+ * add a region subtag — `con-EC`, `nul-ID`, `aux-BR`, `prn-AF` — which is a valid BCP 47
+ * tag, a legal directory name, and accepted here.
+ *
  * A locale is the other identifier this tool turns into a path: catalogs live at
  * `i18n/<locale>/*.po` and overrides at `i18n/<locale>/overrides/<slideId>.md`. Container
  * ids have been gated since spec 001; locales were validated only inside the manifest
@@ -76,7 +85,9 @@ const LOCALE_REJECTION_DETAIL: Readonly<Record<LocaleRejection, string>> = Objec
   empty: 'must not be empty',
   'too-long': `must be at most ${MAX_LOCALE_TAG_LENGTH} characters`,
   'illegal-character': 'must be a BCP 47 tag using only letters, digits and "-"',
-  'reserved-name': 'is a reserved device name and cannot be a directory on Windows',
+  'reserved-name':
+    'is a reserved device name and cannot be a directory on Windows — add a region ' +
+    'subtag to use the language anyway (con-EC, nul-ID, aux-BR, prn-AF)',
 })
 
 /**

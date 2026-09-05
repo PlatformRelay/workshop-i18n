@@ -59,6 +59,20 @@ describe('isLocaleTag', () => {
 })
 
 describe('assertSafeLocale', () => {
+  it('tells a user what to do instead, not only that they cannot', () => {
+    let message = ''
+    try {
+      assertSafeLocale('con')
+    } catch (error) {
+      message = (error as Error).message
+    }
+    expect(message).toMatch(/reserved/i)
+    // The workaround has to be in the message: a facilitator typing `--locale con` reads
+    // this line and nothing else.
+    expect(message).toMatch(/con-EC|region subtag/i)
+    expect(isLocaleTag('con-EC')).toBe(true)
+  })
+
   it('returns the tag it accepted', () => {
     expect(assertSafeLocale('pt-BR')).toBe('pt-BR')
   })
