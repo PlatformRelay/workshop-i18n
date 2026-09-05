@@ -50,9 +50,15 @@ all.
 
 ## `refused/` — valid GNU output we reject
 
-The files under `refused/` are **not malformed**. `msgfmt` compiles all three. We refuse
-them anyway, and each refusal is pinned by a test so it cannot drift from a decision into
-an accident.
+The files under `refused/` are **not malformed**: plain `msgfmt` compiles all three. We
+refuse them anyway, and each refusal is pinned by a test so it cannot drift from a decision
+into an accident.
+
+`msgfmt --check` is worth running on them too, because it splits the two cases and the
+split is informative. It **refuses** both headerless catalogs (`warning: PO file header
+missing or invalid`, exit 1) — so on that shape gettext's own strict mode agrees with us —
+and it **accepts** the ISO-8859-1 one, which correctly leaves the charset refusal ours
+alone.
 
 | File | Command | What is refused, and by which layer |
 | --- | --- | --- |

@@ -223,9 +223,10 @@ emit xgettext-hostile-no-wrap.po
 
 # --------------------------------------------------------------------------------------
 # 5. GNU output this codec refuses. Kept as fixtures precisely because they are valid
-#    gettext — `msgfmt` compiles all three — so the refusals are deliberate limits, and
-#    pinning them stops one drifting into an accident. README.md and ADR 0013 say why each
-#    is kept.
+#    gettext — plain `msgfmt` compiles all three — so the refusals are deliberate limits,
+#    and pinning them stops one drifting into an accident. `msgfmt --check` is stricter and
+#    splits them: it refuses the two headerless catalogs and accepts the ISO-8859-1 one.
+#    README.md and ADR 0013 say why each is kept.
 # --------------------------------------------------------------------------------------
 
 mkdir -p "$here/refused"
@@ -234,7 +235,7 @@ mkdir -p "$here/refused"
 # `Content-Type` to declare a charset in, so xgettext falls back to ASCII and strips every
 # non-ASCII byte out of the msgids. `Grüße, 日本語 — first line` is extracted as
 # `Gre,   first line`. The stderr suppressed here is the `invalid multibyte sequence` run
-# that reports it, one line per lost character.
+# that reports it — 32 lines for the 6 characters lost here, two per discarded UTF-8 byte.
 ( cd "$work" && xgettext --from-code=UTF-8 -k_ -kpgettext:1c,2 -kngettext:1,2 \
     --add-comments=TRANSLATORS --omit-header \
     -o "$here/refused/xgettext-omit-header.po" src-v2.c 2>/dev/null )

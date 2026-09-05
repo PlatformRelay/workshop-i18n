@@ -43,11 +43,24 @@ const REFUSED = readdirSync(join(GNU, 'refused'))
   .sort()
   .map((name) => `refused/${name}`)
 
-/** The subset the *codec* refuses: no header entry at all. */
-const HEADERLESS = REFUSED.filter((name) => name.includes('header'))
-
 /** Any identity will do — none of these catalogs gets far enough for it to matter. */
 const IDENTITY: CatalogIdentity = { locale: 'de', name: '03-pods' }
+
+/**
+ * The subset the *codec* refuses, derived by asking it rather than by reading the file
+ * name. Selecting on a `header` substring worked for today's two files and would have
+ * quietly swept in any future fixture whose name happened to contain the word. What makes
+ * these tests worth anything is the exact message asserted below, so membership is settled
+ * by "does `parsePo` refuse it" and the reason is settled by the assertion.
+ */
+const HEADERLESS = REFUSED.filter((name) => {
+  try {
+    parsePo(read(name), { fileName: name })
+    return false
+  } catch {
+    return true
+  }
+})
 
 function gettextVersion(tool: string): string | undefined {
   const probe = spawnSync(tool, ['--version'], { encoding: 'utf8' })
@@ -74,6 +87,25 @@ function charsetRefusal(text: string, fileName: string): string | undefined {
     return message.includes('charset') ? message : undefined
   }
   return undefined
+}
+
+/**
+ * Which of the refusals this directory exists to pin actually fired, or `undefined` when
+ * none did.
+ *
+ * The catalog layer is deliberately *not* asked the blunt question "did you throw?". It
+ * throws for every catalog here — none of them uses this tool's `msgctxt` unit-id
+ * convention — so a bare try/catch reports a refusal for any file at all, including one
+ * that was never refused for the reason claimed. Only the two named refusals count.
+ */
+function refusalOf(name: string): 'no-header' | 'charset' | undefined {
+  const text = read(name)
+  try {
+    parsePo(text, { fileName: name })
+  } catch {
+    return 'no-header'
+  }
+  return charsetRefusal(text, name) === undefined ? undefined : 'charset'
 }
 
 /** True on GitHub Actions and every other runner that sets the conventional variable. */
@@ -309,10 +341,12 @@ describe('normalizations applied to a GNU-written catalog', () => {
 })
 
 /**
- * GNU output we refuse. All three compile under `msgfmt` — they are valid gettext, not
- * garbage — so these are deliberate limits of ours, recorded in ADR 0013 and pinned here
- * so they stay decisions rather than becoming accidents. Loosening one is a change to
- * make on purpose, with these tests as the place to say so.
+ * GNU output we refuse. All three compile under plain `msgfmt` — they are valid gettext,
+ * not garbage — so these are deliberate limits of ours, recorded in ADR 0013 and pinned
+ * here so they stay decisions rather than becoming accidents. Loosening one is a change to
+ * make on purpose, with these tests as the place to say so. (`msgfmt --check` is stricter
+ * and refuses the two headerless catalogs, so on that shape gettext's own strict mode
+ * agrees with us; it accepts the ISO-8859-1 one, which leaves that refusal ours alone.)
  *
  * The two shapes are refused at different layers, and that is not a detail: the codec
  * (`parsePo`) refuses a headerless catalog because a PO file without `msgid ""` is
@@ -320,23 +354,28 @@ describe('normalizations applied to a GNU-written catalog', () => {
  * charset, because that is a policy of this tool rather than of the format.
  */
 describe('GNU output this codec deliberately refuses', () => {
-  /** Nothing may sit under `refused/` quietly accepted, whichever layer does the refusing. */
-  it.each(REFUSED)('refuses %s at some layer', (name) => {
-    const text = read(name)
-    let refusedBy: string | undefined
-    try {
-      parsePo(text, { fileName: name })
-    } catch {
-      refusedBy = 'parsePo'
-    }
-    if (refusedBy === undefined) {
-      try {
-        parseCatalog(text, { identity: IDENTITY, fileName: name })
-      } catch (error) {
-        refusedBy = (error as Error).constructor.name
-      }
-    }
-    expect(refusedBy, `${name} was accepted by every layer`).toBeDefined()
+  /**
+   * The guard on the directory itself: every file under `refused/` must be refused for
+   * one of the two reasons this directory claims, and adding a fourth fixture must not
+   * earn a green tick it did not deserve.
+   *
+   * The first version of this test asked only "did some layer throw?", which made it
+   * inert — `parseCatalog` throws for every foreign catalog over the `msgctxt` convention,
+   * so an accepted catalog dropped into `refused/` passed. A fixture that trips neither
+   * named refusal now fails here, and the right response is to give it its own test rather
+   * than to widen this one.
+   */
+  it.each(REFUSED)('refuses %s for a reason this directory claims', (name) => {
+    expect(
+      refusalOf(name),
+      `${name} sits under refused/ but neither refusal fired: it is either accepted now, ` +
+        'or refused for a new reason that needs a test of its own',
+    ).toBeDefined()
+  })
+
+  it('has a fixture for each refusal it claims', () => {
+    expect(REFUSED.map(refusalOf)).toEqual(expect.arrayContaining(['no-header', 'charset']))
+    expect(HEADERLESS.length).toBeGreaterThan(1)
   })
 
   it.each(HEADERLESS)('refuses %s, naming the line', (name) => {
@@ -472,7 +511,11 @@ describe('gettext agrees with what we write back', () => {
     },
   )
 
-  /** The refused files are valid gettext. That is what makes their refusal a finding. */
+  /**
+   * The refused files are valid gettext. That is what makes their refusal a finding. Plain
+   * `msgfmt` is the right bar here: `--check` additionally enforces the header we are
+   * arguing about, so using it would beg the question.
+   */
   it.runIf(haveGettext)(
     `compiles every fixture, refused ones included (${msgfmtVersion ?? 'msgfmt'})`,
     () => {

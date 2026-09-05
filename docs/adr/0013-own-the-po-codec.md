@@ -108,9 +108,12 @@ so this is a graceful loss, not a correctness one.
 
 ### Shapes we refuse that GNU produces
 
-Two of them, both valid gettext — `msgfmt` compiles all three fixtures under
+Two of them, both valid gettext — plain `msgfmt` compiles all three fixtures under
 `fixtures/catalogs/gnu-generated/refused/` — so these are our limits, not gettext's bugs. Each is
 kept on purpose and pinned by a test, so neither can drift from a decision into an accident.
+`msgfmt --check` splits the two, informatively: it refuses both headerless catalogs (`warning: PO
+file header missing or invalid`, exit 1), so gettext's own strict mode agrees with us there, and it
+accepts the ISO-8859-1 one, which leaves the charset refusal ours alone.
 
 **A catalog with no header entry.** Three GNU invocations produce one:
 
