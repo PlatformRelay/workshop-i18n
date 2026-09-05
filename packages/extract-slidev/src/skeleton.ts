@@ -353,11 +353,25 @@ function rejectReplacement(
       'translation adds a "|" inside a table cell, which adds a column to that row — escape it as "\\|"',
     )
   }
-  if (context.prefix === '' && /^(?: {4,}|\t)/.test(splitLines(replacement)[0] ?? '')) {
-    return reject(
-      'indented-code',
-      'translation starts its line with a tab or four spaces, which CommonMark renders as a code block — remove the leading indentation',
-    )
+  // An indented code block can only begin where a new block can: at the top of the unit,
+  // or after a blank line inside it. Elsewhere the same indentation is a lazy paragraph
+  // continuation, which is why this is not a flat test on every line. Reading only the
+  // first line missed the second case, where `\n    code` renders the paragraph away.
+  const replacementLines = splitLines(replacement)
+  for (const [index, line] of replacementLines.entries()) {
+    const opensBlock =
+      index === 0
+        ? context.prefix === ''
+        : // Inside a container the line carries the container's own indentation, and how
+          // much of it counts as code depends on context composition does not have.
+          hole.encoding.continuationPrefix === '' &&
+          (replacementLines[index - 1] ?? '').trim() === ''
+    if (opensBlock && /^(?: {4,}|\t)/.test(line)) {
+      return reject(
+        'indented-code',
+        'translation begins a line with a tab or four spaces where a new block starts, which CommonMark renders as a code block — remove the leading indentation',
+      )
+    }
   }
   for (const line of splitLines(composed)) {
     if (isSlideSeparatorLine(line)) {

@@ -303,6 +303,24 @@ describe('composeSkeleton refuses a replacement that would break out of its hole
     }
   })
 
+  it('rejects an indented block that opens after a blank line inside the translation', () => {
+    // The guard read only the first line, so a unit that starts a fresh block partway
+    // through slipped past: `\n    code` renders the paragraph away entirely, leaving a
+    // code block where prose was.
+    for (const text of ['\n    code', 'Erste Zeile\n\n    code', 'a\n\n\tcode']) {
+      expect(() => composeSkeleton(skeleton, { 'slides:s1:body/p-1': text })).toThrow(
+        CompositionError,
+      )
+    }
+  })
+
+  it('allows an indented line that continues a paragraph rather than opening a block', () => {
+    // No blank line in front of it, so CommonMark reads it as a lazy continuation.
+    expect(composeSkeleton(skeleton, { 'slides:s1:body/p-1': 'Erste\n    zweite' })).toContain(
+      'Erste\n    zweite',
+    )
+  })
+
   it('allows indentation on a hole that does not begin its line', () => {
     const inline = createSkeleton('# Heading\n', [
       hole('slides:s1:body/h1-1/title', 2, 9, 'Heading'),
