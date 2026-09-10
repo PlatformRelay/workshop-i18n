@@ -270,7 +270,11 @@ export function scanHtml(text: string): readonly HtmlToken[] {
         })
         cursor = read.end
         if (RAW_TEXT.has(name.toLowerCase()) && !read.selfClosing) {
-          const closeAt = text.toLowerCase().indexOf(`</${name.toLowerCase()}`, cursor)
+          // Searched from the cursor, case-insensitively: lower-casing the whole text once
+          // per element made a block of many small scripts quadratic.
+          const closer = new RegExp(`</${name.toLowerCase()}`, 'gi')
+          closer.lastIndex = cursor
+          const closeAt = closer.exec(text)?.index ?? -1
           const contentEnd = closeAt === -1 ? text.length : closeAt
           if (contentEnd > cursor) tokens.push({ kind: 'opaque', start: cursor, end: contentEnd })
           cursor = contentEnd
@@ -382,8 +386,18 @@ function isDirective(attribute: HtmlAttribute): boolean {
   return /^(?:v-|:|@|#)/.test(attribute.name)
 }
 
-/** Build the element tree; unclosed elements end with the block, stray closers stay tokens. */
-function buildTree(tokens: readonly HtmlToken[]): HtmlNode[] {
+/**
+ * Deepest element nesting the locator walks. A unit key under it would pass the identity
+ * limit long before, and every walk below is recursive, so a block nested deeper is left
+ * as skeleton and reported rather than allowed to overflow the stack.
+ */
+const MAX_HTML_DEPTH = 48
+
+/**
+ * Build the element tree; unclosed elements end with the block, stray closers stay tokens.
+ * Returns `undefined` for a block nested deeper than {@link MAX_HTML_DEPTH}.
+ */
+function buildTree(tokens: readonly HtmlToken[]): HtmlNode[] | undefined {
   const root: HtmlNode[] = []
   const stack: ElementNode[] = []
   const append = (node: HtmlNode): void => {
@@ -401,6 +415,7 @@ function buildTree(tokens: readonly HtmlToken[]): HtmlNode[] {
       }
       append(element)
       if (!element.closed) stack.push(element)
+      if (stack.length > MAX_HTML_DEPTH) return undefined
       continue
     }
     if (token.kind === 'close') {
@@ -479,6 +494,8 @@ export interface HtmlBlockLocation {
   readonly residual: string
   /** Units that were skipped because their key would be unsafe. */
   readonly skippedUnsafeKeys: number
+  /** True when the block nests too deeply to walk; nothing in it was located. */
+  readonly tooDeep: boolean
 }
 
 /** A key segment for a name: Vue's hyphenated form, reduced to `[a-z0-9-]`. */
@@ -519,6 +536,13 @@ export function locateHtmlBlock(
   isSafeKey: (key: string) => boolean,
 ): HtmlBlockLocation {
   const tree = buildTree(scanHtml(text))
+  if (tree === undefined) {
+    const residual = scanHtml(text)
+      .filter((token) => token.kind === 'text')
+      .map((token) => text.slice(token.start, token.end))
+      .join(' ')
+    return { spans: [], residual, skippedUnsafeKeys: 0, tooDeep: true }
+  }
   const spans: HtmlSpan[] = []
   const blank = new Uint8Array(text.length)
   const blankRange = (start: number, end: number): void => {
@@ -614,5 +638,10 @@ export function locateHtmlBlock(
     .split('')
     .map((unit, index) => (blank[index] === 1 ? ' ' : unit))
     .join('')
-  return { spans, residual: residual.replace(/&[#\w]+;/g, ' '), skippedUnsafeKeys }
+  return {
+    spans,
+    residual: residual.replace(/&[#\w]+;/g, ' '),
+    skippedUnsafeKeys,
+    tooDeep: false,
+  }
 }

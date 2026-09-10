@@ -446,6 +446,34 @@ describe('locateProse inside HTML blocks and components (ADR 0015)', () => {
   })
 })
 
+describe('locateProse on hostile HTML sizes', () => {
+  const timed = (fragment: string) => {
+    const started = performance.now()
+    const located = locate(fragment)
+    return { located, elapsed: performance.now() - started }
+  }
+
+  it('stays linear over many small raw-text elements', () => {
+    const { elapsed } = timed(`<div>\n${'<script></script>'.repeat(20_000)}\n</div>\n`)
+    expect(elapsed).toBeLessThan(2_000)
+  })
+
+  it('degrades deep nesting to skeleton plus a warning instead of overflowing the stack', () => {
+    for (const fragment of [
+      `<div>\n${'<span>x '.repeat(5_000)}\n`,
+      `<div>\n${'<div>'.repeat(20_000)}deep${'</div>'.repeat(20_000)}\n`,
+      `<div>\nx ${'</span>'.repeat(20_000)}\n</div>\n`,
+    ]) {
+      const { located, elapsed } = timed(fragment)
+      expect(elapsed).toBeLessThan(5_000)
+      for (const span of located.spans) expect(span.unitKey.length).toBeLessThanOrEqual(256)
+    }
+    const deep = locate(`<div>\n${'<div>'.repeat(200)}deep words${'</div>'.repeat(200)}\n`)
+    expect(deep.spans).toEqual([])
+    expect(deep.diagnostics.map((d) => d.code)).toEqual(['prose-in-html-block'])
+  })
+})
+
 describe('locateProse and Slidev slot markers', () => {
   // Slidev's slot sugar (`@slidev/cli` 52.19.0, `node/syntax/slot-sugar.ts`): a line
   // matching `/^::\s*([\w.\-:]+)\s*::\s*$/` at block indent 0 becomes

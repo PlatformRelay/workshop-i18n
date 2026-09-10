@@ -439,13 +439,14 @@ class ProseLocator {
       })
     }
     const leftover = LETTER.test(located.residual)
-    if (!leftover && located.skippedUnsafeKeys === 0) return
+    const tooDeep = located.tooDeep || located.skippedUnsafeKeys > 0
+    if (!leftover && !tooDeep) return
     this.diagnostics.push(
       diagnostic(
         this.file,
         'prose-in-html-block',
         'warning',
-        leftover
+        !tooDeep
           ? 'prose inside this HTML block could not be extracted safely — it sits in a comment, behind an unterminated tag, or inside an element that is not scanned — so it stays English; move it into the element text to have it extracted'
           : 'this HTML block nests too deeply for a safe unit identity, so some of its prose stays English; flatten the nesting to have it extracted',
         this.base + start,
