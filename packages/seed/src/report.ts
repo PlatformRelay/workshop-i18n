@@ -187,13 +187,26 @@ export function buildSeedReport(
   }
 }
 
-/** Escape anything that could steer a terminal; the rest is printed as it is. */
+/**
+ * Escape anything that could steer a terminal or reorder what it shows — C0 and C1
+ * controls, line and paragraph separators, and the bidirectional embedding, override and
+ * isolate controls (the "Trojan Source" set) plus the directional marks; the rest is
+ * printed as it is.
+ */
 function printable(text: string): string {
   let out = ''
   for (const char of text) {
     const code = char.codePointAt(0) ?? 0
     const control =
-      code < 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x2028 || code === 0x2029
+      code < 0x20 ||
+      (code >= 0x7f && code <= 0x9f) ||
+      code === 0x2028 ||
+      code === 0x2029 ||
+      (code >= 0x202a && code <= 0x202e) ||
+      (code >= 0x2066 && code <= 0x2069) ||
+      code === 0x200e ||
+      code === 0x200f ||
+      code === 0x061c
     out += control ? `\\u${code.toString(16).padStart(4, '0')}` : char
   }
   return out

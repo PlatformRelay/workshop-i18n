@@ -186,18 +186,36 @@ describe('seed', () => {
     })
   })
 
-  it('renders untrusted paths without their control characters', () => {
+  it('refuses a translated path carrying control characters rather than printing it', () => {
+    expect(() =>
+      seed({
+        locale: 'pt-BR',
+        provenance: LABEL,
+        slides: {
+          english: [{ path: 'S05-pod/index.md', text: EN }],
+          translated: [{ path: 'evil\u001b[2J.md', text: PT }],
+        },
+        catalogs: [catalog()],
+      }),
+    ).toThrow(SeedInputError)
+  })
+
+  it('renders bidirectional controls escaped, so a path cannot reorder the report', () => {
+    const override = String.fromCodePoint(0x202e)
+    const isolate = String.fromCodePoint(0x2066)
     const result = seed({
       locale: 'pt-BR',
       provenance: LABEL,
       slides: {
         english: [{ path: 'S05-pod/index.md', text: EN }],
-        translated: [{ path: 'evil\u001b[2J.md', text: PT }],
+        translated: [{ path: `a${override}b${isolate}c.md`, text: PT }],
       },
       catalogs: [catalog()],
     })
-    expect(result.report.surfaces[0]?.unpairedTranslated).toEqual(['evil\u001b[2J.md'])
-    expect(formatSeedReport(result.report)).not.toContain('\u001b')
+    const text = formatSeedReport(result.report)
+    expect(text).not.toContain(override)
+    expect(text).not.toContain(isolate)
+    expect(text).toContain('a\\u202eb\\u2066c.md')
   })
 
   it('refuses a locale that is not a safe tag', () => {

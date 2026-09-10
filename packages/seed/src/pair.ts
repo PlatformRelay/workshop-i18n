@@ -44,11 +44,37 @@ export function resolveLimits(overrides: Partial<SeedLimits> | undefined): SeedL
   return limits
 }
 
+/** Longest accepted file path. */
+export const MAX_PATH_LENGTH = 1024
+
+/**
+ * Why `path` is not a safe tree-relative path, or `undefined` when it is one. Paths are
+ * pairing keys and report text, never opened here — but a CLI will join them to a root,
+ * and a report prints them, so neither an escape from the tree nor a terminal control
+ * sequence may get through.
+ */
+export function unsafePathReason(path: string): string | undefined {
+  if (path === '') return 'is empty'
+  if (path.length > MAX_PATH_LENGTH) return `is longer than ${MAX_PATH_LENGTH} characters`
+  for (const char of path) {
+    const code = char.codePointAt(0) ?? 0
+    if (code < 0x20 || (code >= 0x7f && code <= 0x9f)) return 'contains a control character'
+  }
+  if (path.includes('\\')) return 'contains a backslash'
+  if (path.startsWith('/') || /^[A-Za-z]:/.test(path)) return 'is absolute'
+  if (path.split('/').includes('..')) return 'leaves the tree through ".."'
+  return undefined
+}
+
 function indexByPath(files: readonly SeedFile[], tree: string): Map<string, string> {
   const byPath = new Map<string, string>()
   for (const file of files) {
     if (typeof file.path !== 'string' || typeof file.text !== 'string') {
       throw new SeedInputError(`every ${tree} file must have a string path and text`)
+    }
+    const unsafe = unsafePathReason(file.path)
+    if (unsafe !== undefined) {
+      throw new SeedInputError(`${tree} file path ${JSON.stringify(file.path)} ${unsafe}`)
     }
     if (byPath.has(file.path)) {
       throw new SeedInputError(`${tree} tree lists ${JSON.stringify(file.path)} twice`)

@@ -235,6 +235,19 @@ describe('alignSlides', () => {
     expect(() => alignSlides([file('S05.md', PT)], [file('S05.md', PT)])).toThrow(SeedInputError)
   })
 
+  it.each([
+    ['empty', ''],
+    ['absolute', '/etc/passwd'],
+    ['a drive letter', 'C:/deck.md'],
+    ['a parent segment', 'pages/../../x.md'],
+    ['a backslash', 'pages\\x.md'],
+    ['a control character', `pages/${String.fromCodePoint(10)}x.md`],
+    ['over-long', `${'a/'.repeat(600)}x.md`],
+  ])('throws on a file path that is %s', (_label, path) => {
+    expect(() => alignSlides([file('a.md', EN)], [file(path, PT)])).toThrow(SeedInputError)
+    expect(() => alignSlides([file(path, EN)], [])).toThrow(SeedInputError)
+  })
+
   it('throws on duplicate paths in either tree', () => {
     expect(() => alignSlides([file('a.md', EN), file('a.md', EN)], [])).toThrow(SeedInputError)
     expect(() => alignSlides([file('a.md', EN)], [file('a.md', PT), file('a.md', PT)])).toThrow(
