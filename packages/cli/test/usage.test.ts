@@ -14,6 +14,8 @@ describe('usage', () => {
     const result = invoke(new MemoryFileSystem(), ['--help'])
     expect(result.code).toBe(EXIT.OK)
     expect(result.stdout).toContain('init-ids')
+    expect(result.stdout).toContain('extract')
+    expect(result.stdout).toContain('status')
   })
 
   it('rejects an unknown command with 64, naming it', () => {
@@ -34,9 +36,9 @@ describe('usage', () => {
   })
 
   it('prints per-command help for <command> --help', () => {
-    const result = invoke(new MemoryFileSystem(), ['init-ids', '--help'])
+    const result = invoke(new MemoryFileSystem(), ['status', '--help'])
     expect(result.code).toBe(EXIT.OK)
-    expect(result.stdout).toContain('--check')
+    expect(result.stdout).toContain('--policy')
   })
 
   it('reports a missing manifest with 66 and the path it looked at', () => {

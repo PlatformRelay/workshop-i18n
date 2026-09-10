@@ -4,9 +4,14 @@ import { extractCommand } from './extract.js'
 import { initIdsCommand } from './init-ids.js'
 import type { CliIo } from './io.js'
 import { type Command, runWith } from './run.js'
+import { statusCommand } from './status.js'
 
 /** Every command, in the order `--help` lists them. */
-export const COMMANDS: readonly Command[] = Object.freeze([initIdsCommand, extractCommand])
+export const COMMANDS: readonly Command[] = Object.freeze([
+  initIdsCommand,
+  extractCommand,
+  statusCommand,
+])
 
 /**
  * Run the CLI against an injected world. Pure apart from `io`; returns the exit code and
