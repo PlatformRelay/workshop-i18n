@@ -30,6 +30,7 @@
   "devDependencies": {
     "@types/mdast": "^4.0.4",
     "@types/node": "^22.20.1",
-    "@vue/compiler-dom": "3.5.39"
+    "@vue/compiler-dom": "3.5.39",
+    "markdown-exit": "1.0.0-beta.9"
   }
 }
