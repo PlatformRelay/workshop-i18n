@@ -287,8 +287,59 @@ describe('extract — updating catalogs (spec 002 US-1)', () => {
     const result = invoke(fs, ['extract'])
     expect(result.code).toBe(EXIT.OK)
     expect(result.stdout).toMatch(
-      /pt-BR: re-keyed? .*slides:s05-pod-pods \(\d+ added, \d+ obsoleted\)/,
+      /pt-BR: re-keyed slides:s05-pod-pods \(\d+ added, \d+ fuzzy, \d+ obsoleted\)/,
     )
+  })
+
+  it('reports the common re-key: a paragraph inserted before translated siblings', () => {
+    const fs = corpus()
+    invoke(fs, ['extract'])
+    const po = fs.text(SLIDES_PO)
+    const first = idOf(po, 'A Pod wraps one or more containers.')
+    const second = idOf(po, 'Every container in a Pod shares its network namespace.')
+    fs.put(SLIDES_PO, translate(translate(po, first, 'Um.'), second, 'Dois.'))
+    fs.put(
+      '/repo/pages/S05-pod/index.md',
+      POD_SLIDES.replace('# Pods\n\n', '# Pods\n\nA brand new opening paragraph.\n\n'),
+    )
+    const result = invoke(fs, ['extract'])
+    expect(result.code).toBe(EXIT.OK)
+    // Keys shift down: the first key now holds new English, the second holds the first
+    // paragraph's English, and a third key holds the second's. Translations stay on keys.
+    expect(result.stdout).toContain(
+      'pt-BR: re-keyed slides:s05-pod-pods (1 added, 2 fuzzy, 0 obsoleted)',
+    )
+    expect(result.stdout).toContain(
+      `pt-BR:   ${second} now has the English ${first} was translated from`,
+    )
+    const third = idOf(fs.text(SLIDES_PO), 'Every container in a Pod shares its network namespace.')
+    expect(result.stdout).toContain(
+      `pt-BR:   ${third} now has the English ${second} was translated from`,
+    )
+  })
+
+  it('calls an edit plus an appended paragraph only a possible re-key, with no shift claimed', () => {
+    const fs = corpus()
+    invoke(fs, ['extract'])
+    fs.put(
+      '/repo/pages/S05-pod/index.md',
+      `${POD_SLIDES.replace('Pending, Running, Succeeded.', 'Pending, Running.')}\nMore at the end.\n`,
+    )
+    const result = invoke(fs, ['extract'])
+    expect(result.stdout).toContain(
+      'pt-BR: possibly re-keyed slides:s05-pod-lifecycle (1 added, 1 fuzzy, 0 obsoleted)',
+    )
+    expect(result.stdout).not.toContain('now has the English')
+  })
+
+  it('stays silent for a plain edit', () => {
+    const fs = corpus()
+    invoke(fs, ['extract'])
+    fs.put(
+      '/repo/pages/S05-pod/index.md',
+      POD_SLIDES.replace('Pending, Running, Succeeded.', 'Pending, Running.'),
+    )
+    expect(invoke(fs, ['extract']).stdout).not.toContain('re-keyed')
   })
 })
 

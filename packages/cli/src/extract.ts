@@ -114,12 +114,18 @@ function execute(context: CommandContext): number {
     const rekeyed = rekeyedContainers(locale)
     if (rekeyed.length === 0) continue
     io.stdout(
-      `extract ${locale.locale}: ${count(rekeyed.length, 'container')} had units re-keyed by a structural edit (ADR 0005); their obsoleted translations must be re-established via translation memory:\n`,
+      `extract ${locale.locale}: ${count(rekeyed.length, 'container')} look re-keyed by a structural edit (ADR 0005); translations stay on their keys, so confirm these in the TMS:\n`,
     )
     for (const item of rekeyed) {
+      const label = item.certain ? 're-keyed' : 'possibly re-keyed'
       io.stdout(
-        `extract ${locale.locale}: re-keyed ${item.container} (${item.added} added, ${item.obsoleted} obsoleted)\n`,
+        `extract ${locale.locale}: ${label} ${item.container} (${item.added} added, ${item.fuzzied} fuzzy, ${item.obsoleted} obsoleted)\n`,
       )
+      for (const shift of item.shifted) {
+        io.stdout(
+          `extract ${locale.locale}:   ${shift.id} now has the English ${shift.from} was translated from\n`,
+        )
+      }
     }
   }
   return EXIT.OK

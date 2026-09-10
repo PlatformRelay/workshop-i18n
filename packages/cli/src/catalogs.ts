@@ -300,36 +300,104 @@ export function undeclaredLocales(workspace: Workspace): readonly string[] {
     .sort(compareStrings)
 }
 
-/** One container whose units were both added and obsoleted in one run. */
+/** A unit whose key now holds English that another key's translation was made from. */
+export interface ShiftedUnit {
+  /** The unit id that now carries the English. */
+  readonly id: string
+  /** The unit id whose translation was made against that English. */
+  readonly from: string
+}
+
+/** One container whose unit keys look re-keyed by a structural edit in this run. */
 export interface RekeyedContainer {
   /** `<surface>:<containerId>`. */
   readonly container: string
   readonly added: number
+  readonly fuzzied: number
   readonly obsoleted: number
+  /** Pairs proven by exact English: `id` now holds the text `from` was translated from. */
+  readonly shifted: readonly ShiftedUnit[]
+  /**
+   * `true` when a shift is proven, or units were added and obsoleted together (ADR 0005's
+   * amendment); `false` for added plus fuzzy with no proven shift — an edit plus an
+   * insertion looks the same as a shift combined with an edit.
+   */
+  readonly certain: boolean
 }
 
 /**
- * Containers where units were added *and* obsoleted in the same run — the residue ADR
- * 0005's 2026-09-05 amendment names: a structural edit re-keys later siblings, which
- * arrive here as a removed id plus an added id. Reported so the loss is visible in review.
+ * Containers whose unit keys shifted in this run — the residue ADR 0005's 2026-09-05
+ * amendment names. Inserting a block re-keys its later siblings, so their translations
+ * stay on keys that now hold *different* English: the common symptom is not "removed plus
+ * added" but "fuzzy plus added", with each fuzzy entry's `#| msgid` reappearing as the
+ * English of a neighbouring key.
+ *
+ * Exact-text matches are **reported, never acted on.** Moving a translation to the key
+ * whose English matches would be identity by content hash, which ADR 0005 and
+ * constitution II forbid, and it would re-attach a reviewed translation with no human
+ * action (constitution V). The report tells a reviewer exactly which pairs to confirm in
+ * the TMS, where translation memory turns each one into a match-and-confirm.
  */
 export function rekeyedContainers(plan: LocalePlan): readonly RekeyedContainer[] {
   // Surfaces and container ids never contain ':', so the container is the first two fields.
   const containerOf = (id: string) => id.slice(0, id.indexOf(':', id.indexOf(':') + 1))
-  const added = new Map<string, number>()
-  const obsoleted = new Map<string, number>()
-  const bump = (counts: Map<string, number>, id: string) =>
-    counts.set(containerOf(id), (counts.get(containerOf(id)) ?? 0) + 1)
+  const entries = new Map<string, CatalogEntry>()
   for (const planned of plan.catalogs) {
-    for (const id of planned.summary.added) bump(added, id)
-    for (const id of planned.summary.obsoleted) bump(obsoleted, id)
+    for (const entry of [...planned.catalog.entries, ...planned.catalog.obsolete]) {
+      entries.set(formatUnitId(entry.id), entry)
+    }
   }
-  return [...added.keys()]
-    .filter((container) => obsoleted.has(container))
-    .sort(compareStrings)
-    .map((container) => ({
+  interface Tally {
+    added: string[]
+    fuzzied: string[]
+    obsoleted: string[]
+  }
+  const tallies = new Map<string, Tally>()
+  const tallyOf = (id: string): Tally => {
+    const container = containerOf(id)
+    let tally = tallies.get(container)
+    if (tally === undefined) {
+      tally = { added: [], fuzzied: [], obsoleted: [] }
+      tallies.set(container, tally)
+    }
+    return tally
+  }
+  for (const planned of plan.catalogs) {
+    for (const id of planned.summary.added) tallyOf(id).added.push(id)
+    for (const id of planned.summary.fuzzied) tallyOf(id).fuzzied.push(id)
+    for (const id of planned.summary.obsoleted) tallyOf(id).obsoleted.push(id)
+  }
+
+  const result: RekeyedContainer[] = []
+  for (const [container, tally] of [...tallies].sort(([a], [b]) => compareStrings(a, b))) {
+    // English a translation was made from: a fuzzy entry's previous source, or an
+    // obsoleted entry's msgid.
+    const madeFrom = new Map<string, string>()
+    for (const id of [...tally.fuzzied].sort(compareStrings)) {
+      const previous = entries.get(id)?.previousSource
+      if (previous !== undefined && !madeFrom.has(previous)) madeFrom.set(previous, id)
+    }
+    for (const id of [...tally.obsoleted].sort(compareStrings)) {
+      const source = entries.get(id)?.source
+      if (source !== undefined && !madeFrom.has(source)) madeFrom.set(source, id)
+    }
+    const shifted: ShiftedUnit[] = []
+    for (const id of [...tally.added, ...tally.fuzzied].sort(compareStrings)) {
+      const source = entries.get(id)?.source
+      const from = source === undefined ? undefined : madeFrom.get(source)
+      if (from !== undefined && from !== id) shifted.push({ id, from })
+    }
+    const certain = shifted.length > 0 || (tally.added.length > 0 && tally.obsoleted.length > 0)
+    const possible = tally.added.length > 0 && tally.fuzzied.length > 0
+    if (!certain && !possible) continue
+    result.push({
       container,
-      added: added.get(container) ?? 0,
-      obsoleted: obsoleted.get(container) ?? 0,
-    }))
+      added: tally.added.length,
+      fuzzied: tally.fuzzied.length,
+      obsoleted: tally.obsoleted.length,
+      shifted,
+      certain,
+    })
+  }
+  return result
 }

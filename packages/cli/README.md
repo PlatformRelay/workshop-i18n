@@ -70,9 +70,17 @@ printed to stderr with their location.
 Update rules (spec 002): an entry whose English did not change is untouched, translator comments
 and unknown flags included; an English edit makes exactly that entry `fuzzy` with `#| msgid`; a unit
 that left the English source becomes an obsolete `#~` entry; a new unit enters as untranslated.
-A no-change run writes nothing and is byte-identical. Units that were added *and* obsoleted within
-one container in the same run are reported as re-keyed — the residue ADR 0005's amendment names —
-so the loss is visible in review.
+A no-change run writes nothing and is byte-identical.
+
+Re-keyed units — the residue ADR 0005's amendment names — are reported per container. Inserting a
+block shifts the keys of its later siblings, so their translations stay on keys that now hold
+different English: they turn up as fuzzy entries plus an added one. When a key's new English is
+exactly the English another key's translation was made from (its `#| msgid`, or an obsoleted
+msgid), `extract` names the pair (`<id> now has the English <from> was translated from`); added
+plus fuzzy units with no proven pair are reported as *possibly* re-keyed. The translations are not
+moved: re-attaching by matching text would be identity by content, which ADR 0005 forbids, and it
+would carry a reviewed translation across without a human action. The report is what a reviewer
+confirms in the TMS, where translation memory makes each pair a match-and-confirm.
 
 `--check` writes nothing and exits 1 when any catalog is out of date with the English source.
 
