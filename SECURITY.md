@@ -43,3 +43,12 @@ Out of scope:
 - Dependencies are kept current via Renovate; CI runs CodeQL and OpenSSF Scorecard.
 - Releases are built in CI from tagged commits; provenance is attached where the toolchain
   supports it.
+
+## Known limitations
+
+- **Manifest size (denial of service).** Each manifest glob is bounded in length, brace expansion
+  and segment count, so no single glob can stall a run, but the number of `include`/`exclude`
+  entries is not yet capped: a pull request that adds hundreds of broad entries to
+  `.localization/workshop.yaml` multiplies the run time of `extract` and `status` (about 600
+  entries take over a minute on a real workshop). A cap and a once-per-base walk are planned; until
+  then, treat changes to the manifest in external pull requests like changes to CI configuration.

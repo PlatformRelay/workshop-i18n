@@ -41,10 +41,16 @@ nest, up to 64 alternatives); every other character is literal. A wildcard never
 `.` — name a dot-path literally, e.g. `{.github,docs}/*.md`. Unbalanced braces, `./` and `..`
 segments are refused. Matching uses no regular expression, and a glob is bounded: at most 512
 bytes as written, 64 alternatives and 2048 bytes once its braces are expanded, and 32 segments in
-any alternative — so testing a path costs a small constant times its length, and a hostile glob in
-a pull request cannot stall CI. A glob over a bound is refused (exit 65, naming the manifest
+any alternative — so testing a path costs a small constant times its length, and no single glob
+in a pull request can stall CI. A glob over a bound is refused (exit 65, naming the manifest
 entry). Repeated alternatives and runs of `**` are merged before counting, since they cannot change
 what a glob matches.
+
+**Known gap:** the *number* of entries is not bounded yet. Each include glob walks its own base, so
+a manifest with hundreds of broad entries multiplies the run time — about 600 entries (a 12 KB
+manifest) take `extract` on Kubernetes-Workshop to over a minute. Capping the entries per surface and
+walking each base once is planned; until then, review manifest changes in pull requests as you
+would a CI configuration change.
 
 The walk starts at each glob's literal base, never follows a symlink (a symlinked source is skipped
 with a warning; a symlinked glob base, catalog or `i18n/` directory is an error), and never enters
@@ -52,8 +58,10 @@ with a warning; a symlinked glob base, catalog or `i18n/` directory is an error)
 `**/*.md` cannot extract a locale's overrides as English. An include glob whose literal base lies
 inside any of these trees (`i18n/**/*.md`, `.git/config`, `labs/node_modules/**`) is refused
 outright (exit 65), since it would walk it directly. These names are compared in any letter case
-(`I18N/`, `.GIT/`), because on a case-insensitive file system that is the same directory. A glob
-that matches nothing is warned about; a file two surfaces both claim is an error.
+(`I18N/`, `.GIT/`) and without trailing dots or spaces (`.git./`), because a case-insensitive or
+Win32 file system opens the same directory for them; NTFS 8.3 short names (`GIT~1`) are not
+recognised. A glob that matches nothing is warned about; a file two surfaces both claim is an
+error.
 
 ## Commands
 
