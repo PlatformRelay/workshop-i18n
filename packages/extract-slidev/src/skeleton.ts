@@ -56,7 +56,7 @@ import {
   isSlotMarkerLine,
   isTildeFenceOpenerLine,
 } from './deck.js'
-import { markupTokens } from './html.js'
+import { isWellNested, markupTokens } from './html.js'
 
 /** Where a markdown hole sits, which decides what a replacement may not contain. */
 export type HoleContext = 'body' | 'note'
@@ -412,10 +412,13 @@ function rejectReplacement(
   // Markup rides along literally (ADR 0004, ADR 0015), so it is compared as a multiset: a
   // translator may move `<strong>` to another word, but an edited attribute, an added
   // `<img onerror>` or a new `{{ }}` — which Vue would execute — is not a translation.
-  if (!sameMultiset(markupTokens(replacement), markupTokens(hole.source))) {
+  // Moving is fine only while the tags still nest: a well-formed English unit must stay
+  // well-formed, or the reordering is a template Vue refuses to compile.
+  const unnested = isWellNested(hole.source) && !isWellNested(replacement)
+  if (unnested || !sameMultiset(markupTokens(replacement), markupTokens(hole.source))) {
     return reject(
       'markup-changed',
-      'translation changes the HTML tags or {{ }} interpolations the English carries — keep every tag and interpolation exactly as written; only their position may change',
+      'translation changes the HTML tags or {{ }} interpolations the English carries, or stops them nesting — keep every tag and interpolation exactly as written; only their position may change, and every tag must still close after it opens',
     )
   }
   // An HTML block ends at the first blank line, and everything after it — the rest of
