@@ -195,6 +195,24 @@ describe('FR-004: content gates on untrusted translations', () => {
     )
   })
 
+  it.each([
+    ['a bare domain', 'Zweite Folie auf attacker.io'],
+    ['a bare email address', 'Zweite Folie: admin@evil.com'],
+  ])('never emits %s, which linkify would make a live link', (_label, translation) => {
+    const entries = withEntry(TITLE, { translation })
+    const preview = composeLocale(slidesOnly(entries))
+    expect(deckOf(preview)).not.toContain('evil')
+    expect(deckOf(preview)).not.toContain('attacker')
+    expect(preview.findings).toContainEqual(
+      expect.objectContaining({ severity: 'warning', code: 'markup-parity', unitId: TITLE }),
+    )
+    const strict = composeLocale(slidesOnly(entries, 'strict'))
+    expect(strict.releasable).toBe(false)
+    expect(strict.findings).toContainEqual(
+      expect.objectContaining({ severity: 'error', code: 'markup-parity', unitId: TITLE }),
+    )
+  })
+
   it('never emits a new mustache expression', () => {
     const entries = withEntry(TITLE, { translation: 'Zweite {{ $slidev.nav.next() }} Folie' })
     expect(deckOf(composeLocale(slidesOnly(entries)))).not.toContain('{{')

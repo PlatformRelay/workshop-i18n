@@ -42,6 +42,8 @@
  * which is visible and cheap; the alternative is a missed injection, which is neither.
  */
 
+import LinkifyIt from 'linkify-it'
+
 /** What a token is. Kinds are compared separately so a report can say what changed. */
 export type MarkupTokenKind = 'code' | 'tag' | 'mustache' | 'brace' | 'url' | 'entity'
 
@@ -276,14 +278,46 @@ function linkDestinations(text: string): readonly string[] {
   return found
 }
 
-/** URLs a linkifier would turn into links, with trailing sentence punctuation trimmed. */
-function bareUrls(text: string): readonly string[] {
-  const found: string[] = []
-  for (const match of text.matchAll(/(?:https?:\/\/|www\.)[^\s<>()[\]"'`{}]+/gi)) {
-    const url = match[0].replace(/[.,;:!?*_~]+$/, '')
-    if (url !== '') found.push(url)
-  }
-  return found
+/**
+ * Top-level domains linkify-it does *not* link schemelessly by default, added here so a
+ * consumer who extends its markdown-it's TLD list (`linkify.tlds(…, true)`) is still
+ * covered. Pure over-reporting: against the default renderer these can only cause a
+ * fallback, never let a link through.
+ */
+const EXTRA_FUZZY_TLDS: readonly string[] = Object.freeze([
+  'app',
+  'blog',
+  'cloud',
+  'club',
+  'dev',
+  'online',
+  'page',
+  'site',
+  'store',
+  'tech',
+  'top',
+  'xyz',
+])
+
+/**
+ * The linkifier Slidev's markdown-it runs (`linkify: true`), configured with its
+ * defaults plus schemeless IPs and the extra TLDs above — again only ever *more*.
+ *
+ * Why the library and not a regex: linkify-it links `attacker.io`, `evil.com/login` and
+ * `admin@evil.com` with no scheme at all, under TLD, IDN, punycode, bracket and trailing-
+ * punctuation rules that a hand-written pattern would approximate and drift from. The
+ * parity invariant is "no new live link can appear", and the only way to state what the
+ * renderer links without guessing is to ask the code the renderer uses. It is pure
+ * (no I/O), dependency-light (uc.micro) and pinned to the major markdown-it 14 uses.
+ */
+const LINKIFY = new LinkifyIt({ fuzzyLink: true, fuzzyEmail: true, fuzzyIP: true }).tlds(
+  [...EXTRA_FUZZY_TLDS],
+  true,
+)
+
+/** Everything a linkifier would turn into a live link, as spelled in the text. */
+function linkifiedUrls(text: string): readonly string[] {
+  return (LINKIFY.match(text) ?? []).map((match) => match.raw)
 }
 
 function entityTokens(text: string): readonly string[] {
@@ -303,7 +337,7 @@ export function markupTokens(text: string): readonly MarkupToken[] {
     tag: tags,
     mustache: mustache.tokens,
     brace: braceTokens(mustache.rest),
-    url: [...linkDestinations(normalized), ...autolinks, ...bareUrls(normalized)],
+    url: [...linkDestinations(normalized), ...autolinks, ...linkifiedUrls(normalized)],
     entity: entityTokens(text),
   }
   return KIND_ORDER.flatMap((kind) => byKind[kind].map((token) => ({ kind, text: token })))

@@ -25,9 +25,11 @@
     "@workshop-i18n/core": "workspace:*",
     "@workshop-i18n/extract-markdown": "workspace:*",
     "@workshop-i18n/extract-quiz": "workspace:*",
-    "@workshop-i18n/extract-slidev": "workspace:*"
+    "@workshop-i18n/extract-slidev": "workspace:*",
+    "linkify-it": "^5.0.2"
   },
   "devDependencies": {
+    "@types/linkify-it": "^5.0.0",
     "@types/node": "^22.20.1"
   }
 }

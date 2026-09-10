@@ -183,6 +183,43 @@ describe('checkMarkupParity', () => {
     expect(checkMarkupParity('[x](./a)', '[x](./a){onclick="evil()"}').ok).toBe(false)
   })
 
+  // Slidev renders with markdown-it `linkify: true`, and linkify-it links schemeless
+  // domains and email addresses too ("fuzzy" links). Each of these became a live link.
+  it.each([
+    ['a bare domain', 'Mehr unter attacker.io'],
+    ['a domain with a path', 'Melde dich an: evil.com/login'],
+    ['a bare email address', 'Schreib an admin@evil.com'],
+    ['an IDN domain', 'Siehe пример.рф'],
+    ['a punycode domain', 'Siehe xn--e1afmkfd.xn--p1ai/x'],
+    ['a domain in parentheses before punctuation', 'Siehe (evil.com).'],
+    ['a bare IP address', 'Öffne 10.0.0.1/admin'],
+  ])('rejects %s a linkifier would turn into a live link', (_label, translation) => {
+    const result = checkMarkupParity('See the docs', translation)
+    expect(result.ok).toBe(false)
+    expect(result.added.map((token) => token.kind)).toContain('url')
+  })
+
+  it('accepts a schemeless domain the English already links, unchanged', () => {
+    expect(
+      checkMarkupParity(
+        'Docs live at k8s.io, questions to help@k8s.io.',
+        'Die Doku liegt auf k8s.io, Fragen an help@k8s.io.',
+      ),
+    ).toEqual({ ok: true, added: [], removed: [] })
+  })
+
+  it('rejects a changed schemeless domain', () => {
+    const result = checkMarkupParity('Docs at k8s.io', 'Doku auf k8s.io.evil.com')
+    expect(result.ok).toBe(false)
+  })
+
+  it('compares multisets: duplicating a token the English has once is an addition', () => {
+    const result = checkMarkupParity('Page {{ a }}', 'Seite {{ a }} und {{ a }}')
+    expect(result.ok).toBe(false)
+    expect(result.added).toEqual([{ kind: 'mustache', text: '{{ a }}' }])
+    expect(result.removed).toEqual([])
+  })
+
   it('ignores a trailing sentence period on a bare URL', () => {
     expect(
       checkMarkupParity('See https://k8s.io/docs.', 'Unter https://k8s.io/docs findest du mehr').ok,
