@@ -128,6 +128,15 @@ const CODE_LIKE = new Set(['code', 'kbd', 'samp', 'var', 'pre', 'script', 'style
 /** Elements whose contents are never scanned for runs; any prose in them is reported. */
 const NOT_SCANNED = new Set(['svg', 'math'])
 
+/**
+ * A tag name as Vue resolves it: `KwCard`, `kwCard` and `kw-card` are one component. A
+ * name with no lower-case letter is an upper-cased HTML tag, not a PascalCase word, so it
+ * is lower-cased rather than hyphenated letter by letter (`DIV` is `div`, not `d-i-v`).
+ */
+function tagKey(name: string): string {
+  return /[a-z]/.test(name) ? componentNameKey(name) : name.toLowerCase()
+}
+
 function readTagName(text: string, at: number): string | undefined {
   TAG_NAME.lastIndex = at
   const match = TAG_NAME.exec(text)
@@ -358,10 +367,10 @@ export function isWellNested(text: string): boolean {
   for (const token of scanHtml(text)) {
     if (token.kind === 'open') {
       if (!token.selfClosing && !VOID.has(token.name.toLowerCase())) {
-        open.push(componentNameKey(token.name))
+        open.push(tagKey(token.name))
       }
     } else if (token.kind === 'close') {
-      if (open.pop() !== componentNameKey(token.name)) return false
+      if (open.pop() !== tagKey(token.name)) return false
     }
   }
   return open.length === 0
@@ -409,7 +418,7 @@ function buildTree(tokens: readonly HtmlToken[]): HtmlNode[] | undefined {
       const element: ElementNode = {
         kind: 'element',
         open: token,
-        name: componentNameKey(token.name),
+        name: tagKey(token.name),
         children: [],
         closed: token.selfClosing || VOID.has(token.name.toLowerCase()),
         closeEnd: undefined,
@@ -420,7 +429,7 @@ function buildTree(tokens: readonly HtmlToken[]): HtmlNode[] | undefined {
       continue
     }
     if (token.kind === 'close') {
-      const name = componentNameKey(token.name)
+      const name = tagKey(token.name)
       const index = stack.findLastIndex((element) => element.name === name)
       if (index !== -1) {
         const element = stack[index] as ElementNode
