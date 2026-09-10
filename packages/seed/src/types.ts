@@ -4,8 +4,9 @@
  *
  * Every English unit handed to an aligner ends up in exactly one place — a
  * {@link SeedDraft} or the `unitIds` of exactly one {@link SeedMiss} — so a report can
- * account for the whole English corpus rather than only for what matched. The tests pin
- * that partition as a property.
+ * account for the whole English corpus rather than only for what matched. Example-based
+ * tests for every aligner and miss path assert that partition; there is no generated
+ * property test for it.
  */
 
 import type { Surface, UnitId } from '@workshop-i18n/core'

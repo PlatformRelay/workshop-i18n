@@ -13,8 +13,10 @@
  *
  * - **Refusals** (`markup-divergence`, `length-divergence`, …) — the string would change
  *   what the page *does* (a tag, attribute or Vue directive the English does not carry, a
- *   `{{ }}` interpolation, a comment that could end a speaker note, a `javascript:` or
- *   `data:` link), or its length says it is almost certainly not this unit's text.
+ *   `{{ }}` interpolation however it is spelled, a character reference that could spell
+ *   one, an HTML comment opener `<!--` — the only comment marker checked, because it is
+ *   the one that can end a speaker note — or a `javascript:`/`data:`/`vbscript:`/`file:`
+ *   link), or its length says it is almost certainly not this unit's text.
  * - **Warnings** (`code-span-divergence`, `link-divergence`) — translators legitimately
  *   rephrase around inline code and point links at localized docs. Refusing those would
  *   discard good work; the draft carries the warning into the report instead.
