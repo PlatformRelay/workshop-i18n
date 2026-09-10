@@ -133,6 +133,26 @@ describe('discoverSurfaceFiles — hostile globs', () => {
     expect(found.files.some((file) => file.surface === 'labs')).toBe(false)
   })
 
+  it.each([
+    ["'i18n/**/*.md'", 'i18n'],
+    ["'{labs,i18n}/**/*.md'", 'i18n'],
+    ["'.localization/*.md'", '.localization'],
+  ])('refuses an include glob %s that reaches into the tool’s own tree', (glob, reserved) => {
+    const fs = new MemoryFileSystem({
+      '/repo/.localization/workshop.yaml': MANIFEST.replace("'labs/**/*.md'", glob),
+      '/repo/i18n/pt-BR/overrides/x.md': '# Tradução\n',
+      '/repo/labs/a.md': '',
+      '/repo/pages/S05-pod/index.md': '',
+      '/repo/quiz/questions.json': '{}',
+    })
+    const result = invoke(fs, ['extract'])
+    expect(result.code).toBe(EXIT.DATA)
+    expect(result.stderr).toContain(
+      `surfaces.labs.include[0] reaches into ${reserved}/, which belongs to workshop-i18n`,
+    )
+    expect(fs.writes).toEqual([])
+  })
+
   it('names the manifest entry of a glob it refuses', () => {
     const fs = new MemoryFileSystem({
       '/repo/.localization/workshop.yaml': MANIFEST.replace("'labs/README.md'", "'labs/{a'"),

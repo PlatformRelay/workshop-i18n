@@ -11,7 +11,8 @@
  * - it never enters `.git`/`node_modules` (anywhere) or the tool's own trees at the root,
  *   `i18n/` and `.localization/`: an override under `i18n/<locale>/overrides/` is
  *   translated content, and extracting it as English would be a silent disaster that a
- *   broad `**\/*.md` glob would otherwise walk straight into;
+ *   broad `**\/*.md` glob would otherwise walk straight into — and an include glob whose
+ *   base lies inside either tree is refused, since it would walk it directly;
  * - output is sorted by path, so everything downstream is deterministic.
  */
 
@@ -114,6 +115,17 @@ export function discoverSurfaceFiles(workspace: Workspace): Discovery {
     spec.include.forEach((pattern, index) => {
       const entry = `surfaces.${spec.surface}.include[${index}]`
       const matcher = compileManifestGlob(pattern, entry)
+      for (const base of matcher.bases) {
+        const first = base.split('/')[0] ?? ''
+        if (RESERVED_ROOT_DIRECTORIES.has(first)) {
+          // The root walk skips these trees, but a glob based inside one would walk it
+          // directly — and extract a locale's overrides as English.
+          throw new CliError(
+            EXIT.DATA,
+            `${entry} reaches into ${first}/, which belongs to workshop-i18n (catalogs, overrides, the manifest) and is never English source`,
+          )
+        }
+      }
       let matched = 0
       for (const base of matcher.bases) {
         const { files, links } = walkFiles(workspace, base)

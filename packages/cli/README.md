@@ -39,7 +39,7 @@ hostile glob in a pull request cannot stall CI. The walk starts at each glob's l
 base, never follows a symlink (a symlinked source is skipped with a warning; a symlinked glob base,
 catalog or `i18n/` directory is an error), and never enters `.git/`, `node_modules/`, or the tool's
 own `i18n/` and `.localization/` trees — so a broad `**/*.md` cannot extract a locale's overrides
-as English. A glob that matches nothing is warned about; a file two surfaces both claim is an error.
+as English, and an include glob based inside either tree (`i18n/**/*.md`) is refused outright. A glob that matches nothing is warned about; a file two surfaces both claim is an error.
 
 ## Commands
 
