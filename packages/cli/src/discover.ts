@@ -44,8 +44,13 @@ export interface Discovery {
   readonly warnings: readonly string[]
 }
 
-/** Every regular file under `base`, plus the symlinks met on the way. */
-function walk(
+/**
+ * Every regular file under `base` (repository-relative, `''` for the root), plus the
+ * symlinks met on the way — reported, never followed. A missing base yields nothing.
+ *
+ * @throws {CliError} (`DATA`) when `base` itself, or a directory above it, is a symlink.
+ */
+export function walkFiles(
   workspace: Workspace,
   base: string,
 ): { readonly files: readonly string[]; readonly links: readonly string[] } {
@@ -88,7 +93,7 @@ export function discoverSurfaceFiles(workspace: Workspace): Discovery {
     spec.include.forEach((pattern, index) => {
       const matcher = compileGlob(pattern)
       const base = globBase(pattern)
-      const { files, links } = walk(workspace, base)
+      const { files, links } = walkFiles(workspace, base)
       let matched = 0
       for (const path of files) {
         if (!matcher.test(path) || excludes.some((exclude) => exclude.test(path))) continue
