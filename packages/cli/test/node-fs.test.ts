@@ -82,6 +82,14 @@ describe('the CLI on the real file system', () => {
     expect(existsSync(join(root, 'i18n/de/pages'))).toBe(true)
   })
 
+  it('removeDirectory refuses a directory that is not empty, leaving it whole', () => {
+    write('i18n/de/labs/NOTES.txt', 'kept\n')
+    expect(() => nodeFileSystem().removeDirectory(join(root, 'i18n/de/labs'))).toThrow(
+      /ENOTEMPTY|EEXIST/,
+    )
+    expect(readFileSync(join(root, 'i18n/de/labs/NOTES.txt'), 'utf8')).toBe('kept\n')
+  })
+
   it('refuses to write through a symlinked i18n directory', () => {
     const outside = mkdtempSync(join(tmpdir(), 'workshop-i18n-outside-'))
     try {

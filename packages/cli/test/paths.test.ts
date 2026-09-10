@@ -148,4 +148,32 @@ surfaces:
     expect(() => writePlans(workspace, [plan])).toThrow(/i18n\/de\/labs is a symlink/)
     expect(fs.writes).toEqual([])
   })
+
+  it('removes emptied directories up to, never including, i18n/<locale>/', () => {
+    const fs = new MemoryFileSystem({
+      '/repo/.localization/workshop.yaml': `apiVersion: workshop-i18n/v1
+locales:
+  targets: [de]
+surfaces:
+  labs:
+    include: ['labs/**/*.md']
+`,
+      '/repo/labs/day-1/a.md': '# A\n\n<!-- labId: a -->\n\nText.\n',
+    })
+    const io = { cwd: '/repo', fs, stdout: () => undefined, stderr: () => undefined }
+    const workspace = loadWorkspace(io, '/repo')
+    const plan = planLocale(workspace, extractCorpus(workspace, readSources(workspace)), 'de')
+    writePlans(workspace, [plan])
+    const [only] = plan.catalogs
+    expect(only?.path).toBe('i18n/de/labs/day-1/a.po')
+    if (only === undefined) return
+    // The locale's one catalog goes away: everything below the locale empties.
+    writePlans(workspace, [
+      { locale: 'de', catalogs: [{ ...only, text: undefined, previousText: only.text }] },
+    ])
+    expect(fs.kind('/repo/i18n/de/labs/day-1')).toBeUndefined()
+    expect(fs.kind('/repo/i18n/de/labs')).toBeUndefined()
+    expect(fs.kind('/repo/i18n/de')).toBe('directory')
+    expect(fs.kind('/repo/i18n')).toBe('directory')
+  })
 })
