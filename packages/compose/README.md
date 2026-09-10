@@ -75,22 +75,47 @@ and again on the emitted output.
 - **Skeleton identity** — `compareSkeletons(english, locateFile(surface, composed))`
   re-locates the *output* with the same extractor and requires the same holes and
   byte-identical bytes between them: fences, frontmatter machinery, Vue islands, includes.
-- **Markup and placeholder parity** — `checkMarkupParity(english, translation)`: inline
-  code spans, HTML tags and Vue components (attributes included), `{{ }}` expressions,
-  attribute braces, URLs and character references must match the English unit as
-  multisets. Translations are untrusted; a new `<script>`, `onclick=`, `{{ }}` or changed
-  URL is never emitted (preview: English fallback + warning; strict: error). The scanner
-  over-approximates markup on purpose — see `markup.ts`.
+- **Markup and placeholder parity** — `checkMarkupParity(english, translation)`.
+  Translations are untrusted; a translation that fails is never emitted (preview:
+  English fallback + warning; strict: error). Two layers:
 
-  **URL tokens, precisely.** The set is the union of (a) every link `href` and image
-  `src` that **markdown-it 14.3.0** creates when it parses the unit inline, configured as
-  **`@slidev/cli` 52.19** configures its engine (`html`, `xhtmlOut`, `linkify`, Slidev's
-  quotes) — schemeless domains, emails and links inside emphasis or strikethrough
-  included; and (b) lexical over-reports: inline and autolink destinations, and a
-  `linkify-it` pass over the unescaped text with schemeless IPs and extra TLDs. A
-  differential test holds this to "every link the renderer creates is counted" over a
-  form × context matrix against markdown-it 14.3.0 **and** markdown-exit 1.0.0-beta.9,
-  the engine Slidev 52 actually renders with (via `unplugin-vue-markdown` 32).
+  1. **The barrier — coarse and renderer-independent.** A translation may not
+     *introduce*, beyond what its English unit has (as a multiset):
+     - `linklike` — dotted host-like runs (`evil.com`, `пример.рф`, `xn--…`; digits-only
+       decimals such as `1.5` exempt), an `@` touching a word (emails, `@user`), `://`,
+       `mailto:`, a GitHub issue reference `#123`, or a bracket label that is not
+       inline-link text (`[admin]`, which resolves against any reference definition in
+       the file);
+     - `syntax` — `$` (KaTeX), `^[` and `[^` (footnotes), `]:` (definitions);
+     - `format` — any Unicode format character (Cf: zero-width and bidi controls,
+       U+FEFF, U+00AD, …).
+
+     Dropping these is allowed — a translation that leaves out an English `e.g.` creates
+     nothing. A translation longer than `max(8192, 4 × English)` is refused before any
+     parser runs.
+  2. **Exact tokens, two-way:** inline code spans, HTML tags and Vue components
+     (attributes included), `{{ }}` expressions, attribute braces, character references
+     and URL tokens must match the English as multisets. URL tokens are inline and
+     autolink destinations, a `linkify-it` pass over the unescaped text, and — for text
+     up to 8192 characters — every `href`/`src` a **model** of the renderer creates:
+     markdown-it 14.3.0 configured as `@slidev/cli` 52.19 configures its slide renderer
+     (`html`, `xhtmlOut`, `linkify`, Slidev's quotes) with `markdown-it-footnote` 4.0.0
+     and Slidev's KaTeX `math_inline` rule. The model only ever adds tokens; the barrier
+     does not depend on it.
+
+  A differential test checks both layers against markdown-exit 1.0.0-beta.9 (the engine
+  Slidev 52 actually renders slides with, via `unplugin-vue-markdown` 32) and markdown-it
+  14.3.0, each with the same two plugins: over a matrix of link forms × inline contexts
+  (emphasis, strikethrough, footnotes, inline math, escapes, entities, links, images,
+  code spans, U+FEFF) plus both re-reviews' bypass lists, every link either engine
+  creates is counted *and* trips the coarse layer on its own.
+
+  **Measured false-positive cost.** On the 1 399 real pt-BR translations the seed lane
+  aligns from Kubernetes-Workshop PR #55, the coarse layer rejects **no** translation
+  the gate did not already reject (11 before and after: 9 changed code spans, 2 added
+  character references). Judged two-way it would have rejected 18 more, all for a
+  *dropped* `e.g.`, `i.e.`, `a.m.`, `#1` or dotted identifier — which is why it is
+  introduction-only.
 - **Protected terms** — `missingProtectedTerms(english, translation, manifest.protectedTerms)`:
   every term the English uses must appear unaltered (case-sensitive, whole-word).
 - **Length budget** — slides only, `lengthBudgetFor(manifest, layout)` against the code
@@ -108,26 +133,37 @@ Stated so nobody mistakes the gates for more than they are.
   alt="…">`: the unit falls back to English with a `markup-parity` warning. That is the
   price of catching `onclick=` added to an existing tag; move translatable attribute text
   into prose, or accept English there.
-- **Reference-link labels are not compared.** A translation can re-point `[text][a]` to
-  `[text][b]` when the file already defines `[b]:`. It cannot introduce a new target (the
-  definitions are English skeleton), so this is out of scope rather than an injection.
+- **Reference labels are compared, coarsely.** A bracket label the English lacks
+  (`[admin]`, `[text][admin]`) is refused, because it would resolve against any
+  definition in the file. Changing a *full* reference's link text is allowed; re-pointing
+  it to another existing label is refused as a changed label.
 - **needs-review renders unmarked in preview.** That follows core's contract (a draft is
   not a gap) but means a preview deck can *look* finished while carrying drafts no human
   accepted. Reviewers must read `units[].state`, not the rendered deck; only strict output
   is releasable.
-- **The renderer is modelled, not embedded.** The URL guarantee holds for Slidev's
-  default markdown setup as of `@slidev/cli` 52.19. Not modelled: MDC/Comark syntax
-  (`mdc: true` / `comark`; its `{…}` attribute blocks are caught lexically as `brace`
-  tokens, its link forms are not proven), KaTeX `\href`, a consumer `markdownSetup`
-  that adds link-creating plugins or TLDs beyond the extra ones here, and reference links
-  that resolve only against definitions elsewhere in the file (see above).
+- **What the renderer model covers — and why it is not the barrier.** The model follows
+  `@slidev/cli` 52.19's slide renderer: its markdown options plus the two plugins that
+  change where text tokens split, `markdown-it-footnote` (always on) and KaTeX
+  `math_inline` (on whenever a deck uses `$…$`). Slidev's other plugins are not modelled:
+  Shiki and the code-block transformers, `MarkdownItLink` (turns existing links with
+  `./`, `/`, `#` or digit-only targets into router links and adds `target="_blank"` to
+  the rest — it creates none), task lists, GitHub alerts, v-drag, slot sugar, scoped
+  styles, and MDC/Comark (opt-in via `mdc`/`comark`; its `{…}` attribute blocks are
+  caught as `brace` tokens). Speaker notes are rendered separately, by Slidev's own
+  markdown-exit 1.1.0-beta.2 with `html` on and `linkify` off. A consumer
+  `markdownSetup` can add anything. None of this weakens the barrier, which assumes no
+  renderer; it bounds only which links are also counted by their exact `href`.
+- **Labs are rendered by GitHub, not Slidev.** GitHub's GFM adds extended autolinks,
+  `#123` issue references, `@user` mentions and commit-SHA links. The coarse layer
+  refuses introduced hosts, `@`-words and `#123`; a bare hexadecimal commit SHA a
+  translation introduces is **not** caught.
 - **Versions move in lockstep with the consumer's renderer.** `markdown-it` 14.3.0,
-  `linkify-it` 5.0.2 (with `uc.micro` 2.1.0) and the test-only `markdown-exit`
-  1.0.0-beta.9 are pinned exactly to what the consumer's lockfile resolves. A Renovate
-  bump of any of them — or of the consumer's `@slidev/cli`, `unplugin-vue-markdown` or
-  `markdown-exit` — must move both sides together, with the differential test rerun
-  against the new engine; bumping one side alone is exactly how a new link form slips
-  through.
+  `markdown-it-footnote` 4.0.0, `linkify-it` 5.0.2 (with `uc.micro` 2.1.0) and the
+  test-only `markdown-exit` 1.0.0-beta.9 are pinned exactly to what the consumer's
+  lockfile resolves. A Renovate bump of any of them — or of the consumer's `@slidev/cli`,
+  `unplugin-vue-markdown` or `markdown-exit` — must move both sides together, with the
+  differential test rerun against the new engine. A drifted model only loses exact
+  `href` tokens; the barrier still holds.
 - **Length budgets** cover slides only, and a layout with no configured budget gets the
   manifest default rather than an "uncovered" report.
 

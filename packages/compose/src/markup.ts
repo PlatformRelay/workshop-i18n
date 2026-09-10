@@ -30,6 +30,17 @@
  * order). Adding a token is how an attack arrives; removing one is how a translation
  * drops a command or leaves a `<v-click>` unbalanced, which fails the Vue compile.
  *
+ * ## Two layers, and which one is the barrier
+ *
+ * The barrier is the **coarse layer** (`coarse.ts`: `linklike`, `syntax`, `format`),
+ * which asks nothing about any renderer and is judged one way — a translation may not
+ * introduce what the English lacks. The exact kinds below it are two-way. URL tokens
+ * additionally include every link a model of the consumer's renderer creates
+ * (`renderer.ts`); that model may only ever add tokens. Three review rounds chased
+ * renderer fidelity (emphasis splitting, footnotes, KaTeX, U+FEFF trimming) before this
+ * split was made; the differential test now requires every link either engine creates to
+ * trip the coarse layer on its own.
+ *
  * ## Conservative on purpose
  *
  * The tokenizer is deliberately *not* a faithful CommonMark parser, and it errs in one
