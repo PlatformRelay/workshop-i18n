@@ -164,8 +164,12 @@ describe('discoverSurfaceFiles — hostile globs', () => {
       'which holds version-control or dependency files',
     ],
     ["'node_moduleſ/x.md'", 'node_moduleſ', 'which holds version-control or dependency files'],
+    // Win32 drops trailing dots and spaces from a path component: `.git.` opens `.git`.
+    ["'.git./config'", '.git.', 'which holds version-control or dependency files'],
+    ["'.git /config'", '.git ', 'which holds version-control or dependency files'],
+    ["'i18n. ./pt-BR/**/*.md'", 'i18n. .', 'which belongs to workshop-i18n'],
   ])(
-    'refuses %s in any letter case, since a case-insensitive file system resolves it to the real tree',
+    'refuses %s, which a case-insensitive or Win32 file system resolves to the real tree',
     (glob, written, reason) => {
       const fs = new MemoryFileSystem({
         '/repo/.localization/workshop.yaml': MANIFEST.replace("'labs/**/*.md'", glob),

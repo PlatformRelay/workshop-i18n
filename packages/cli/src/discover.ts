@@ -33,14 +33,25 @@ const SKIPPED_ANYWHERE: ReadonlySet<string> = new Set(['.git', 'node_modules'])
 export const RESERVED_ROOT_DIRECTORIES: ReadonlySet<string> = new Set(['i18n', '.localization'])
 
 /**
- * A directory name reduced to what a case-insensitive file system compares: on macOS and
- * Windows `I18N/` *is* `i18n/`, so the protected names must match in any letter case.
- * Unicode-aware (`ſ` folds to `s`, the Kelvin sign to `k`) rather than ASCII-only,
- * because those file systems fold Unicode too. On a case-sensitive file system this only
- * ever refuses more — a genuine `I18N/` source directory is not worth the ambiguity.
+ * A directory name reduced to what a file system may treat as the same name, so the
+ * protected names match however they are spelled:
+ *
+ * - **letter case** — on macOS and Windows `I18N/` *is* `i18n/`; Unicode-aware (`ſ` folds
+ *   to `s`, the Kelvin sign to `k`), because those file systems fold Unicode too;
+ * - **trailing dots and spaces** — Win32 drops them, so `.git./config` opens `.git/config`
+ *   (git refuses the same spellings for the same reason).
+ *
+ * Not covered: NTFS 8.3 short names (`GIT~1`) and alternate data streams
+ * (`.git::$INDEX_ALLOCATION`), which git's own `is_ntfs_dotgit` also checks; Windows is not
+ * a platform this CLI is tested on. On a case-sensitive file system all of this only ever refuses more — a
+ * genuine `I18N/` source directory is not worth the ambiguity.
  */
 function foldName(name: string): string {
-  return name.normalize('NFC').toUpperCase().toLowerCase()
+  return name
+    .normalize('NFC')
+    .toUpperCase()
+    .toLowerCase()
+    .replace(/[. ]+$/, '')
 }
 
 function isSkippedAnywhere(name: string): boolean {
