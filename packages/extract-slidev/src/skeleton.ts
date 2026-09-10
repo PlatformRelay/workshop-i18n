@@ -68,6 +68,9 @@ export type HoleContext = 'body' | 'note'
  * indentation) that the locator stripped from the unit's continuation lines.
  * `html-text` is a prose run inside a raw HTML block or Vue island (ADR 0015): spliced
  * the same way, but judged as HTML — a blank line would end the block.
+ * `html-attribute` is the value of a declared component prop: its delimiting quote is
+ * escaped as an entity, and an unquoted value is re-emitted double-quoted, so a
+ * translation can never end the attribute early.
  * `yaml-scalar` re-emits the value as a double-quoted YAML scalar.
  */
 export type HoleEncoding =
@@ -83,6 +86,12 @@ export type HoleEncoding =
       readonly kind: 'html-text'
       /** Indentation (and any blockquote marker) every continuation line carries. */
       readonly continuationPrefix: string
+      readonly context: HoleContext
+    }
+  | {
+      readonly kind: 'html-attribute'
+      /** The quote delimiting the value in the source; `''` when it is unquoted. */
+      readonly quote: '"' | "'" | ''
       readonly context: HoleContext
     }
   | { readonly kind: 'yaml-scalar' }
@@ -126,6 +135,7 @@ export type ReplacementRejection =
   | 'slot-marker'
   | 'markup-changed'
   | 'blank-line'
+  | 'attribute-line-break'
 
 /** One refused replacement. */
 export interface CompositionIssue {
@@ -236,8 +246,22 @@ function encodeYamlScalar(text: string): string {
   return JSON.stringify(text)
 }
 
+/**
+ * An attribute value that cannot end its attribute. The unit text is the raw value with
+ * its entities literal, so only the delimiting quote needs escaping; an unquoted value
+ * gains double quotes, because a translation may carry the spaces an unquoted value
+ * cannot.
+ */
+function encodeAttributeValue(text: string, quote: '"' | "'" | ''): string {
+  if (quote === "'") return text.replace(/'/g, '&#39;')
+  const escaped = text.replace(/"/g, '&quot;')
+  return quote === '"' ? escaped : `"${escaped}"`
+}
+
 function encodeReplacement(hole: Hole, raw: string, text: string): string {
   if (hole.encoding.kind === 'yaml-scalar') return encodeYamlScalar(text)
+  if (hole.encoding.kind === 'html-attribute')
+    return encodeAttributeValue(text, hole.encoding.quote)
   const prefix = hole.encoding.continuationPrefix
   return splitLines(text).join(lineBreakOf(raw) + prefix)
 }
@@ -374,6 +398,16 @@ function rejectReplacement(
           : `translation ${verb} "${token}", which would leave an HTML comment open or closed over the wrong text — keep exactly the delimiters the English has`,
       )
     }
+  }
+  if (hole.encoding.kind === 'html-attribute') {
+    // Everything else below judges lines and markup; an attribute value is neither. What
+    // it must not do is span lines, where Slidev's line scanner reads it without the tag.
+    return /[\r\n]/.test(replacement)
+      ? reject(
+          'attribute-line-break',
+          'translation of a component prop contains a line break, which Slidev reads line by line outside the tag — keep the prop on one line',
+        )
+      : undefined
   }
   // Markup rides along literally (ADR 0004, ADR 0015), so it is compared as a multiset: a
   // translator may move `<strong>` to another word, but an edited attribute, an added

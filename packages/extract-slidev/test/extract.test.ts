@@ -1,7 +1,7 @@
 import { formatUnitId } from '@workshop-i18n/core'
 import { describe, expect, it } from 'vitest'
 import { extractSlidevFile, locateSlidevFile, SlidevExtractionError } from '../src/extract.js'
-import { composeSkeleton } from '../src/skeleton.js'
+import { type CompositionError, composeSkeleton } from '../src/skeleton.js'
 
 /** Spec 001 AS-1: two frontmatter blocks, a Vue island, a note, and a fenced block. */
 const SLIDE_FILE = [
@@ -150,6 +150,82 @@ describe('extractSlidevFile', () => {
     expect(() =>
       composeSkeleton(skeleton, { 'slides:s1:body/div.1/t:1': 'Eins.\n\nZwei.' }),
     ).toThrow(/blank line/)
+  })
+})
+
+describe('extractSlidevFile component text props (ADR 0015)', () => {
+  const PROPS = { KwCard: ['heading', 'leftHeading'], CodeNote: ['label'] }
+  const slide = (...body: string[]) => ['---', 'slideId: s1', '---', '', ...body, ''].join('\n')
+  const units = (source: string, options = { componentTextProps: PROPS }) =>
+    extractSlidevFile(source, options).units.map((unit) => [unit.id.unitKey, unit.source])
+
+  it('extracts nothing from a prop until the manifest declares it', () => {
+    expect(units(slide('<KwCard heading="One IP per Pod" kind="net" />'), {} as never)).toEqual([])
+  })
+
+  it('extracts a declared prop, and never an undeclared one or a binding', () => {
+    const source = slide(
+      '<CodeNote at="1" label="a real tag" variant="warn" :heading="computed">',
+      'You built it.',
+      '</CodeNote>',
+    )
+    expect(units(source)).toEqual([
+      ['body/code-note.1/prop:label', 'a real tag'],
+      ['body/code-note.1/t:1', 'You built it.'],
+    ])
+  })
+
+  it('matches names the way Vue resolves them', () => {
+    const source = slide('<kw-card left-heading="Links" kind="pod" />')
+    expect(units(source)).toEqual([['body/kw-card.1/prop:left-heading', 'Links']])
+  })
+
+  it('keeps entities literal and re-escapes the delimiting quote on composition', () => {
+    const source = slide(
+      `<KwCard heading='Say "hi" &amp; wave' />`,
+      '<KwCard heading="It&#39;s here" />',
+      '<KwCard heading=Unquoted />',
+    )
+    const extraction = extractSlidevFile(source, { componentTextProps: PROPS })
+    expect(extraction.units.map((unit) => unit.source)).toEqual([
+      'Say "hi" &amp; wave',
+      'It&#39;s here',
+      'Unquoted',
+    ])
+    const composed = composeSkeleton(extraction.skeleton, {
+      'slides:s1:body/kw-card.1/prop:heading': `Sag "hallo" & wink's`,
+      'slides:s1:body/kw-card.2/prop:heading': 'Er sagt "da"',
+      'slides:s1:body/kw-card.3/prop:heading': 'Ohne "Anführung"',
+    })
+    expect(composed).toContain(`<KwCard heading='Sag "hallo" & wink&#39;s' />`)
+    expect(composed).toContain('<KwCard heading="Er sagt &quot;da&quot;" />')
+    expect(composed).toContain('<KwCard heading="Ohne &quot;Anführung&quot;" />')
+  })
+
+  it('reproduces the source byte-for-byte when a prop is not translated', () => {
+    const source = slide(`<KwCard heading='Say "hi"' />`, '<KwCard heading=Bare />')
+    const { skeleton } = extractSlidevFile(source, { componentTextProps: PROPS })
+    expect(composeSkeleton(skeleton, {})).toBe(source)
+  })
+
+  it('refuses a prop translation that breaks the line or opens a comment', () => {
+    const source = slide('<KwCard heading="One line" />')
+    const { skeleton } = extractSlidevFile(source, { componentTextProps: PROPS })
+    const reasonOf = (text: string) => {
+      try {
+        composeSkeleton(skeleton, { 'slides:s1:body/kw-card.1/prop:heading': text })
+        return undefined
+      } catch (error) {
+        return (error as CompositionError).issues[0]?.reason
+      }
+    }
+    expect(reasonOf('Zwei\nZeilen')).toBe('attribute-line-break')
+    expect(reasonOf('offen <!-- hier')).toBe('comment-terminator')
+    expect(reasonOf('Eine Zeile')).toBeUndefined()
+  })
+
+  it('skips an empty or symbol-only prop value', () => {
+    expect(units(slide('<KwCard heading="" />', '<KwCard heading="①" />'))).toEqual([])
   })
 })
 
