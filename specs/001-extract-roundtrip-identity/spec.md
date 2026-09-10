@@ -15,9 +15,10 @@ lint rejects missing/duplicate ids. (ADRs 0001, 0003, 0004, 0005, 0010; constitu
 ### User Story 1 - Adopt identities in an existing workshop (Priority: P1)
 
 A workshop maintainer runs `workshop-i18n init-ids` on their repo. The tool proposes a stable
-`slideId` for every slide (derived from section + heading), lab id, and quiz-question id where one
-is missing, writes them into the sources as a reviewable diff, and from then on `init-ids --check`
-in CI rejects missing or duplicate identities.
+`slideId` for every slide (derived from section + heading) and a lab id for every lab where one is
+missing, writes them into the sources as a reviewable diff, and from then on `init-ids --check`
+in CI rejects missing or duplicate identities — quiz-question ids included, which are checked but
+never inserted (see FR-001).
 
 **Why this priority**: Nothing else in the product works without identities; this is the one-time
 migration cost ADR 0005 schedules explicitly (~400 slides in Kubernetes-Workshop plus the OpenTofu
@@ -75,8 +76,13 @@ skeleton reproduces the source semantically losslessly; fences and Vue islands b
 
 ### Functional Requirements
 
-- **FR-001**: `init-ids` MUST propose and insert explicit identities for slides, labs, and quiz
-  questions, idempotently, changing nothing else.
+- **FR-001**: `init-ids` MUST propose and insert explicit identities for slides and labs,
+  idempotently, changing nothing else. Quiz-question ids MUST be checked (missing, duplicate
+  within and across banks, unsafe) but never inserted: both consumers' own
+  `questions.schema.json` requires an `id` on every question, so a missing one is a schema
+  violation for the author to fix, and a minted id would be a second, competing authority over a
+  file the consumer's CI already validates. *(Amended 2026-09-10: the original text said
+  `init-ids` inserts quiz-question ids; the implementation checks them only, for this reason.)*
 - **FR-002**: `init-ids --check` MUST exit non-zero on missing or duplicate identities (CI lint).
 - **FR-003**: `extract` MUST read the `workshop.yaml` manifest (versioned `apiVersion`; unknown
   major version → hard error).
