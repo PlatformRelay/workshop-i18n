@@ -1,9 +1,68 @@
+import { readFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
+import { Worker } from 'node:worker_threads'
 import { describe, expect, it } from 'vitest'
-import { compileGlob, GlobError, MAX_GLOB_ALTERNATIVES } from '../src/glob.js'
+import {
+  compileGlob,
+  GlobError,
+  MAX_GLOB_ALTERNATIVES,
+  MAX_GLOB_BYTES,
+  MAX_GLOB_EXPANDED_BYTES,
+  MAX_GLOB_SEGMENTS,
+} from '../src/glob.js'
 
 function matches(pattern: string, path: string): boolean {
   return compileGlob(pattern).test(path)
 }
+
+/**
+ * The matcher's own source as plain JavaScript, so a worker can run it without vitest.
+ * This relies on glob.ts importing nothing; give it an import and these tests say so.
+ */
+const GLOB_MODULE = stripTypeScriptTypes(
+  readFileSync(new URL('../src/glob.ts', import.meta.url), 'utf8'),
+)
+
+/**
+ * Run `body` against the real matcher (`compileGlob` in scope) in a worker thread and
+ * resolve with how long it took. Vitest cannot interrupt synchronous code, so a timing
+ * test run in-process would *hang* on the regression it exists to catch; a worker can be
+ * terminated, so past `limitMs` the test fails with a message instead.
+ */
+function timeInWorker(body: string, limitMs: number): Promise<number> {
+  const code = `${GLOB_MODULE}
+import { parentPort } from 'node:worker_threads'
+const started = performance.now()
+${body}
+parentPort.postMessage(performance.now() - started)
+`
+  const worker = new Worker(new URL(`data:text/javascript,${encodeURIComponent(code)}`))
+  return new Promise<number>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      void worker.terminate()
+      reject(new Error(`the matcher did not finish within ${limitMs} ms`))
+    }, limitMs)
+    worker.once('message', (elapsed: number) => {
+      clearTimeout(timer)
+      void worker.terminate()
+      resolve(elapsed)
+    })
+    worker.once('error', (error) => {
+      clearTimeout(timer)
+      reject(error)
+    })
+  })
+}
+
+describe('timeInWorker (the timing tests’ harness)', () => {
+  it('fails a matcher that never returns instead of hanging the suite', async () => {
+    await expect(timeInWorker('for (;;) {}', 300)).rejects.toThrow('did not finish within 300 ms')
+  })
+
+  it('surfaces an error thrown by the matcher', async () => {
+    await expect(timeInWorker("compileGlob('{a')", 5_000)).rejects.toThrow('unbalanced')
+  })
+})
 
 describe('compileGlob', () => {
   it('matches a literal path exactly', () => {
@@ -83,13 +142,90 @@ describe('compileGlob', () => {
     expect(() => compileGlob('{..,labs}/x.md')).toThrow(/escapes the repository/)
   })
 
-  it('matches pathological star runs in linear-ish time (no regex backtracking)', () => {
-    const name = `labs/${'a'.repeat(60)}.md`
-    const started = performance.now()
-    expect(matches('labs/*a*a*a*a*a*a*a*a*b.md', name)).toBe(false)
-    expect(matches('*a*a*a*a*a*a*a*a*a*a*a*a*b', 'a'.repeat(200))).toBe(false)
-    expect(matches(`${'**/'.repeat(12)}b`, `${'a/'.repeat(60)}c`)).toBe(false)
-    expect(performance.now() - started).toBeLessThan(250)
+  it('matches pathological star runs in linear-ish time (no regex backtracking)', async () => {
+    const elapsed = await timeInWorker(
+      `
+      const name = 'labs/' + 'a'.repeat(60) + '.md'
+      if (compileGlob('labs/*a*a*a*a*a*a*a*a*b.md').test(name)) throw new Error('matched')
+      if (compileGlob('*a*a*a*a*a*a*a*a*a*a*a*a*b').test('a'.repeat(200))) throw new Error('matched')
+      if (compileGlob('**/'.repeat(12) + 'b').test('a/'.repeat(60) + 'c')) throw new Error('matched')
+      `,
+      5_000,
+    )
+    expect(elapsed).toBeLessThan(250)
+  })
+})
+
+describe('compileGlob bounds (work is bounded, not merely non-exponential)', () => {
+  // The reviewer's glob: 64 brace alternatives, 500 `*` segments. Before the bounds it
+  // took `extract --check` on the real corpus from under a second to nearly three minutes.
+  const HOSTILE = `{${Array(64).fill('*').join(',')}}/${'*/'.repeat(500)}x.md`
+
+  it('refuses a glob longer than the byte limit, saying what the limit is', () => {
+    expect(new TextEncoder().encode(HOSTILE).length).toBeGreaterThan(MAX_GLOB_BYTES)
+    expect(() => compileGlob(HOSTILE)).toThrow(GlobError)
+    expect(() => compileGlob(HOSTILE)).toThrow(`longer than ${MAX_GLOB_BYTES} bytes`)
+  })
+
+  it('counts the limit in UTF-8 bytes, not characters', () => {
+    const wide = `labs/${'ü'.repeat(MAX_GLOB_BYTES / 2)}.md`
+    expect(wide.length).toBeLessThan(MAX_GLOB_BYTES)
+    expect(() => compileGlob(wide)).toThrow(`longer than ${MAX_GLOB_BYTES} bytes`)
+    expect(() => compileGlob(`labs/${'x'.repeat(MAX_GLOB_BYTES - 5)}`)).not.toThrow()
+  })
+
+  it('refuses an alternative with more segments than the segment limit', () => {
+    const deep = `${'a/'.repeat(MAX_GLOB_SEGMENTS)}x.md`
+    expect(() => compileGlob(deep)).toThrow(`more than ${MAX_GLOB_SEGMENTS} path segments`)
+    expect(() => compileGlob(`${'a/'.repeat(MAX_GLOB_SEGMENTS - 1)}x.md`)).not.toThrow()
+    expect(() => compileGlob(`{x,${'*/'.repeat(MAX_GLOB_SEGMENTS)}y}.md`)).toThrow(
+      `more than ${MAX_GLOB_SEGMENTS} path segments`,
+    )
+  })
+
+  it('collapses a run of ** into one before counting segments, without changing matches', () => {
+    const glob = `labs/${'**/'.repeat(MAX_GLOB_SEGMENTS * 2)}x.md`
+    expect(matches(glob, 'labs/x.md')).toBe(true)
+    expect(matches(glob, 'labs/a/b/c/x.md')).toBe(true)
+    expect(matches(glob, 'labs/a/b/c/y.md')).toBe(false)
+    expect(matches(glob, 'labs/.hidden/x.md')).toBe(false)
+  })
+
+  it('deduplicates brace alternatives before counting them', () => {
+    const repeated = `{${Array(MAX_GLOB_ALTERNATIVES * 2)
+      .fill('x')
+      .join(',')}}/*.md`
+    const glob = compileGlob(repeated)
+    expect(glob.bases).toEqual(['x'])
+    expect(glob.test('x/a.md')).toBe(true)
+    expect(() => compileGlob(`{*,*}{*,*}{*,*}{*,*}{*,*}{*,*}{*,*}/x.md`)).not.toThrow()
+  })
+
+  it('keeps a worst-case glob the bounds still admit fast on deep paths', async () => {
+    // Close to every limit at once: four alternatives of ~460 bytes (just under the
+    // expanded-bytes limit), 31 segments with `**` between star-heavy segments that fail
+    // late, tested against thousands of deep, long paths the attacker also controls.
+    const elapsed = await timeInWorker(
+      `
+      const star = '*a'.repeat(12) + '*b'
+      const pattern = '{a,b}{a,b}/**/' + Array(15).fill(star).join('/**/')
+      const glob = compileGlob(pattern)
+      const segment = 'a'.repeat(60)
+      for (let file = 0; file < 2000; file += 1) {
+        const path = Array(8).fill(segment).join('/') + '/' + file + segment
+        if (glob.test(path)) throw new Error('matched ' + path)
+      }
+      `,
+      20_000,
+    )
+    expect(elapsed).toBeLessThan(5_000)
+  }, 30_000)
+
+  it('refuses a glob whose alternatives add up to more than the expanded-bytes limit', () => {
+    const star = `${'*a'.repeat(12)}*b`
+    const pattern = `{a,b}{a,b}{a,b}/**/${Array(15).fill(star).join('/**/')}`
+    expect(new TextEncoder().encode(pattern).length).toBeLessThanOrEqual(MAX_GLOB_BYTES)
+    expect(() => compileGlob(pattern)).toThrow(`more than ${MAX_GLOB_EXPANDED_BYTES}`)
   })
 })
 

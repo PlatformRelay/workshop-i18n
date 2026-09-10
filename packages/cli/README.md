@@ -39,8 +39,12 @@ own — add `exclude: ['labs/README.md']` if an index page should not be a trans
 Globs are repository-relative and support `*`, `?`, `**` (whole segments) and `{a,b}` (which may
 nest, up to 64 alternatives); every other character is literal. A wildcard never matches a leading
 `.` — name a dot-path literally, e.g. `{.github,docs}/*.md`. Unbalanced braces, `./` and `..`
-segments are refused. Matching is linear in the pattern and path — no regular expression, so a
-hostile glob in a pull request cannot stall CI. The walk starts at each glob's literal
+segments are refused. Matching uses no regular expression, and a glob is bounded: at most 512
+bytes as written, 64 alternatives and 2048 bytes once its braces are expanded, and 32 segments in
+any alternative — so testing a path costs a small constant times its length, and a hostile glob in
+a pull request cannot stall CI. A glob over a bound is refused (exit 65, naming the manifest
+entry). Repeated alternatives and runs of `**` are merged before counting, since they cannot change
+what a glob matches. The walk starts at each glob's literal
 base, never follows a symlink (a symlinked source is skipped with a warning; a symlinked glob base,
 catalog or `i18n/` directory is an error), and never enters `.git/`, `node_modules/`, or the tool's
 own `i18n/` and `.localization/` trees — so a broad `**/*.md` cannot extract a locale's overrides

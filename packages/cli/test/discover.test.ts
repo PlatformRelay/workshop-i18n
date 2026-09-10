@@ -153,6 +153,21 @@ describe('discoverSurfaceFiles — hostile globs', () => {
     expect(fs.writes).toEqual([])
   })
 
+  it('refuses a glob over the size bounds before walking anything, naming the entry', () => {
+    const hostile = `{${Array(64).fill('*').join(',')}}/${'*/'.repeat(500)}x.md`
+    const fs = new MemoryFileSystem({
+      '/repo/.localization/workshop.yaml': MANIFEST.replace("'labs/**/*.md'", `'${hostile}'`),
+      '/repo/labs/a.md': '',
+      '/repo/pages/S05-pod/index.md': '',
+      '/repo/quiz/questions.json': '{}',
+    })
+    const result = invoke(fs, ['extract', '--check'])
+    expect(result.code).toBe(EXIT.DATA)
+    expect(result.stderr).toContain('surfaces.labs.include[0]: ')
+    expect(result.stderr).toContain('longer than 512 bytes')
+    expect(fs.writes).toEqual([])
+  })
+
   it('names the manifest entry of a glob it refuses', () => {
     const fs = new MemoryFileSystem({
       '/repo/.localization/workshop.yaml': MANIFEST.replace("'labs/README.md'", "'labs/{a'"),
