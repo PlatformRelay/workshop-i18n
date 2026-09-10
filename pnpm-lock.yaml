@@ -37,7 +37,27 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
-  packages/compose: {}
+  packages/compose:
+    dependencies:
+      '@workshop-i18n/catalog-po':
+        specifier: workspace:*
+        version: link:../catalog-po
+      '@workshop-i18n/core':
+        specifier: workspace:*
+        version: link:../core
+      '@workshop-i18n/extract-markdown':
+        specifier: workspace:*
+        version: link:../extract-markdown
+      '@workshop-i18n/extract-quiz':
+        specifier: workspace:*
+        version: link:../extract-quiz
+      '@workshop-i18n/extract-slidev':
+        specifier: workspace:*
+        version: link:../extract-slidev
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
 
   packages/core:
     dependencies:
