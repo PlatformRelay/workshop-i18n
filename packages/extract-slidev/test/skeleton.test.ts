@@ -417,6 +417,36 @@ describe('composeSkeleton keeps the markup a unit carries (ADR 0015)', () => {
     ).toBe('markup-changed')
   })
 
+  it('rejects any "<" before a non-space character the English does not have', () => {
+    // Coarse on purpose: whatever this package's scanner makes of it, a renderer might
+    // read a tag, a closer or a bogus comment there (ADR 0015).
+    const tail = ' <span class="kw-muted">das</span> {{ $slidev.nav.currentPage }}.'
+    for (const added of [
+      '<x_y v-html="a">b</x_y>',
+      '<svg:a onmouseover="x">b</svg:a>',
+      '</ div>',
+      '</1',
+      '<?x>',
+      '<!x>',
+      '<3',
+    ]) {
+      expect(reasonOf(`Nutze ${added}${tail}`), added).toBe('markup-changed')
+    }
+    expect(reasonOf(`Nutze a < b${tail}`)).toBeUndefined()
+    expect(reasonOf(`Nutze &lt;b&gt;${tail}`)).toBeUndefined()
+  })
+
+  it('judges a multi-line tag against the English as written, not as re-indented', () => {
+    const quoted = '> Use <span\n> class="x">this</span>.\n'
+    const english = 'Use <span\nclass="x">this</span>.'
+    const nested = createSkeleton(quoted, [
+      hole('slides:s1:body/bq-1/p-1', 2, quoted.length - 1, english, markdown('> ')),
+    ])
+    expect(
+      composeSkeleton(nested, { 'slides:s1:body/bq-1/p-1': 'Nutze <span\nclass="x">das</span>.' }),
+    ).toBe('> Nutze <span\n> class="x">das</span>.\n')
+  })
+
   it('rejects a translation that keeps every tag but no longer nests them', () => {
     // Same multiset, broken structure: Vue refuses to compile a closing tag before its
     // opener, which fails the whole deck's build rather than one slide.
@@ -435,9 +465,11 @@ describe('composeSkeleton keeps the markup a unit carries (ADR 0015)', () => {
   })
 
   it('rejects a tag the translation leaves unterminated, which would swallow the skeleton', () => {
+    // A bare `<b` at the end is not a tag by itself — but it lands in front of skeleton
+    // that may complete it, so it is refused like any `<` the English does not have.
     expect(
       reasonOf('Nutze <span class="kw-muted">das</span> {{ $slidev.nav.currentPage }} <b'),
-    ).toBe(undefined)
+    ).toBe('markup-changed')
     expect(
       reasonOf('Nutze <span class="kw-muted">das</span> {{ $slidev.nav.currentPage }} <b class="x'),
     ).toBe('markup-changed')

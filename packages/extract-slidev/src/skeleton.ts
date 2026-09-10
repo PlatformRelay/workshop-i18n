@@ -56,7 +56,7 @@ import {
   isSlotMarkerLine,
   isTildeFenceOpenerLine,
 } from './deck.js'
-import { isWellNested, markupTokens } from './html.js'
+import { coarseMarkup, isWellNested, markupTokens } from './html.js'
 
 /** Where a markdown hole sits, which decides what a replacement may not contain. */
 export type HoleContext = 'body' | 'note'
@@ -355,6 +355,7 @@ function countOccurrences(text: string, token: string): number {
 function rejectReplacement(
   hole: Hole,
   replacement: string,
+  translation: string,
   context: SpliceContext,
 ): CompositionIssue | undefined {
   const id = formatUnitId(hole.id)
@@ -399,8 +400,33 @@ function rejectReplacement(
       )
     }
   }
+  // Markup rides along literally (ADR 0004, ADR 0015), so it is compared as a multiset: a
+  // translator may move `<strong>` to another word, but an edited attribute, an added
+  // `<img onerror>` or a new `{{ }}` — which Vue would execute — is not a translation.
+  //
+  // The coarse reading decides; the precise one may only add refusals. Both compare the
+  // translation with the English as the translator sees them — container indentation
+  // stripped from both — so a multi-line tag is judged as written, not as re-indented.
+  // Then the coarse *count* runs again over the lines the replacement lands in, because a
+  // `<` at the edge of a hole reads the skeleton next to it: `Welt <img` swallows the
+  // `</div` that follows. (A count, not the tokens: a translated prop value legitimately
+  // changes the text of the tag around it.)
+  const english = hole.source.replace(/\r\n/g, '\n')
+  const translated = translation.replace(/\r\n/g, '\n')
+  const unnested = isWellNested(english) && !isWellNested(translated)
+  if (
+    unnested ||
+    !sameMultiset(coarseMarkup(translated), coarseMarkup(english)) ||
+    coarseMarkup(composed).length !== coarseMarkup(current).length ||
+    !sameMultiset(markupTokens(translated), markupTokens(english))
+  ) {
+    return reject(
+      'markup-changed',
+      'translation adds, drops or changes something a renderer could read as markup — an HTML tag, a "<" before a non-space character, or a {{ }} interpolation — or stops the tags nesting; keep every one exactly as the English has it (only its position may change), and write a literal "<" followed by a space or as &lt;',
+    )
+  }
   if (hole.encoding.kind === 'html-attribute') {
-    // Everything else below judges lines and markup; an attribute value is neither. What
+    // Everything else below judges lines and blocks; an attribute value is neither. What
     // it must not do is span lines, where Slidev's line scanner reads it without the tag.
     return /[\r\n]/.test(replacement)
       ? reject(
@@ -408,18 +434,6 @@ function rejectReplacement(
           'translation of a component prop contains a line break, which Slidev reads line by line outside the tag — keep the prop on one line',
         )
       : undefined
-  }
-  // Markup rides along literally (ADR 0004, ADR 0015), so it is compared as a multiset: a
-  // translator may move `<strong>` to another word, but an edited attribute, an added
-  // `<img onerror>` or a new `{{ }}` — which Vue would execute — is not a translation.
-  // Moving is fine only while the tags still nest: a well-formed English unit must stay
-  // well-formed, or the reordering is a template Vue refuses to compile.
-  const unnested = isWellNested(hole.source) && !isWellNested(replacement)
-  if (unnested || !sameMultiset(markupTokens(replacement), markupTokens(hole.source))) {
-    return reject(
-      'markup-changed',
-      'translation changes the HTML tags or {{ }} interpolations the English carries, or stops them nesting — keep every tag and interpolation exactly as written; only their position may change, and every tag must still close after it opens',
-    )
   }
   // An HTML block ends at the first blank line, and everything after it — the rest of
   // the card, its closing tag — is then read as markdown.
@@ -504,7 +518,7 @@ export function composeSkeleton(skeleton: Skeleton, translations: TranslationLoo
     const translation = lookup(translations, formatUnitId(hole.id))
     if (translation === undefined || translation === hole.source) continue
     const replacement = encodeReplacement(hole, source.slice(hole.start, hole.end), translation)
-    const issue = rejectReplacement(hole, replacement, spliceContextOf(source, hole))
+    const issue = rejectReplacement(hole, replacement, translation, spliceContextOf(source, hole))
     if (issue) {
       issues.push(issue)
       continue

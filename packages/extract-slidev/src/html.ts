@@ -57,8 +57,12 @@ export type HtmlToken =
     }
   | { readonly kind: 'close'; readonly start: number; readonly end: number; readonly name: string }
 
-/** A tag name, which must be followed by whitespace, `/` or `>` to be one. */
-const TAG_NAME = /[A-Za-z][A-Za-z0-9-]*/y
+/**
+ * A tag name as Vue's tokenizer reads one: a letter, then anything up to whitespace, `/`
+ * or `>`. So `<x_y>`, `<Foo.Bar>`, `<svg:a>` and `<a"b>` are all elements — reading them
+ * with a narrower grammar once let a translation compile to a live `v-html`.
+ */
+const TAG_NAME = /[A-Za-z][^\s/>]*/y
 const WHITESPACE = /\s/
 
 /** Elements whose contents the HTML tokenizer reads as raw text, not markup. */
@@ -238,6 +242,13 @@ export function scanHtml(text: string): readonly HtmlToken[] {
         cursor = end
         continue
       }
+      // `</` not followed by a letter is a bogus comment to the HTML tokenizer Vue follows:
+      // it runs to the next `>` and is never text.
+      flushText(cursor)
+      const end = opaqueUntil(cursor + 2, '>')
+      tokens.push({ kind: 'opaque', start: cursor, end })
+      cursor = end
+      continue
     } else if (text.charAt(cursor) === '<') {
       const name = readTagName(text, cursor + 1)
       if (name !== undefined) {
@@ -283,6 +294,53 @@ export function markupTokens(text: string): readonly string[] {
   return scanHtml(text)
     .filter((token) => token.kind !== 'text' && token.kind !== 'comment')
     .map((token) => text.slice(token.start, token.end))
+}
+
+/**
+ * Every place in `text` where Vue, or a markdown renderer ahead of it, *could* start
+ * reading markup — read coarsely, on purpose.
+ *
+ * The precise scanner above decides what the locator extracts; it must never be what
+ * decides what composition lets through. A renderer-independent over-approximation does:
+ * every `<` not followed by whitespace (with everything up to the next `>`, or to the end
+ * when there is none), every `{{` (up to its `}}`), and every `}}`. A translation must
+ * carry exactly these tokens of its English, so anything it adds that a renderer might
+ * treat as a tag, a closer, a bogus comment or an interpolation is refused — whether or
+ * not this package's own scanner would have recognised it. A false positive costs an
+ * English fallback; a false negative costs code execution in the deck.
+ */
+export function coarseMarkup(text: string): readonly string[] {
+  // Next `>` and next `}}` at or after each offset, computed once so this stays linear.
+  const nextGreater = new Int32Array(text.length + 1).fill(-1)
+  const nextClose = new Int32Array(text.length + 1).fill(-1)
+  for (let index = text.length - 1; index >= 0; index -= 1) {
+    nextGreater[index] = text.charAt(index) === '>' ? index : (nextGreater[index + 1] ?? -1)
+    nextClose[index] = text.startsWith('}}', index) ? index : (nextClose[index + 1] ?? -1)
+  }
+  const tokens: string[] = []
+  for (let index = 0; index < text.length; index += 1) {
+    // A comment's words are nobody's markup and may be translated; its delimiters are
+    // counted here and, in context, by composition's comment guard.
+    if (text.startsWith('<!--', index)) {
+      tokens.push('<!--')
+      const close = text.indexOf('-->', index + 4)
+      if (close === -1) break
+      tokens.push('-->')
+      index = close + 2
+      continue
+    }
+    // A `<` at the very end counts too: what follows it is the skeleton it lands against.
+    if (text.charAt(index) === '<' && !WHITESPACE.test(text.charAt(index + 1) || 'x')) {
+      const close = nextGreater[index + 1] ?? -1
+      tokens.push(text.slice(index, close === -1 ? text.length : close + 1))
+    }
+    if (text.startsWith('{{', index)) {
+      const close = nextClose[index + 2] ?? -1
+      tokens.push(text.slice(index, close === -1 ? text.length : close + 2))
+    }
+    if (text.startsWith('}}', index)) tokens.push('}}')
+  }
+  return tokens
 }
 
 /**
