@@ -94,12 +94,12 @@ describe('extractSlidevFile', () => {
   it('splices a translation into every hole and leaves the skeleton untouched', () => {
     const { skeleton, units } = extractSlidevFile(SLIDE_FILE)
     const translations = Object.fromEntries(
-      units.map((unit) => [formatUnitId(unit.id), `DE ${unit.id.unitKey}`]),
+      units.map((unit) => [formatUnitId(unit.id), `DE ${unit.id.unitKey.replaceAll('/', ' ')}`]),
     )
     const composed = composeSkeleton(skeleton, translations)
-    expect(composed).toContain('# DE body/h1-1/title')
-    expect(composed).toContain('kicker: "DE fm/kicker"')
-    expect(composed).toContain('- DE body/h2-1/l-1/li-1/p-1')
+    expect(composed).toContain('# DE body h1-1 title')
+    expect(composed).toContain('kicker: "DE fm kicker"')
+    expect(composed).toContain('- DE body h2-1 l-1 li-1 p-1')
     expect(composed).toContain('```yaml {none|1-2|all}\nkind: Pod\n---\nkind: Service\n```')
     expect(composed).toContain('<KwCard heading="One IP per Pod" kind="net" />')
     expect(composed).toContain('image: /covers/section-05.webp')

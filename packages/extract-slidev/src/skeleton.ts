@@ -137,6 +137,7 @@ export type ReplacementRejection =
   | 'blank-line'
   | 'attribute-line-break'
   | 'block-syntax'
+  | 'added-syntax'
 
 /** One refused replacement. */
 export interface CompositionIssue {
@@ -313,8 +314,259 @@ function spliceContextOf(source: string, hole: Hole): SpliceContext {
   }
 }
 
-/** A line Slidev reads as a snippet import or a KaTeX block, at any indentation. */
-const BLOCK_SYNTAX_LINE = /^\s*(?:<<<|\$\$)/
+/**
+ * A line a markdown or Slidev block rule reads, at any indentation: a snippet import
+ * (`<<<`), a KaTeX block (`$$`), any line whose trimmed text starts with `:` (the MDC
+ * block grammar accepts two or more colons and trims before the name, and its `:1`
+ * shorthand crashes the build), or a link reference definition (`[name]:`), which an image
+ * elsewhere can point at.
+ */
+const BLOCK_SYNTAX_LINE = /^\s*(?:<<<|\$\$|:|\[[^\]\n]*\]:)/
+
+/**
+ * Prose punctuation a translation may add freely. Everything outside this set, Unicode
+ * letters, marks and decimal digits, and the two ordinary spaces is budgeted by the
+ * English (see {@link addedCharacters}).
+ */
+const FREE_PUNCTUATION = new Set(Array.from('.,;:!?\'"()-–—…«»“”‘’¿¡%'))
+
+/** True for a character a translation may add without it counting against the English. */
+function isFreeCharacter(character: string): boolean {
+  return (
+    /^[\p{L}\p{M}\p{Nd}]$/u.test(character) ||
+    // Non-ASCII punctuation and symbols — `→`, `·`, `≤`, `€`, `✓`. Every grammar in the
+    // render path is spelled in ASCII: CommonMark/markdown-it syntax and escapes, HTML and
+    // Vue templates, Slidev's extensions, KaTeX and MDC delimiters. None of these can
+    // start, end or change markup. Format characters, unusual spaces, controls and
+    // private-use or unassigned code points stay budgeted.
+    ((character.codePointAt(0) ?? 0) > 0x7f && /^[\p{P}\p{S}]$/u.test(character)) ||
+    character === ' ' ||
+    character === '\u00a0' ||
+    FREE_PUNCTUATION.has(character)
+  )
+}
+
+/** Named references decoded before budgeting; any other name stays, and its `&` counts. */
+const NAMED_REFERENCES: Readonly<Record<string, string>> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  nbsp: '\u00a0',
+  lbrace: '{',
+  lcub: '{',
+  rbrace: '}',
+  rcub: '}',
+  dollar: '$',
+  ast: '*',
+  midast: '*',
+  lowbar: '_',
+  grave: '`',
+  num: '#',
+  verbar: '|',
+  vert: '|',
+  sol: '/',
+  bsol: '\\',
+  commat: '@',
+  excl: '!',
+  lsqb: '[',
+  lbrack: '[',
+  rsqb: ']',
+  rbrack: ']',
+  colon: ':',
+  semi: ';',
+  equals: '=',
+  plus: '+',
+  hat: '^',
+  percnt: '%',
+  period: '.',
+  comma: ',',
+  quest: '?',
+  lpar: '(',
+  rpar: ')',
+}
+
+/**
+ * `text` with its character references and markdown backslash escapes decoded — every
+ * numeric one, and the named ones above, with an optional `;` and names matched without
+ * case — so the budget counts what the renderer shows rather than how it was spelled.
+ */
+export function decodeCharacters(text: string): string {
+  return text
+    .replace(/&#([xX][0-9a-fA-F]+|[0-9]+);?/g, (match, digits: string) => {
+      const code =
+        digits[0] === 'x' || digits[0] === 'X'
+          ? Number.parseInt(digits.slice(1), 16)
+          : Number.parseInt(digits, 10)
+      return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : match
+    })
+    .replace(
+      /&([A-Za-z]+);?/g,
+      (match, name: string) => NAMED_REFERENCES[name.toLowerCase()] ?? match,
+    )
+    .replace(/\\([!-/:-@[-`{-~])/g, '$1')
+}
+
+/**
+ * Count of each character in `text`, by code point. A line break is counted only when the
+ * line after it could start a block (see {@link opensNoBlock}): re-wrapping prose is free,
+ * while a break before `- `, `1.`, `#` or `>` starts a line a block rule may read.
+ * Inside a raw HTML block no block rule runs until a blank line, which is refused on its
+ * own, so there every break is free (`breaksAreFree`).
+ */
+/**
+ * True when a line starting `line` — the text after a line break inside a paragraph, past
+ * ordinary spaces — cannot start or interrupt a block. Each case is a rule CommonMark and
+ * markdown-it state for paragraph continuation lines; Slidev's and MDC's line-level
+ * syntax is refused separately, line by line, in context.
+ */
+function opensNoBlock(line: string): boolean {
+  const first = line.charAt(0)
+  // A letter, and any non-ASCII character: every block rule in the render path — CommonMark
+  // and markdown-it, Slidev's slot, snippet and KaTeX rules, MDC — starts with ASCII.
+  if (/^\p{L}$/u.test(first) || (first.codePointAt(0) ?? 0) > 0x7f) return true
+  // No block rule starts with these. A backtick starts a code span; a fence needs a run of
+  // three, which the syntax counts refuse wherever it appears.
+  if ('("\'`/'.includes(first)) return true
+  // A list marker needs whitespace after it, and a thematic break or setext underline is
+  // nothing but markers and spaces: `**bold**` or `-x` is neither.
+  if ('*+-'.includes(first)) return /^.\S/.test(line) && !/^[*+\-\s]*$/.test(line)
+  if (first === '=') return !/^=+\s*$/.test(line)
+  // An ATX heading needs a space (or the end) after one to six hashes.
+  if (first === '#') return !/^#{1,6}(?:\s|$)/.test(line)
+  // Only an ordered list starting at 1 may interrupt a paragraph.
+  if (/^\d$/.test(first)) {
+    const marker = /^(\d{1,9})[.)](?:\s|$)/.exec(line)
+    return marker === null || Number(marker[1]) !== 1
+  }
+  return false
+}
+
+function characterCounts(text: string, breaksAreFree: boolean): Map<string, number> {
+  const counts = new Map<string, number>()
+  const characters = Array.from(text)
+  for (const [index, character] of characters.entries()) {
+    if (character === '\n') {
+      let next = index + 1
+      while (characters[next] === ' ' || characters[next] === '\u00a0') next += 1
+      const lineEnd = characters.indexOf('\n', next)
+      const line = characters.slice(next, lineEnd === -1 ? characters.length : lineEnd).join('')
+      if (breaksAreFree || opensNoBlock(line)) continue
+    }
+    counts.set(character, (counts.get(character) ?? 0) + 1)
+  }
+  return counts
+}
+
+/**
+ * The characters `translation` holds more of than `english`, outside the free set.
+ *
+ * The backbone of the guard (ADR 0015): rather than enumerating the syntax a renderer
+ * might read — which three review rounds showed is always one construct short — this
+ * enumerates what a translation may add. Letters, marks, digits, ordinary spaces, line
+ * breaks and prose punctuation are free; every other character (`` ` ~ < > { } [ ] $ * _
+ * # | @ / \\ & ^ = + ``, symbols, emoji, other spaces, format characters) may appear at
+ * most as often as in the English unit. Both sides are decoded first.
+ */
+export function addedCharacters(
+  english: string,
+  translation: string,
+  breaksAreFree = false,
+): readonly string[] {
+  const budget = characterCounts(english, breaksAreFree)
+  const added: string[] = []
+  for (const [character, count] of characterCounts(translation, breaksAreFree)) {
+    if (!isFreeCharacter(character) && count > (budget.get(character) ?? 0)) {
+      added.push(character === '\n' ? 'a line break before a non-letter' : character)
+    }
+  }
+  return added
+}
+
+/**
+ * The inline code spans of a markdown unit, delimiters included, found the way CommonMark
+ * finds them: a backtick run closes at the next run of the same length, and a backslash
+ * keeps the backtick after it from opening one. Their content is literal to the renderer,
+ * so markup the English keeps inside one must not move out of it.
+ */
+export function codeSpans(text: string): readonly string[] {
+  const spans: string[] = []
+  let index = 0
+  while (index < text.length) {
+    const character = text.charAt(index)
+    if (character === '\\' && /[!-/:-@[-`{-~]/.test(text.charAt(index + 1))) {
+      index += 2
+      continue
+    }
+    if (character !== '`') {
+      index += 1
+      continue
+    }
+    let run = 0
+    while (text.charAt(index + run) === '`') run += 1
+    let search = index + run
+    let close = -1
+    while (search < text.length) {
+      const next = text.indexOf('`', search)
+      if (next === -1) break
+      let length = 0
+      while (text.charAt(next + length) === '`') length += 1
+      if (length === run) {
+        close = next
+        break
+      }
+      search = next + length
+    }
+    if (close === -1) {
+      index += run
+      continue
+    }
+    spans.push(text.slice(index, close + run))
+    index = close + run
+  }
+  return spans
+}
+
+/**
+ * Everything in `text` the markdown renderer's linkify could turn into a link — a URL
+ * with a scheme, a `www.` host, or a dotted name ending in a letter-only label — made
+ * of characters the budget lets through for free. Generous on purpose: `values.yaml`
+ * counts, so a translation keeps the English's and adds none.
+ */
+function hostTokens(text: string): readonly string[] {
+  const pattern =
+    /[a-z][a-z0-9+.-]*:\/\/[^\s<>`"'()[\]{}]*|www\.[^\s<>`"'()[\]{}]+|[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)*\.\p{L}{2,}/giu
+  // Trailing sentence punctuation is never part of the host, on either side.
+  return (text.match(pattern) ?? []).map((token) => token.replace(/[.,;:!?]+$/, '').toLowerCase())
+}
+
+/** True when every string in `part` occurs in `whole` at least as often. */
+function isSubMultiset(part: readonly string[], whole: readonly string[]): boolean {
+  const counts = new Map<string, number>()
+  for (const item of whole) counts.set(item, (counts.get(item) ?? 0) + 1)
+  for (const item of part) {
+    const left = counts.get(item) ?? 0
+    if (left === 0) return false
+    counts.set(item, left - 1)
+  }
+  return true
+}
+
+/** How often each syntax a single budgeted character cannot reveal appears in `text`. */
+function syntaxCounts(text: string): readonly number[] {
+  return [
+    // A markdown image: a build-time asset import, and a failed build in a heading.
+    countOccurrences(text, '!['),
+    // A fence opener, which a container prefix can put at the start of a line.
+    (text.match(/`{3,}|~{3,}/g) ?? []).length,
+    // An MDC inline component (`:Button`), latent while the consumer keeps MDC off.
+    // The renderer's own name class: letters, digits, `_`, `$` and `-`.
+    (text.match(/(?:^|[\s*_[]):[\w$-]/gm) ?? []).length,
+    // Slidev rewrites the first `v-drag` in a token into a draggable wrapper.
+    countOccurrences(text, 'v-drag'),
+  ]
+}
 
 /** Named references that decode to a character the renderer would not re-escape. */
 const LIVE_NAMED_REFERENCES: Readonly<Record<string, string>> = {
@@ -464,16 +716,17 @@ function rejectReplacement(
     if (added !== undefined) {
       return reject(
         'block-syntax',
-        `translation starts a line with Slidev block syntax (${JSON.stringify(added.trim().slice(0, 3))}), which imports a file or binds code — keep "<<<" and "$$" out of the start of a line`,
+        `translation starts a line with block syntax (${JSON.stringify(added.trim().slice(0, 3))}) — a snippet import, a KaTeX or MDC block, or a link reference definition — which imports a file or binds code; keep "<<<", "$$", ":" and "[name]:" out of the start of a line`,
       )
     }
   }
   const unnested = isWellNested(english) && !isWellNested(translated)
   // In prose the markdown renderer decodes character references and backslash escapes
   // before Vue compiles the HTML it emits, so `&#123;&#123;` is a live `{{` there. The
-  // markup counts are therefore also taken over the decoded text, and no brace or `$`
-  // may be added at all: `{1}{…}` binds options without any `{{`, and `$` opens math.
-  // A prop value is a static string to Vue, so it is judged on its bytes alone.
+  // markup counts are therefore also taken over the decoded text. (That no brace or `$`
+  // may be added at all — `{1}{…}` binds options without any `{{`, and `$` opens math —
+  // is the character budget's job below.) A prop value is a static string to Vue, so it is
+  // judged on its bytes alone.
   //
   // Each check below catches something the others do not: the token multiset a changed
   // token (`<3` → `<4`); the raw landing count a switch between a reference and the live
@@ -482,8 +735,6 @@ function rejectReplacement(
   const decodes = hole.encoding.kind !== 'html-attribute'
   const decodedEnglish = decodes ? decodeLiveCharacters(english) : english
   const decodedTranslation = decodes ? decodeLiveCharacters(translated) : translated
-  const grows = (character: string): boolean =>
-    countOccurrences(decodedTranslation, character) > countOccurrences(decodedEnglish, character)
   if (
     unnested ||
     !sameMultiset(coarseMarkup(decodedTranslation), coarseMarkup(decodedEnglish)) ||
@@ -491,7 +742,6 @@ function rejectReplacement(
     (decodes &&
       coarseMarkup(decodeLiveCharacters(composed)).length !==
         coarseMarkup(decodeLiveCharacters(current)).length) ||
-    (decodes && (grows('{') || grows('}') || grows('$'))) ||
     !sameMultiset(markupTokens(translated), markupTokens(english))
   ) {
     return reject(
@@ -570,6 +820,41 @@ function rejectReplacement(
       'slot-marker',
       'translation puts a Slidev slot marker ("::name::") on a line of its own, which moves the text after it into another slot — keep "::" inside a sentence',
     )
+  }
+  // The character budget, and the syntax a budget alone cannot see — last, so that a
+  // refusal a specific rule above can name keeps its specific reason. Prop values returned
+  // above (a static string to Vue is exempt); frontmatter never reaches this point.
+  if (hole.encoding.kind === 'markdown' || hole.encoding.kind === 'html-text') {
+    const decodedEnglishText = decodeCharacters(english)
+    const decodedTranslationText = decodeCharacters(translated)
+    const added = addedCharacters(
+      decodedEnglishText,
+      decodedTranslationText,
+      hole.encoding.kind === 'html-text',
+    )
+    const englishSyntax = syntaxCounts(decodedEnglishText)
+    const syntaxGrows =
+      syntaxCounts(decodedTranslationText).some(
+        (count, index) => count > (englishSyntax[index] ?? 0),
+      ) || !isSubMultiset(hostTokens(decodedTranslationText), hostTokens(decodedEnglishText))
+    // Compared with whitespace runs folded: the renderer turns a line break inside a code
+    // span into a space, so re-wrapping a paragraph through one changes nothing.
+    const folded = (text: string): readonly string[] =>
+      codeSpans(text).map((span) => span.replace(/\s+/g, ' '))
+    const codeMoved =
+      hole.encoding.kind === 'markdown' && !sameMultiset(folded(translated), folded(english))
+    if (added.length > 0 || syntaxGrows || codeMoved) {
+      const detail =
+        added.length > 0
+          ? `adds ${added.map((character) => JSON.stringify(character)).join(', ')}, which the English has fewer of`
+          : codeMoved
+            ? 'changes an inline code span, which would move its contents out of code'
+            : 'adds an image, a fence, an MDC component, a v-drag or a link target the English does not have'
+      return reject(
+        'added-syntax',
+        `translation ${detail} — a translation may add letters, digits, spaces and prose punctuation; any other character only as often as the English uses it, and inline code exactly as written`,
+      )
+    }
   }
   return undefined
 }

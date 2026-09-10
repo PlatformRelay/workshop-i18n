@@ -312,9 +312,13 @@ function structuralLines(text: string): { separators: number; fences: number; sl
  */
 function markerFor(source: string, index: number): string {
   const count = (token: string): number => source.split(token).length - 1
+  // Inline code is carried verbatim, as a translator must; the tags outside it after that.
+  const spans = [...source.matchAll(/(`+)(?!`)[\s\S]*?[^`]\1(?!`)/g)].map((match) => match[0])
+  const outside = spans.reduce((text, span) => text.replace(span, ' '), source)
   return [
     `de-${index}`,
-    ...markupInOrder(source),
+    ...spans,
+    ...markupInOrder(outside),
     ...Array.from({ length: count('<!--') }, () => '<!--'),
     ...Array.from({ length: count('-->') }, () => '-->'),
   ].join(' ')
@@ -402,7 +406,7 @@ describe.each(CORPUS.map((fixture) => [fixture.name, fixture] as const))(
       const translations = Object.fromEntries(
         extraction.units.map((unit, index) => [
           formatUnitId(unit.id),
-          `${markerFor(unit.source, index)} — Ü "3" ✓`,
+          `${markerFor(unit.source, index)} — Ü "3" (ok)`,
         ]),
       )
       const composed = composeSkeleton(extraction.skeleton, translations)

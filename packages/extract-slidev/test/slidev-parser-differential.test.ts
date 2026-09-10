@@ -280,9 +280,13 @@ function representativeHoles(skeleton: Skeleton, source: string): readonly Hole[
  */
 function markerFor(source: string, index: number): string {
   const count = (token: string): number => source.split(token).length - 1
+  // Inline code is carried verbatim, as a translator must; the tags outside it after that.
+  const spans = [...source.matchAll(/(`+)(?!`)[\s\S]*?[^`]\1(?!`)/g)].map((match) => match[0])
+  const outside = spans.reduce((text, span) => text.replace(span, ' '), source)
   return [
     `de-${index}`,
-    ...markupInOrder(source),
+    ...spans,
+    ...markupInOrder(outside),
     ...Array.from({ length: count('<!--') }, () => '<!--'),
     ...Array.from({ length: count('-->') }, () => '-->'),
   ].join(' ')
@@ -413,7 +417,7 @@ describe.skipIf(parseSync === undefined)('slide splitting agrees with @slidev/pa
         extraction.units.map((unit, index) => [
           formatUnitId(unit.id),
           // A literal `a < b`, not a tag: composition refuses markup the English lacks.
-          `${markerFor(unit.source, index)} — Ü "3" ✓ 🧑‍🚀 a < b: y`,
+          `${markerFor(unit.source, index)} — Ü "3" (ok): y`,
         ]),
       )
       expect(structureOf(parse, composeSkeleton(extraction.skeleton, translations))).toEqual(

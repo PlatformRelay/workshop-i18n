@@ -1,4 +1,4 @@
-import { parseUnitId } from '@workshop-i18n/core'
+import { formatUnitId, parseUnitId } from '@workshop-i18n/core'
 import { describe, expect, it } from 'vitest'
 import {
   CompositionError,
@@ -157,8 +157,9 @@ describe('composeSkeleton refuses a replacement that would break out of its hole
   })
 
   it('accepts a well-formed surrogate pair', () => {
-    expect(composeSkeleton(skeleton, { 'slides:s1:body/p-1': 'eins 🧑‍🚀 zwei' })).toContain(
-      'eins 🧑‍🚀 zwei',
+    // An astral letter (Deseret): a pair the budget treats as the letter it is.
+    expect(composeSkeleton(skeleton, { 'slides:s1:body/p-1': 'eins 𐐷 zwei' })).toContain(
+      'eins 𐐷 zwei',
     )
   })
 
@@ -331,15 +332,20 @@ describe('composeSkeleton refuses a replacement that would break out of its hole
   })
 
   it('rejects a bare pipe added inside a table cell, which adds a column', () => {
-    const source = '| Verb | Effect |\n| --- | --- |\n'
+    // The English cell already carries an escaped pipe, so the character budget allows one
+    // `|`: only the column guard can tell the bare pipe from the escaped one.
+    const source = '| Verb \\| Noun | Effect |\n| --- | --- |\n'
     const table = createSkeleton(source, [
-      { ...hole('slides:s1:body/t-1/r-1/c-1', 2, 6, 'Verb'), encoding: tableCell() },
+      { ...hole('slides:s1:body/t-1/r-1/c-1', 2, 14, 'Verb \\| Noun'), encoding: tableCell() },
     ])
-    expect(() => composeSkeleton(table, { 'slides:s1:body/t-1/r-1/c-1': 'Verb | Zusatz' })).toThrow(
-      CompositionError,
-    )
-    expect(composeSkeleton(table, { 'slides:s1:body/t-1/r-1/c-1': 'Verb \\| Zusatz' })).toContain(
-      'Verb \\| Zusatz',
+    try {
+      composeSkeleton(table, { 'slides:s1:body/t-1/r-1/c-1': 'Verb | Zusatz' })
+      expect.unreachable('a bare pipe should have been refused')
+    } catch (error) {
+      expect((error as CompositionError).issues[0]?.reason).toBe('table-column')
+    }
+    expect(composeSkeleton(table, { 'slides:s1:body/t-1/r-1/c-1': 'Verbo \\| Nomen' })).toContain(
+      'Verbo \\| Nomen',
     )
   })
 
@@ -357,7 +363,10 @@ describe('composeSkeleton refuses a replacement that would break out of its hole
         composeSkeleton(skeleton, { 'slides:s1:body/p-1': `eins\n${line}\nzwei` })
         expect.unreachable(`${line} should have been refused`)
       } catch (error) {
-        expect((error as CompositionError).issues[0]?.reason).toBe('slot-marker')
+        // Refused as slot syntax by name, or earlier as a line starting with `::`.
+        expect((error as CompositionError).issues[0]?.reason).toMatch(
+          /^(?:slot-marker|block-syntax)$/,
+        )
       }
     }
   })
@@ -451,8 +460,10 @@ describe('composeSkeleton keeps the markup a unit carries (ADR 0015)', () => {
     ]) {
       expect(reasonOf(`Nutze ${added}${tail}`), added).toBe('markup-changed')
     }
-    expect(reasonOf(`Nutze a < b${tail}`)).toBeUndefined()
-    expect(reasonOf(`Nutze &lt;b&gt;${tail}`)).toBeUndefined()
+    // A literal `<` the English does not have costs a fallback too, however it is spelled:
+    // the character budget counts it after decoding.
+    expect(reasonOf(`Nutze a < b${tail}`)).toBeDefined()
+    expect(reasonOf(`Nutze &lt;b&gt;${tail}`)).toBeDefined()
   })
 
   it('compares the coarse tokens themselves, not only how many there are', () => {
@@ -525,7 +536,7 @@ describe('composeSkeleton keeps the markup a unit carries (ADR 0015)', () => {
           `Nutze ${hidden} <span class="kw-muted">das</span> {{ $slidev.nav.currentPage }}.`,
         ),
         hidden,
-      ).toBe('markup-changed')
+      ).toMatch(/^(?:markup-changed|added-syntax)$/)
     }
   })
 
@@ -533,7 +544,7 @@ describe('composeSkeleton keeps the markup a unit carries (ADR 0015)', () => {
     // `{1}{onVnodeMounted: …}` after a `$$` line is a KaTeX block's v-bind; no `{{` needed.
     const tail = ' <span class="kw-muted">das</span> {{ $slidev.nav.currentPage }}.'
     for (const added of ['{x}', 'a } b', '$x$', '\\$x']) {
-      expect(reasonOf(`Nutze ${added}${tail}`), added).toBe('markup-changed')
+      expect(reasonOf(`Nutze ${added}${tail}`), added).toBe('added-syntax')
     }
   })
 
@@ -574,6 +585,223 @@ describe('composeSkeleton keeps the markup a unit carries (ADR 0015)', () => {
     expect(
       reasonOf('Nutze <span class="kw-muted">das</span> {{ $slidev.nav.currentPage }} <b class="x'),
     ).toBe('markup-changed')
+  })
+})
+
+describe('composeSkeleton budgets every character a translation may add (ADR 0015)', () => {
+  const md = (english: string) =>
+    createSkeleton(`${english}\n`, [hole('slides:s1:body/p-1', 0, english.length, english)])
+  const html = (english: string) =>
+    createSkeleton(`${english}\n`, [
+      hole('slides:s1:body/div.1/t:1', 0, english.length, english, {
+        kind: 'html-text',
+        continuationPrefix: '',
+        context: 'body',
+      }),
+    ])
+  const refused = (skeleton: ReturnType<typeof md>, translation: string): boolean => {
+    const id = formatUnitId(skeleton.holes[0]?.id as Hole['id'])
+    try {
+      composeSkeleton(skeleton, { [id]: translation })
+      return false
+    } catch (error) {
+      expect(error).toBeInstanceOf(CompositionError)
+      return true
+    }
+  }
+
+  it('accepts prose that adds only letters, digits, spaces and prose punctuation', () => {
+    const english = 'A Pod runs containers, and the kubelet restarts them.'
+    for (const translation of [
+      'Um Pod roda contêineres — e o kubelet os reinicia!',
+      '¿Qué pasa? «Nada»: el kubelet (sí) reinicia… 100 %',
+      'O “kubelet” reinicia‘os’ – sempre.',
+    ]) {
+      expect(refused(md(english), translation), translation).toBe(false)
+    }
+  })
+
+  it('refuses any other character the English has fewer of', () => {
+    const english = 'A Pod runs containers.'
+    for (const added of [
+      '*',
+      '_',
+      '`',
+      '~',
+      '#',
+      '|',
+      '@',
+      '/',
+      '\\',
+      '&',
+      '^',
+      '=',
+      '+',
+      '[',
+      ']',
+      '\t',
+      '\u2003',
+      '\u200b',
+      '\u200d',
+      '\u202e',
+    ]) {
+      expect(refused(md(english), `Um Pod roda ${added} contêineres.`), JSON.stringify(added)).toBe(
+        true,
+      )
+    }
+  })
+
+  it('lets non-ASCII punctuation and symbols through, which no grammar in the path uses', () => {
+    expect(refused(md('A Pod runs containers.'), 'Um Pod → roda · contêineres ≤ 3 ✓ 🚀 €.')).toBe(
+      false,
+    )
+  })
+
+  it('refuses a link target the English does not have, though it is all letters and dots', () => {
+    // linkify turns a bare host into a link; the character budget cannot see it.
+    expect(refused(md('Read the docs.'), 'Leia evil.com agora.')).toBe(true)
+    expect(refused(md('Read the docs.'), 'Leia www.example agora.')).toBe(true)
+    expect(refused(md('Edit values.yaml first.'), 'Edite values.yaml primeiro.')).toBe(false)
+  })
+
+  it('lets a translation reuse the characters its English already has', () => {
+    const english = 'Run **kubectl** / `k9s` — see #42.'
+    expect(refused(md(english), 'Rode **kubectl** / `k9s` — veja #42.')).toBe(false)
+  })
+
+  it('refuses a markdown image, which the build imports as an asset', () => {
+    // A real `slidev build` published `.env` for `![x](./.env?raw)` in prose.
+    const english = 'A Pod runs containers and the kubelet restarts them.'
+    expect(
+      refused(md(english), 'Um Pod roda contêineres ![x](./.env?raw) e o kubelet os reinicia.'),
+    ).toBe(true)
+    // A link turned into an image needs only a `!`, which is free prose punctuation.
+    const link = 'See [the file](./probe.json) for details.'
+    expect(refused(md(link), 'Veja ![o arquivo](./probe.json) para detalhes.')).toBe(true)
+    // The reference form, with a definition line added below.
+    const reference = 'See [the docs][r] now.\n\n[r]: https://example.com'
+    expect(refused(md(reference), 'Veja ![a doc][r] agora.\n\n[r]: https://example.com')).toBe(true)
+  })
+
+  it('refuses a reference definition line the English does not have', () => {
+    const english = 'See [the docs](https://example.com) now [x].'
+    expect(refused(md(english), 'Veja [x] agora.\n[x]: https://example.com')).toBe(true)
+  })
+
+  it('refuses a run of three backticks or tildes anywhere, not only at the start of a line', () => {
+    // After a list bullet or a quote marker the run opens a fence Slidev turns into a
+    // PlantUml, Mermaid or twoslash block.
+    const item = createSkeleton('- one item\n', [
+      hole('slides:s1:body/l-1/li-1/p-1', 2, 10, 'one item', markdown('  ')),
+    ])
+    for (const fence of ['```plantuml', '~~~ts twoslash', 'eins ``` zwei']) {
+      expect(() => composeSkeleton(item, { 'slides:s1:body/l-1/li-1/p-1': fence }), fence).toThrow(
+        CompositionError,
+      )
+    }
+    // Even when the English has enough backticks for it, in two inline code spans.
+    expect(refused(md('Use `a` and `b` here.'), 'Use ```a`` and `b here.')).toBe(true)
+  })
+
+  it('refuses markup moved out of an inline code span, where it would come alive', () => {
+    expect(
+      refused(md('Run `<img src=x onerror=y>` now.'), 'Rode <img src=x onerror=y> agora.'),
+    ).toBe(true)
+    expect(
+      refused(
+        md("Try `kubectl get pods -o jsonpath='{.items[*]}'` next."),
+        'Tente **kubectl**{onclick="alert(1)"} `get pods -o jsonpath=\'.items[*]\'` depois.',
+      ),
+    ).toBe(true)
+  })
+
+  it('refuses an MDC component or block shape the English does not have', () => {
+    const english = 'Pods run: containers, always.'
+    expect(refused(md(english), 'Pods rodam :Button contêineres.')).toBe(true)
+    expect(refused(md(english), 'Pods rodam\n::alert\ncontêineres.')).toBe(true)
+  })
+
+  it('refuses any line starting with a colon, which the MDC block grammar trims and reads', () => {
+    // `@comark/markdown-it` accepts two or more colons and trims before the name, so all of
+    // these build a live component, and `:1 …` crashes the whole build.
+    const english = 'Pods run containers, always.'
+    for (const line of [':: Toc', ':::Toc', '::::Toc', '  :: Toc', ':1 x']) {
+      expect(refused(md(english), `Pods rodam\n${line}\ncontêineres.`), line).toBe(true)
+    }
+  })
+
+  it('refuses an inline MDC name in the renderer name class, digits and $ included', () => {
+    const english = 'Pods run containers, always.'
+    for (const name of [':1', ':$x', ':x-y', ':_z']) {
+      expect(refused(md(english), `Pods rodam ${name} contêineres.`), name).toBe(true)
+    }
+    expect(refused(md(english), 'Pods rodam: contêineres, sempre.')).toBe(false)
+  })
+
+  it('lets a line break through only where the next line cannot start a block', () => {
+    // Measured on the real pt-BR drafts: re-wrapped prose puts `(`, a code span, bold or a
+    // number at the start of a line all the time, and none of those can start a block.
+    for (const line of [
+      'contêineres, sempre.',
+      '  contêineres, sempre.',
+      '(contêineres), sempre.',
+      '**contêineres** sempre.',
+      '*sempre* contêineres.',
+      '2. contêineres',
+      '2023 contêineres',
+      '→ contêineres',
+      '#hashtag contêineres',
+    ]) {
+      expect(refused(md(`Pods rodam ${line}`), `Pods rodam\n${line}`), line).toBe(false)
+    }
+    expect(refused(md('Pods run `kubectl` always.'), 'Pods rodam\n`kubectl` sempre.')).toBe(false)
+    // A list item, an ordered list at 1, a heading, a quote, a setext underline, a table
+    // row or an HTML block start is a line a block rule reads.
+    for (const line of [
+      '- contêineres',
+      '* contêineres',
+      '+ x',
+      '1. contêineres',
+      '1) x',
+      '# Título',
+      '> citação',
+      '===',
+      '| a | b |',
+      '<div>',
+    ]) {
+      expect(refused(md(`Pods rodam ${line}`), `Pods rodam\n${line}`), line).toBe(true)
+    }
+  })
+
+  it('lets every line break through inside a raw HTML block, where no block rule runs', () => {
+    const english = 'Pods run containers, always.'
+    expect(refused(html(english), 'Pods rodam\n- contêineres, sempre.')).toBe(false)
+  })
+
+  it('refuses an added v-drag, which Slidev rewrites wherever it first appears', () => {
+    expect(refused(md('Drag the box to move it.'), 'Arraste v-drag a caixa.')).toBe(true)
+  })
+
+  it('decodes references before budgeting, in prose and in HTML text alike', () => {
+    // Undecoded, `&#42;` spends only `&` and `#`, which the English has plenty of; decoded
+    // it is a `*` — emphasis — which the English does not have.
+    const english = 'A & B & C & D & E #### x'
+    expect(refused(md(english), '&#42;&#42;x&#42;&#42;')).toBe(true)
+    expect(refused(html(english), '&#42;&#42;x&#42;&#42;')).toBe(true)
+  })
+
+  it('decodes a live brace pair in HTML text before counting markup, over-approximating', () => {
+    // Inert to Vue inside a raw HTML block (it decodes references after finding `{{`), but
+    // ADR 0015 counts it anyway: the English's braces cover the budget, so only the decoded
+    // markup count sees the new pair.
+    expect(refused(html('{{x}} { { } }'), '{{x}} &#123;&#123;y&#125;&#125;')).toBe(true)
+  })
+
+  it('decodes references in HTML text before budgeting, as it does in prose', () => {
+    // Undecoded, this translation spends only `&` and `#`, which the English has plenty
+    // of; decoded, it adds two braces.
+    const english = 'A & B & C & D ## ##'
+    expect(refused(html(english), 'A &#123;&#123;x&#125;&#125;')).toBe(true)
   })
 })
 
