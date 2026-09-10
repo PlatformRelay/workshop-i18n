@@ -418,6 +418,17 @@ describe('parseManifest — component text props (ADR 0015)', () => {
     })
   })
 
+  it('refuses listeners by the shape Vue and HTML read them in, not every name starting "on"', () => {
+    // Vue: `on` + an upper-case letter, or `on-`. HTML: an all-lower-case `on…` attribute is
+    // a live handler on a native element, so that shape stays refused — `online` with it.
+    for (const prop of ['onClick', 'on-click', 'onclick', 'onmouseover']) {
+      expect(textPropRejection(prop), prop).toBeDefined()
+    }
+    for (const prop of ['onboardingTitle', 'onboarding-title', 'heading']) {
+      expect(textPropRejection(prop), prop).toBeUndefined()
+    }
+  })
+
   it('exposes the same prop rule for callers that bypass the manifest', () => {
     expect(textPropRejection('heading')).toBeUndefined()
     for (const prop of ['vHtml', 'v-html', ':heading', '@click', '#default', 'onClick', 'href']) {
