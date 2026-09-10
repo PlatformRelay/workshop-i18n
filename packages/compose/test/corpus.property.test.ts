@@ -160,9 +160,22 @@ function hasControlCharacter(text: string): boolean {
   })
 }
 
+/**
+ * A unit whose source is a structural line — a Slidev slot marker (`::right::`) the
+ * extractor lifts as a unit — cannot be given prose appended to it: `::right:: word` is a
+ * different structural line, which the coarse gate refuses (correctly). Such a unit, like
+ * one carrying a control character, can only render as its own English.
+ */
+function isStructuralOnly(source: string): boolean {
+  return source
+    .split(/\r\n|\n|\r/)
+    .some((line) => /^[ \t]*(?:<<<|\$\$|::|---|`{3,}|~{3,})/.test(line))
+}
+
 /** Keeps every token the gates compare: the English, with prose-only words around it. */
 function markupPreserving(source: string, index: number): string {
-  return hasControlCharacter(source) ? source : `${source} ‹de ${index}›`
+  if (hasControlCharacter(source) || isStructuralOnly(source)) return source
+  return `${source} ‹de ${index}›`
 }
 
 /** Findings other than the extractor's coverage-gap warnings, which are the English's own. */

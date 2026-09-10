@@ -284,12 +284,26 @@ describe('FR-004: content gates on untrusted translations', () => {
     )
   })
 
-  it('falls back when the extractor refuses the splice', () => {
+  it('falls back when a translation introduces a structural line, coarsely', () => {
+    // A `---` line is now caught by the coarse structural gate before the extractor's
+    // own slide-separator rejection, which stays as a redundant backstop.
     const entries = withEntry(POD, { translation: 'Ein Pod\n---\nist klein.' })
     const result = composeLocale(slidesOnly(entries))
     expect(deckOf(result).match(/^---$/gm)?.length).toBe(DECK.match(/^---$/gm)?.length)
     expect(result.findings).toContainEqual(
-      expect.objectContaining({ code: 'unspliceable', unitId: POD, detail: 'slide-separator' }),
+      expect.objectContaining({ severity: 'warning', code: 'markup-parity', unitId: POD }),
+    )
+    expect(composeLocale(slidesOnly(entries, 'strict')).releasable).toBe(false)
+  })
+
+  it('falls back when the extractor refuses the splice (indented code)', () => {
+    // A line of four leading spaces is not a coarse token, so the content gates pass and
+    // the extractor's own splice validation refuses it — the unspliceable demotion path.
+    const entries = withEntry(POD, { translation: '    ein Pod ist klein' })
+    const result = composeLocale(slidesOnly(entries))
+    expect(deckOf(result)).not.toContain('    ein Pod')
+    expect(result.findings).toContainEqual(
+      expect.objectContaining({ code: 'unspliceable', unitId: POD, detail: 'indented-code' }),
     )
   })
 

@@ -30,7 +30,7 @@ import { createMarkdownExit } from 'markdown-exit'
 import MarkdownIt from 'markdown-it'
 import footnote from 'markdown-it-footnote'
 import { describe, expect, it } from 'vitest'
-import { checkMarkupParity, markupTokens } from '../src/markup.js'
+import { checkMarkupParity, MAX_SCANNED_LENGTH, markupTokens } from '../src/markup.js'
 import { mathInline } from '../src/renderer.js'
 
 const SLIDEV_OPTIONS = { html: true, xhtmlOut: true, linkify: true, quotes: `""''` } as const
@@ -88,6 +88,11 @@ const FORMS: readonly string[] = [
   'xn--e1afmkfd.xn--p1ai/x',
   'evil.com:8080/a?b=c#d',
   'sub.evil.co.uk',
+  '😈.ws',
+  '☃.com',
+  '⌘.io',
+  'evil．com',
+  'evil。com',
 ]
 
 const CONTEXTS: readonly (readonly [string, (form: string) => string])[] = [
@@ -113,6 +118,7 @@ const CONTEXTS: readonly (readonly [string, (form: string) => string])[] = [
   ['image source', (form) => `![x](https://${form})`],
   ['autolink', (form) => `<${form}>`],
   ['inside a code span', (form) => `\`${form}\``],
+  ['glued to a code span', (form) => `${form}\`kubectl get pods\``],
   ['after a tag', (form) => `<b>${form}</b>`],
   ['glued to text', (form) => `siehe:${form}`],
   ['line break', (form) => `eins\n${form}`],
@@ -198,5 +204,23 @@ describe.each(RENDERERS)('every link %s creates', (_name, render) => {
     // (A few need context a one-line fixture lacks, e.g. a footnote definition without a
     // reference renders nothing; the coarse layer rejects them regardless.)
     expect(bypassesLinked.length).toBeGreaterThan(REVIEW_BYPASSES.length / 2)
+  })
+})
+
+describe.each(RENDERERS)('a long translation %s would link', (_name, render) => {
+  it('is rejected, never accepted with a layer skipped (re-review 4, P1)', () => {
+    // The reviewer's window: English over 2 048 characters, a translation between the
+    // renderer model's scan limit and 4 x English, carrying an emoji host glued to a code
+    // span the English shares. The consumer engine links it; the gate must refuse it.
+    const english = `Run \`docker pull nginx@sha256:abcd1234\` now. ${'The scheduler places Pods on Nodes and the kubelet keeps them running. '.repeat(30)}`
+    const translation = `Veja 😈.ws\`docker pull nginx@sha256:abcd1234\` agora. ${'O escalonador coloca Pods em Nodes e o kubelet os reinicia. '.repeat(140)}`
+    expect(english.length).toBeGreaterThan(2_048)
+    expect(translation.length).toBeGreaterThan(MAX_SCANNED_LENGTH)
+    expect(translation.length).toBeLessThanOrEqual(english.length * 4)
+    expect(render(`# T\n\n${translation}\n`).length).toBeGreaterThan(0)
+    expect(checkMarkupParity(english, translation).ok).toBe(false)
+    // …and within the limit, the coarse layer alone refuses the same host.
+    const { added } = checkMarkupParity(english.slice(0, 200), translation.slice(0, 200))
+    expect(added.some((token) => COARSE_KINDS.has(token.kind))).toBe(true)
   })
 })

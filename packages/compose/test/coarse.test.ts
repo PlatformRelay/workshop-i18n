@@ -79,6 +79,71 @@ describe('link-shaped sequences a translation may not introduce', () => {
   })
 })
 
+describe('hosts spelled with symbols, emoji or non-ASCII dots (re-review 4, P1/P3)', () => {
+  it.each([
+    ['an emoji host', 'Veja 😈.ws agora'],
+    ['a snowman host', 'Veja ☃.com agora'],
+    ['a command-key host', 'Veja ⌘.io agora'],
+    ['an emoji host glued to a code span the English shares', 'Veja 😈.ws`kubectl get pods` agora'],
+    ['a fullwidth dot', 'Veja evil．com agora'],
+    ['an ideographic full stop', 'Veja evil。com agora'],
+    ['a halfwidth ideographic full stop', 'Veja evil｡com agora'],
+  ])('%s is link-shaped', (_label, translation) => {
+    expect(addedKinds('See `kubectl get pods` now', translation)).toContain('linklike')
+  })
+})
+
+/**
+ * Slidev block syntax that reads files or switches renderers, reached from a prose hole
+ * (re-review 4, P0): a real `slidev build` of a strictly composed deck with a translated
+ * line `<<< @/.env txt` published the `.env` secret into `dist/assets`. The payload
+ * transforms and the variants below are the reviewer's, verbatim.
+ */
+describe('structural lines a translation may not introduce', () => {
+  const english = 'A Pod runs containers and the kubelet restarts them.'
+  it.each([
+    ['env braceless', (s: string) => `${s}\n<<< @/.env txt`],
+    ['env no lang', (s: string) => `${s}\n<<< @/.env`],
+    [
+      'mid-paragraph',
+      (s: string) => {
+        const words = s.split(' ')
+        return `${words[0]}\n<<< @/.env txt\n${words.slice(1).join(' ')}`
+      },
+    ],
+    ['indented', (s: string) => `${s}\n   <<< @/.env txt`],
+    ['CR', (s: string) => `${s}\r<<< @/.env txt`],
+    ['CRLF', (s: string) => `${s}\r\n<<< @/.env txt`],
+    ['relative', (s: string) => `${s}\n<<< ../package.json`],
+    ['katex braceless', (s: string) => `${s}\n$$\nx\n$$`],
+    ['tab-indented', (s: string) => `${s}\n\t<<< @/.env`],
+    ['first line', (s: string) => `<<< @/.env txt\n${s}`],
+    ['slot marker', (s: string) => `${s}\n::right::`],
+    ['slide separator', (s: string) => `${s}\n---`],
+    ['backtick fence opener', (s: string) => `${s}\n\`\`\`ts`],
+    ['tilde fence opener', (s: string) => `${s}\n~~~`],
+  ])('%s', (_label, make) => {
+    const result = checkMarkupParity(english, make(english))
+    expect(result.ok).toBe(false)
+    expect(result.added.map((token) => token.kind)).toContain('structural')
+  })
+
+  it('lets through a structural line the English unit already has, unchanged', () => {
+    expect(
+      checkMarkupParity(
+        'See below\n<<< @/snippets/pod.yaml',
+        'Veja abaixo\n<<< @/snippets/pod.yaml',
+      ).ok,
+    ).toBe(true)
+  })
+
+  it('does not trip on prose that merely contains the characters mid-line', () => {
+    expect(checkMarkupParity('a << b', 'a << b e $$ custa')).toMatchObject({
+      added: expect.not.arrayContaining([expect.objectContaining({ kind: 'structural' })]),
+    })
+  })
+})
+
 describe('syntax sequences a translation may not introduce', () => {
   it.each([
     ['inline math', 'Das kostet $x$'],
@@ -120,9 +185,18 @@ describe('length cap before any parser runs', () => {
     expect(result.added.map((token) => token.kind)).toEqual(['oversize'])
   })
 
-  it('scales the cap with a long English unit', () => {
-    const english = 'word '.repeat(MAX_SCANNED_LENGTH / 4)
-    expect(checkMarkupParity(english, `${english}!`).ok).toBe(true)
+  it('never scales the cap past what the renderer model scans (re-review 4, P1)', () => {
+    // The cap used to be max(8192, 4 x English), so for English over 2048 characters a
+    // translation in (8192, 4 x English] was accepted with the renderer model silently
+    // skipped. A barrier must never be skipped silently: over the scan limit is refused.
+    const english = `Run \`docker pull nginx@sha256:abcd1234\` now. ${'The kubelet keeps Pods running. '.repeat(80)}`
+    const translation = `Veja 😈.ws\`docker pull nginx@sha256:abcd1234\` agora. ${'O kubelet mantém os Pods. '.repeat(340)}`
+    expect(english.length).toBeGreaterThan(2048)
+    expect(translation.length).toBeGreaterThan(MAX_SCANNED_LENGTH)
+    expect(translation.length).toBeLessThanOrEqual(english.length * 4)
+    const result = checkMarkupParity(english, translation)
+    expect(result.ok).toBe(false)
+    expect(result.added.map((token) => token.kind)).toEqual(['oversize'])
   })
 
   it.each([

@@ -58,7 +58,7 @@
 
 import LinkifyIt from 'linkify-it'
 
-import { formatTokens, linkLikeTokens, syntaxTokens } from './coarse.js'
+import { formatTokens, linkLikeTokens, structuralTokens, syntaxTokens } from './coarse.js'
 import { rendererLinks } from './renderer.js'
 
 /** What a token is. Kinds are compared separately so a report can say what changed. */
@@ -71,6 +71,7 @@ export type MarkupTokenKind =
   | 'linklike'
   | 'syntax'
   | 'format'
+  | 'structural'
   | 'entity'
   | 'oversize'
 
@@ -99,6 +100,7 @@ const KIND_ORDER: readonly MarkupTokenKind[] = [
   'linklike',
   'syntax',
   'format',
+  'structural',
   'entity',
   'oversize',
 ]
@@ -361,9 +363,13 @@ function entityTokens(text: string): readonly string[] {
 /**
  * The longest text any scan runs on. markdown-it is superlinear on some crafted inputs
  * (`http://a` repeated 40 000 times took 16.7 s), so the renderer model only ever sees
- * text up to this length, and {@link checkMarkupParity} refuses a translation longer than
- * `max(MAX_SCANNED_LENGTH, 4 × English)` before any parser runs. Real units are far
- * shorter; a translation four times its English is not a translation.
+ * text up to this length — and {@link checkMarkupParity} refuses any translation longer
+ * than this before a parser runs. The cap is absolute on purpose: it once scaled to
+ * `4 × English`, which left a window (8 192, 4 × English] where the renderer model was
+ * skipped *silently* and an emoji host glued to a shared code span went through
+ * (re-review 4). No layer may be skipped for a translation that is then accepted. Real
+ * units are far shorter: the longest of 1 399 real pt-BR translations is 2 771
+ * characters.
  */
 export const MAX_SCANNED_LENGTH = 8_192
 
@@ -392,6 +398,7 @@ export function markupTokens(text: string): readonly MarkupToken[] {
     ],
     linklike: linkLikeTokens(normalized),
     syntax: syntaxTokens(normalized),
+    structural: structuralTokens(normalized),
     format: formatTokens(normalized),
     entity: entityTokens(text),
     oversize: [],
@@ -413,6 +420,7 @@ const INTRODUCTION_ONLY_KINDS: ReadonlySet<MarkupTokenKind> = new Set([
   'linklike',
   'syntax',
   'format',
+  'structural',
 ])
 
 function keyOf(token: MarkupToken): string {
@@ -439,11 +447,11 @@ function multisetDifference(
  * Compare the markup of an English unit with that of its translation.
  *
  * `ok` is true only when both carry exactly the same tokens (as multisets, per kind). A
- * translation longer than `max(MAX_SCANNED_LENGTH, 4 × English)` is refused with a single
- * `oversize` token before anything scans it.
+ * translation longer than {@link MAX_SCANNED_LENGTH} is refused with a single `oversize`
+ * token before anything scans it.
  */
 export function checkMarkupParity(english: string, translation: string): MarkupParity {
-  const limit = Math.max(MAX_SCANNED_LENGTH, english.length * 4)
+  const limit = MAX_SCANNED_LENGTH
   if (translation.length > limit) {
     return {
       ok: false,
