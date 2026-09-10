@@ -447,6 +447,10 @@ describe('locateProse inside HTML blocks and components (ADR 0015)', () => {
 })
 
 describe('locateProse keeps slot scopes and HTML elements apart', () => {
+  it('keys an upper-case HTML tag by its lower-case name, not letter by letter', () => {
+    expect(keys('<DIV>\n  <P>Shouted words</P>\n</DIV>\n')).toEqual(['body/div.1/p.1/t:1'])
+  })
+
   it('never gives a <slot> element and a fallback slot scope the same key', () => {
     const fragment = [
       '<slot>',
