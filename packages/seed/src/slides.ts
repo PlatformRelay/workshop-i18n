@@ -114,16 +114,31 @@ function tally(keys: Iterable<string | undefined>): Map<string, number> {
   return counts
 }
 
-/** Deterministic rendering of a parsed YAML value, with object keys sorted. */
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
-  if (value !== null && typeof value === 'object') {
-    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
-      a < b ? -1 : a > b ? 1 : 0,
-    )
-    return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(',')}}`
+/** Deepest frontmatter value {@link canonical} renders; real slide machinery is a few levels. */
+const MAX_MACHINERY_DEPTH = 32
+
+/**
+ * Deterministic rendering of a parsed YAML value, with object keys sorted. `undefined`
+ * for a value that is cyclic — YAML aliases can build one (`layout: &x [*x]`) — or nested
+ * deeper than {@link MAX_MACHINERY_DEPTH}: hostile frontmatter misses, it never aborts.
+ */
+function canonical(value: unknown, ancestors: readonly object[] = []): string | undefined {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'undefined'
+  if (ancestors.includes(value) || ancestors.length >= MAX_MACHINERY_DEPTH) return undefined
+  const path = [...ancestors, value]
+  const render = (item: unknown) => canonical(item, path)
+  if (Array.isArray(value)) {
+    const items = value.map(render)
+    return items.includes(undefined) ? undefined : `[${items.join(',')}]`
   }
-  return JSON.stringify(value) ?? 'undefined'
+  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
+    a < b ? -1 : a > b ? 1 : 0,
+  )
+  const rendered = entries.map(([key, item]) => {
+    const inner = render(item)
+    return inner === undefined ? undefined : `${JSON.stringify(key)}:${inner}`
+  })
+  return rendered.includes(undefined) ? undefined : `{${rendered.join(',')}}`
 }
 
 /**

@@ -137,6 +137,17 @@ describe('alignSlides', () => {
     expect(section.drafts.some((draft) => draft.id.containerId === 's05-recap')).toBe(true)
   })
 
+  it.each([
+    ['a self-referencing alias', 'layout: &x [*x]'],
+    ['a self-referencing map', 'layout: &x { a: *x }'],
+    ['deep nesting', `layout: ${'['.repeat(2000)}${']'.repeat(2000)}`],
+  ])('misses, rather than crashes on, translated frontmatter with %s', (_label, yaml) => {
+    const hostile = PT.replace('layout: two-cols', yaml)
+    const section = only(alignSlides([file('S05.md', EN)], [file('S05.md', hostile)]).sections)
+    expect(section.drafts.some((draft) => draft.id.containerId === 's05-yaml')).toBe(false)
+    expect(accounted(section)).toEqual(englishIds(EN))
+  })
+
   it('misses a slide whose fenced-block count diverged', () => {
     const diverged = PT.replace('Aplique-o.', 'Aplique-o.\n\n```sh\nkubectl apply\n```')
     const section = only(alignSlides([file('S05.md', EN)], [file('S05.md', diverged)]).sections)
