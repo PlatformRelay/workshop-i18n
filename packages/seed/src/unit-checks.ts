@@ -23,6 +23,17 @@
  * install: every hostile case that has ever been live must be refused, or build exactly
  * like its English.
  *
+ * ## The backbone: a character budget
+ *
+ * After decoding escapes and character references, every character of the translation
+ * outside a small free set — letters, marks, decimal digits, the ordinary space and the
+ * no-break space, and prose punctuation `. , ; : ! ? ' " ( ) - – — … « » “ ” ‘ ’ ¿ ¡ %` —
+ * may occur at most as often as in the English unit ({@link firstOverBudget}). Markup is
+ * built from the other characters, so this refuses markup the English could not already
+ * produce without enumerating any syntax. A line break is free only when the next line
+ * starts with a letter (a re-wrap); any other added break is budgeted. The rules below
+ * were found one at a time before the budget existed and stay as further refusals.
+ *
  * Two tiers:
  *
  * - **Refusals** (`markup-divergence`, `length-divergence`, …). A translation is refused
@@ -38,9 +49,18 @@
  *   - a line that is a Slidev slot marker (`::name::`), a slide separator (`---…`), a
  *     fence opener, a snippet import (`<<<` — reads a local file into the build) or a
  *     KaTeX block (`$$`), unless the English has the identical line;
- *   - a `{`, `}` or `$` beyond the English's count, after decoding: every Slidev option
- *     block (code-block `{lines}{options}`, KaTeX `{…}{options}`, MDC `{attrs}`) is a
- *     brace pair that becomes a live `v-bind`, and a single `$` switches KaTeX on;
+ *   - a `{`, `}` or `$` beyond the English's count, after decoding — counted over the
+ *     whole unit, and again outside code spans (whole translation when its spans are not
+ *     trusted), because a brace inside an English code span such as `jsonpath={…}` is
+ *     inert and must not fund a live one: every Slidev option block (code-block
+ *     `{lines}{options}`, KaTeX `{…}{options}`, MDC `{attrs}`) is a brace pair that
+ *     becomes a live `v-bind`, and a single `$` switches KaTeX on;
+ *   - a run of three or more backticks or tildes anywhere (a fence opens after a list or
+ *     blockquote marker too, and need not close);
+ *   - an image (`![`) beyond the English's count, or an image target the English does not
+ *     have — the build turns every image into an import, `./.env?raw` included — and a
+ *     link reference definition line;
+ *   - a braceless MDC name (`:Toc`, `::Toc`, `:href`) after whitespace, emphasis or `[`;
  *   - a Unicode format character (general category Cf: zero-width characters, the soft
  *     hyphen, the byte-order mark, bidirectional controls), literal or as a character
  *     reference, which can hide text from a linkifier or a reviewer — and the invisibles
@@ -109,6 +129,93 @@ const SLOT_MARKER = /^::\s*[\w.\-:]+\s*::$/
 const BACKTICK_EATER = /\[|<\S|:\/\/|www\.|\$|\{/
 /** The characters that open Slidev option blocks and KaTeX. */
 const BRACE_OR_DOLLAR = /[{}$]/g
+/**
+ * A run of three or more backticks or tildes, anywhere: a fence opens after a list or
+ * blockquote marker too (`- ```plantuml`, `> ```mermaid`), not only at the start of a line,
+ * and it need not be closed to turn into a component or a build-time transform.
+ */
+const FENCE_RUN = /`{3,}|~{3,}/g
+/** A Markdown image opener. Vue's asset-URL transform turns every image into an import. */
+const IMAGE = /!\[/g
+/** An inline image's target: retargeting an English image is as good as adding one. */
+const IMAGE_TARGET = /!\[[^\]]*\]\(\s*<?([^)\s>]*)/g
+/**
+ * A braceless MDC component or bound prop (`:Toc`, `::Toc`, `:href`): a colon run right
+ * after the start of a line, whitespace, emphasis, or a link bracket, then a name.
+ */
+const MDC_NAME = /(?:^|[\s*_[])(:{1,2}[A-Za-z][\w-]*)/gm
+/** A link reference definition line (`[r]: target`), which can retarget any `[x][r]`. */
+const REFERENCE_DEFINITION = /^\[[^\]]*\]:/
+/**
+ * Prose punctuation a translation may add freely. Everything outside the free set —
+ * letters, marks, decimal digits, the two ordinary spaces and these — is budgeted by the
+ * English unit (see {@link firstOverBudget}).
+ */
+const FREE_PUNCTUATION: ReadonlySet<string> = new Set([
+  ...'.,;:!?\'"()%',
+  '-',
+  String.fromCodePoint(0x2013), // en dash
+  String.fromCodePoint(0x2014), // em dash
+  String.fromCodePoint(0x2026), // ellipsis
+  String.fromCodePoint(0xab), // left guillemet
+  String.fromCodePoint(0xbb), // right guillemet
+  String.fromCodePoint(0x201c), // left double quote
+  String.fromCodePoint(0x201d), // right double quote
+  String.fromCodePoint(0x2018), // left single quote
+  String.fromCodePoint(0x2019), // right single quote
+  String.fromCodePoint(0xbf), // inverted question mark
+  String.fromCodePoint(0xa1), // inverted exclamation mark
+])
+const FREE_SPACES: ReadonlySet<string> = new Set([' ', String.fromCodePoint(0xa0)])
+const LETTER_MARK_DIGIT = /^[\p{L}\p{M}\p{Nd}]$/u
+
+function isFree(char: string): boolean {
+  return FREE_SPACES.has(char) || FREE_PUNCTUATION.has(char) || LETTER_MARK_DIGIT.test(char)
+}
+
+/**
+ * True when the line break at `index` only re-wraps prose: the next line, after ordinary
+ * spaces, starts with a letter. Translators re-wrap nearly every paragraph (529 of the 539
+ * units the budget alone refused in PR #55 differ only in where the lines break), and a
+ * line that starts with a letter cannot open any block — every CommonMark, markdown-exit
+ * or Slidev block start (list, heading, setext underline, thematic break, fence, table,
+ * HTML, slot marker, separator, MDC block, snippet, math) begins with a digit, punctuation
+ * or indentation that a paragraph line cannot carry past a letter. Any other break stays
+ * budgeted.
+ */
+function isWrap(chars: readonly string[], index: number): boolean {
+  let next = index + 1
+  while (chars[next] === ' ') next += 1
+  const char = chars[next]
+  return char !== undefined && /^\p{L}$/u.test(char)
+}
+
+/**
+ * The backbone rule: the first character, outside the free set, that the translation uses
+ * more often than its English unit — or `undefined` when every such character is within
+ * the English's budget. Both texts are decoded first, so a reference or an escape is
+ * counted as the character it renders as.
+ *
+ * It does not enumerate syntax. Every markup construct is built from characters outside
+ * the free set (`` ` ~ < > { } [ ] $ * _ # | @ / \ & ^ = + ``, line breaks, symbols), so a
+ * translation can only produce markup its English could already produce from the same
+ * characters. The specific rules after it remain as further refusals.
+ */
+export function firstOverBudget(source: string, translation: string): string | undefined {
+  const budget = new Map<string, number>()
+  for (const char of decodeInline(source)) {
+    if (!isFree(char)) budget.set(char, (budget.get(char) ?? 0) + 1)
+  }
+  const theirs = [...decodeInline(translation)]
+  for (const [index, char] of theirs.entries()) {
+    if (isFree(char) || (char === '\n' && isWrap(theirs, index))) continue
+    const left = budget.get(char) ?? 0
+    if (left === 0) return char
+    budget.set(char, left - 1)
+  }
+  return undefined
+}
+
 /** Joins sorted tokens into one comparable string; a character no token contains. */
 const SEPARATOR = String.fromCharCode(0)
 
@@ -265,7 +372,8 @@ function structuralLines(text: string): string[] {
       // the build, and its options become a live `v-bind` on the code block wrapper.
       line.startsWith('<<<') ||
       // A KaTeX block, whose `$$ {…}{options}` opener also becomes a live `v-bind`.
-      line.startsWith('$$')
+      line.startsWith('$$') ||
+      REFERENCE_DEFINITION.test(line)
     return structural ? [collapse(line)] : []
   })
 }
@@ -282,6 +390,7 @@ function activeSchemes(decoded: string): string[] {
  * can only refuse more.
  */
 export function hasMarkupDivergence(source: string, translation: string): boolean {
+  if (firstOverBudget(source, translation) !== undefined) return true
   // Coarse, whole unit, both sides as plain text.
   if (!isSubMultiset(markupTokens(translation, false), markupTokens(source, false))) return true
   const references = (text: string) =>
@@ -308,6 +417,13 @@ export function hasMarkupDivergence(source: string, translation: string): boolea
   if (!isSubMultiset(chars(theirDecoded, BRACE_OR_DOLLAR), chars(ourDecoded, BRACE_OR_DOLLAR))) {
     return true
   }
+  if (!isSubMultiset(chars(theirDecoded, FENCE_RUN), chars(ourDecoded, FENCE_RUN))) return true
+  // Images: any `![` the English does not have, including a link flipped into one.
+  if (chars(theirDecoded, IMAGE).length > chars(ourDecoded, IMAGE).length) return true
+  const imageTargets = (text: string) => [...text.matchAll(IMAGE_TARGET)].map((m) => m[1] ?? '')
+  if (!isSubMultiset(imageTargets(theirDecoded), imageTargets(ourDecoded))) return true
+  const mdcNames = (text: string) => [...text.matchAll(MDC_NAME)].map((m) => m[1] ?? '')
+  if (!isSubMultiset(mdcNames(theirDecoded), mdcNames(ourDecoded))) return true
   if (!isSubMultiset(activeSchemes(theirDecoded), activeSchemes(ourDecoded))) return true
 
   // Context, to refuse more. The English side counts only what is certainly live — outside
@@ -319,8 +435,19 @@ export function hasMarkupDivergence(source: string, translation: string): boolea
   const trusted = !BACKTICK_EATER.test(theirProse)
   const theirLive = trusted ? theirProse : translation
   if (!isSubMultiset(markupTokens(theirLive, trusted), markupTokens(ourProse, true))) return true
-  const ourLive = findMustaches(decodeInline(ourProse))
-  const theirLiveMustaches = findMustaches(decodeInline(theirLive))
+  const ourProseDecoded = decodeInline(ourProse)
+  const theirLiveDecoded = decodeInline(theirLive)
+  // Braces, dollars and images a code span holds are inert there, so they may not pay for
+  // live ones: `jsonpath={…}` in an English span does not fund a prose `{onclick=…}`.
+  const live = (text: string, pattern: RegExp) => chars(text, pattern)
+  if (
+    !isSubMultiset(live(theirLiveDecoded, BRACE_OR_DOLLAR), live(ourProseDecoded, BRACE_OR_DOLLAR))
+  ) {
+    return true
+  }
+  if (live(theirLiveDecoded, IMAGE).length > live(ourProseDecoded, IMAGE).length) return true
+  const ourLive = findMustaches(ourProseDecoded)
+  const theirLiveMustaches = findMustaches(theirLiveDecoded)
   if (!isSubMultiset(theirLiveMustaches.complete.map(collapse), ourLive.complete.map(collapse))) {
     return true
   }

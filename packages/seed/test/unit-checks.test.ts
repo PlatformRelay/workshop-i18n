@@ -170,9 +170,9 @@ describe('checkTranslation', () => {
   })
 
   it('warns, without refusing, when link targets differ', () => {
-    expect(
-      check('See [docs](https://k8s.io/docs).', 'Veja a [doc](https://k8s.io/pt-br/docs).'),
-    ).toEqual({ miss: undefined, warnings: ['link-divergence'] })
+    expect(check('See [docs](https://k8s.io/docs).', 'Veja a [doc](https://k8s.io/ptbr).')).toEqual(
+      { miss: undefined, warnings: ['link-divergence'] },
+    )
   })
 
   it('treats code spans as a multiset, not a sequence', () => {
@@ -339,6 +339,171 @@ describe('checkTranslation', () => {
     expect(check('Press <kbd>Enter</kbd>', 'Pressione <KBD>Enter</KBD>').miss).toBe(
       'markup-divergence',
     )
+  })
+
+  describe('braces and dollars an English code span carries do not fund live prose', () => {
+    const english =
+      'Print names with `kubectl get pods -o jsonpath={.items[*].metadata.name}` today.'
+    it.each([
+      ['an MDC attribute block', 'Imprima nomes com **kubectl**{onclick="alert(1)"} hoje.'],
+      [
+        'an MDC attribute block, with the code span kept',
+        'Imprima `kubectl get pods -o jsonpath=` com **kubectl**{onclick="alert(1)"} hoje.',
+      ],
+    ])('refuses %s', (_label, translation) => {
+      expect(check(english, translation).miss).toBe('markup-divergence')
+    })
+
+    it('refuses inline math funded by dollars inside an English code span', () => {
+      expect(check('Run `echo $A $B` now.', 'Rode $x$ agora.').miss).toBe('markup-divergence')
+    })
+
+    it('still accepts the code span translated in place', () => {
+      expect(
+        check(
+          english,
+          'Imprima nomes com `kubectl get pods -o jsonpath={.items[*].metadata.name}` hoje.',
+        ).miss,
+      ).toBeUndefined()
+    })
+  })
+
+  it('refuses a KaTeX block even when the English funds every dollar and brace in prose', () => {
+    // Only the `$$` line rule can refuse this: the counts all balance.
+    expect(
+      check(
+        'Costs $1, $2, $3 and $4 using {a} and {b}.',
+        'Custa:\n$$ {1}{onVnodeMounted: () => x()}\nx\n$$',
+      ).miss,
+    ).toBe('markup-divergence')
+  })
+
+  describe('images, which the build turns into imports', () => {
+    it.each([
+      ['a local file read as raw text', 'Veja ![x](./.env?raw) agora.'],
+      ['a JSON file', 'Veja ![x](./probe.json) agora.'],
+      ['a reference-style image', 'Veja ![x][r] agora.\n\n[r]: ./.env?raw'],
+      ['a remote image', 'Veja ![x](https://tracker.example/p.png) agora.'],
+      ['an image spelled with an escaped bang', 'Veja \\![x](./.env?raw) agora.'],
+    ])('refuses %s', (_label, translation) => {
+      expect(check('See the docs now.', translation).miss).toBe('markup-divergence')
+    })
+
+    it('refuses a link the English has, flipped into an image', () => {
+      expect(check('See [docs](./a.png).', 'Veja ![docs](./a.png).').miss).toBe('markup-divergence')
+    })
+
+    it('refuses an English image retargeted at another file', () => {
+      expect(
+        check('See the ![diagram](./diagram.png) below.', 'Veja o ![diagrama](./.env?raw) abaixo.')
+          .miss,
+      ).toBe('markup-divergence')
+    })
+
+    it('accepts an image the English already has', () => {
+      expect(
+        check('See ![diagram](./a.png) here.', 'Veja ![diagrama](./a.png) aqui.').miss,
+      ).toBeUndefined()
+    })
+
+    it('refuses an added reference definition line', () => {
+      expect(check('See [x][r] now.', 'Veja [x][r] agora.\n\n[r]: https://evil.example').miss).toBe(
+        'markup-divergence',
+      )
+    })
+  })
+
+  describe('braceless MDC components', () => {
+    it.each([
+      ['an inline component', 'O Kubernetes agenda :Toc Pods.'],
+      ['an inline component at line start', 'O Kubernetes agenda\n:Toc Pods.'],
+      ['an inline component inside emphasis', 'O Kubernetes agenda *:Toc* Pods.'],
+      ['an inline component inside strong emphasis', 'O Kubernetes agenda __:Toc__ Pods.'],
+      ['an inline component inside a link text', 'O Kubernetes agenda [:Toc](x) Pods.'],
+      ['a bound MDC prop', 'O Kubernetes :href="x" agenda.'],
+      ['a block component', 'O Kubernetes agenda Pods.\n\n::Toc\n::'],
+    ])('refuses %s', (_label, translation) => {
+      expect(check('Kubernetes schedules Pods.', translation).miss).toBe('markup-divergence')
+    })
+
+    it.each([
+      ['a label colon', 'Note: this matters.', 'Nota: isso importa.'],
+      ['a clock time', 'Meet at 10:30 today.', 'Encontro às 10:30 hoje.'],
+      ['a URL', 'See https://k8s.io now.', 'Veja https://k8s.io agora.'],
+      ['an emoji shortcode the English has', 'Ship it :rocket: now.', 'Entregue :rocket: agora.'],
+    ])('accepts %s', (_label, english, translation) => {
+      expect(check(english, translation).miss).toBeUndefined()
+    })
+  })
+
+  describe('the character budget', () => {
+    it('lets a translation add letters, digits, marks, spaces and prose punctuation freely', () => {
+      expect(
+        check(
+          'Run it.',
+          'Rode-o já (agora): 100% «sério», “sim” — ‘não’… ¿quê? ¡olé! \'a\' "b"; ok, fim.',
+        ).miss,
+      ).toBeUndefined()
+      expect(check('Run it.', `Rode${String.fromCodePoint(0xa0)}isso.`).miss).toBeUndefined()
+    })
+
+    it.each([
+      ['an asterisk', 'Rode *isso*.'],
+      ['an underscore', 'Rode _isso_.'],
+      ['a hash', 'Rode #isso.'],
+      ['a pipe', 'Rode | isso.'],
+      ['an at sign', 'Rode @isso.'],
+      ['a slash', 'Rode e/ou isso.'],
+      ['a backslash', 'Rode \\ isso.'],
+      ['an ampersand', 'Rode &amp; isso.'],
+      ['a caret', 'Rode ^isso.'],
+      ['an equals sign', 'Rode = isso.'],
+      ['a plus sign', 'Rode + isso.'],
+      ['a tilde', 'Rode ~isso.'],
+      ['a backtick', 'Rode `isso`.'],
+      ['a bracket', 'Rode [isso].'],
+      ['an emoji', `Rode isso ${String.fromCodePoint(0x1f680)}.`],
+      ['a tab', 'Rode\tisso.'],
+      ['an em space', `Rode${String.fromCodePoint(0x2003)}isso.`],
+      ['an asterisk spelled as a reference', 'Rode &#42;isso&#42;.'],
+    ])('refuses %s the English does not have', (_label, translation) => {
+      expect(check('Run it.', translation).miss).toBe('markup-divergence')
+    })
+
+    it('accepts budgeted characters the English carries, as a multiset', () => {
+      expect(check('Run *it* / now.', 'Rode / *isso* agora.').miss).toBeUndefined()
+      expect(check('Run *it* now.', 'Rode *isso* e *aquilo*.').miss).toBe('markup-divergence')
+    })
+
+    it('treats a line break before a letter as a re-wrap, and any other added break as budgeted', () => {
+      expect(check('Run it now and see.', 'Rode isso agora\ne veja.').miss).toBeUndefined()
+      expect(check('Run it now and see.', 'Rode isso agora\n   e veja.').miss).toBeUndefined()
+      for (const next of ['- item', '1. item', ':: x', '-- ', '(a)', '**b**']) {
+        expect(check('Run it now and see.', `Rode isso agora\n${next}`).miss).toBe(
+          'markup-divergence',
+        )
+      }
+    })
+  })
+
+  describe('fences opened after a container marker', () => {
+    it.each([
+      ['a PlantUML fence in a list item', '- Veja\n- ```plantuml\n@startuml'],
+      ['a Mermaid fence in a blockquote', 'Veja\n> ```mermaid\ngraph TD'],
+      ['a twoslash tilde fence in a list item', 'Veja\n- ~~~ts twoslash\nconst x = 1'],
+      ['a fence run mid-line', 'Veja ```plantuml agora'],
+      [
+        'a list-item unit that is itself a fence opener',
+        '```plantuml\n@startuml\nBob -> Alice\n@enduml',
+      ],
+      ['a blockquote unit that is itself a fence opener', '```mermaid\ngraph TD\nA ==> B'],
+    ])('refuses %s', (_label, translation) => {
+      expect(check('- See\n- the docs', translation).miss).toBe('markup-divergence')
+    })
+
+    it('refuses a fence run even when the English funds every backtick in code spans', () => {
+      expect(check('Use `a` `b` and `c`.', 'Use ``` mermaid.').miss).toBe('markup-divergence')
+    })
   })
 
   it('does not mistake the Portuguese word "Data:" for a data URL', () => {

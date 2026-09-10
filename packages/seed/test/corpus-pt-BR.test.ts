@@ -140,10 +140,11 @@ describe('seeding the PR #55 fixture slice', () => {
     expect(sections).toMatchInlineSnapshot(`
       {
         "labs/day-1-08-ingress.md": {
-          "aligned": 58,
+          "aligned": 56,
           "englishUnits": 72,
           "missReasons": {
             "identical-to-source": 14,
+            "markup-divergence": 2,
           },
         },
         "labs/day-2-12-statefulset.solution.md": {
@@ -162,10 +163,11 @@ describe('seeding the PR #55 fixture slice', () => {
           },
         },
         "labs/labs-README.md": {
-          "aligned": 77,
+          "aligned": 76,
           "englishUnits": 97,
           "missReasons": {
             "identical-to-source": 20,
+            "markup-divergence": 1,
           },
         },
         "quiz/questions.json": {
@@ -219,11 +221,11 @@ describe('seeding the PR #55 fixture slice', () => {
   it('matches the golden totals', () => {
     expect(golden(first.report.totals)).toMatchInlineSnapshot(`
       {
-        "aligned": 399,
+        "aligned": 396,
         "englishUnits": 937,
         "missReasons": {
           "identical-to-source": 80,
-          "markup-divergence": 2,
+          "markup-divergence": 5,
           "no-translated-file": 67,
           "question-missing": 384,
           "structure-diverged": 5,
