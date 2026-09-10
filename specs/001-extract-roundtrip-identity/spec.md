@@ -85,18 +85,21 @@ skeleton reproduces the source semantically losslessly; fences and Vue islands b
   `init-ids` inserts quiz-question ids; the implementation checks them only, for this reason.)*
 - **FR-002**: `init-ids --check` MUST exit non-zero on missing or duplicate identities (CI lint).
 - **FR-003**: `extract` MUST read the `workshop.yaml` manifest (versioned `apiVersion`; unknown
-  major version → hard error).
+  major version → hard error), including the slides surface's optional `componentTextProps`
+  declaration of which static component props carry prose (ADR 0015; none unless declared).
 - **FR-004**: `extract` MUST emit paragraph-granular units with markdown inline markup literal,
   each carrying `<surface>:<containerId>:<unitKey>` and a source hash.
-- **FR-005**: Protected skeleton (fences, frontmatter machinery, Vue islands, includes) MUST never
-  appear as translatable text and MUST survive round-trip byte-identically.
+- **FR-005**: Protected skeleton (fences, frontmatter machinery, Vue islands, includes, Slidev
+  slot markers) MUST never appear as translatable text and MUST survive round-trip
+  byte-identically. Prose *inside* a Vue island or HTML block is extracted as text runs; the
+  island's tags, directives, bindings and undeclared props stay skeleton (ADR 0015).
 - **FR-006**: Extraction MUST be deterministic: identical tree → identical output.
 - **FR-007**: Extraction MUST NOT execute any content or make network calls.
 
 ### Key Entities
 
 - **Manifest**: `.localization/workshop.yaml` — declares surfaces, paths, protected terms, quiz
-  schema variant.
+  schema variant, and (slides only) the component text props extraction reads.
 - **TranslationUnit**: stable id + English source + source hash (packages/core).
 - **Protected skeleton**: the non-translatable structure re-used verbatim at composition.
 
