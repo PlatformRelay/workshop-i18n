@@ -169,6 +169,12 @@ describe('checkTranslation', () => {
     })
   })
 
+  it('warns when a bare URL the linkifier turns into a link is retargeted', () => {
+    expect(
+      check('Read https://kubernetes.io/docs/home first.', 'Leia https://evil.example/pt/x antes.'),
+    ).toEqual({ miss: undefined, warnings: ['link-divergence'] })
+  })
+
   it('warns, without refusing, when link targets differ', () => {
     expect(check('See [docs](https://k8s.io/docs).', 'Veja a [doc](https://k8s.io/ptbr).')).toEqual(
       { miss: undefined, warnings: ['link-divergence'] },
@@ -368,14 +374,33 @@ describe('checkTranslation', () => {
     })
   })
 
-  it('refuses a KaTeX block even when the English funds every dollar and brace in prose', () => {
-    // Only the `$$` line rule can refuse this: the counts all balance.
-    expect(
-      check(
-        'Costs $1, $2, $3 and $4 using {a} and {b}.',
-        'Custa:\n$$ {1}{onVnodeMounted: () => x()}\nx\n$$',
-      ).miss,
-    ).toBe('markup-divergence')
+  describe('rules that are the only guard once the English funds the character budget', () => {
+    // Each English below funds every budgeted character its translation uses — including
+    // the `=`, `>` and line breaks — so the budget passes and only the named rule refuses.
+    // Each was shown red with that rule disabled.
+    it('the `$$` line rule refuses a funded KaTeX block', () => {
+      expect(
+        check(
+          'Costs $1, $2, $3 and $4 using {a} and {b} (x => y)\nper\nnode.',
+          'Custa:\n$$ {1}{onVnodeMounted: () => x}\nx\n$$',
+        ).miss,
+      ).toBe('markup-divergence')
+    })
+
+    it('the image-count rule refuses a reference link flipped into an image', () => {
+      expect(
+        check('See ![a](./a.png) and [b][r] now.', 'Veja ![a](./a.png) e ![b][r] agora.').miss,
+      ).toBe('markup-divergence')
+    })
+
+    it('the reference-definition line rule refuses a funded definition', () => {
+      expect(
+        check(
+          'See [x][r] and [y] at https://kubernetes.io\nfor\nmore.',
+          'Veja [x][r] e mais.\n\n[r]: https://evil.example',
+        ).miss,
+      ).toBe('markup-divergence')
+    })
   })
 
   describe('images, which the build turns into imports', () => {
@@ -410,6 +435,37 @@ describe('checkTranslation', () => {
       expect(check('See [x][r] now.', 'Veja [x][r] agora.\n\n[r]: https://evil.example').miss).toBe(
         'markup-divergence',
       )
+    })
+  })
+
+  describe('MDC lines, in every spelling the MDC block rule accepts', () => {
+    it.each([
+      ['a spaced block component', 'Veja isto.\n:: Toc\n::'],
+      ['a lower-case block component', 'Veja isto.\n:: toc\n::'],
+      ['a widely spaced block component', 'Veja isto.\n::   Toc\n::'],
+      ['an indented block component', 'Veja isto.\n  :: Toc\n::'],
+      ['a three-colon block component', 'Veja isto.\n:::Toc\n:::'],
+      ['a four-colon block component', 'Veja isto.\n::::Toc\n::::'],
+      ['the `:1` shorthand that crashes the build', 'Veja isto.\n:1 texto'],
+      ['a bare colon line', 'Veja isto.\n: texto'],
+    ])('refuses %s', (_label, translation) => {
+      // The English funds the line breaks, so the budget passes and the line rule decides.
+      expect(check('See\nthis\nnow\nplease.', translation).miss).toBe('markup-divergence')
+    })
+
+    it.each([
+      ['a digit', 'O Kubernetes agenda :1 Pods.'],
+      ['a dollar name', 'O Kubernetes agenda :$x Pods.'],
+      ['a dash name', 'O Kubernetes agenda :-x Pods.'],
+      ['an underscore name', 'O Kubernetes agenda :_x Pods.'],
+    ])('refuses an inline MDC name starting with %s', (_label, translation) => {
+      expect(check('Kubernetes schedules $x - and _y Pods.', translation).miss).toBe(
+        'markup-divergence',
+      )
+    })
+
+    it('accepts a colon line the English has identically', () => {
+      expect(check('See:\n::right::\nthis', 'Veja:\n::right::\nisto').miss).toBeUndefined()
     })
   })
 

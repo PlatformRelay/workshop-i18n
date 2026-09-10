@@ -60,7 +60,8 @@
  *   - an image (`![`) beyond the English's count, or an image target the English does not
  *     have — the build turns every image into an import, `./.env?raw` included — and a
  *     link reference definition line;
- *   - a braceless MDC name (`:Toc`, `::Toc`, `:href`) after whitespace, emphasis or `[`;
+ *   - a braceless MDC name (`:Toc`, `::Toc`, `:href`, `:1`, in the renderer's `[\w$-]`
+ *     name class) after whitespace, emphasis or `[`, and any line starting with `:`;
  *   - a Unicode format character (general category Cf: zero-width characters, the soft
  *     hyphen, the byte-order mark, bidirectional controls), literal or as a character
  *     reference, which can hide text from a linkifier or a reviewer — and the invisibles
@@ -71,7 +72,9 @@
  *
  *   It is also refused when its length says it is almost certainly not this unit's text.
  * - **Warnings** (`code-span-divergence`, `link-divergence`) — translators legitimately
- *   rephrase around inline code and point links at localized docs. Refusing those would
+ *   rephrase around inline code and point links at localized docs. A link warning covers
+ *   `](…)` targets and bare `scheme://` URLs; a bare host without a scheme is plain text
+ *   only while Slidev's fuzzy linkify stays off, and compose's host rule is the gate. Refusing those would
  *   discard good work; the draft carries the warning into the report instead.
  */
 
@@ -95,6 +98,12 @@ export interface TranslationCheck {
 const MARKUP = /<[!?][^>]*>?|<\/?[A-Za-z][^<>]*>?|<[^\s<]/g
 /** An inline link or image target, for the link warning. */
 const LINK_TARGET = /\]\(\s*([^)\s]+)/g
+/**
+ * A bare `scheme://` URL, which the linkifier turns into a link. Bare hosts without a
+ * scheme (`evil.example`) stay plain text only while Slidev's fuzzy linkify stays off;
+ * compose's host rule covers them.
+ */
+const BARE_URL = /[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s<>)\]`"']+/g
 /** URL schemes that execute or embed, searched for in the decoded, whitespace-free unit. */
 const ACTIVE_SCHEME = /(?:javascript|vbscript|file):|data:[a-z-]+\//g
 /** Unicode format characters. */
@@ -140,10 +149,11 @@ const IMAGE = /!\[/g
 /** An inline image's target: retargeting an English image is as good as adding one. */
 const IMAGE_TARGET = /!\[[^\]]*\]\(\s*<?([^)\s>]*)/g
 /**
- * A braceless MDC component or bound prop (`:Toc`, `::Toc`, `:href`): a colon run right
- * after the start of a line, whitespace, emphasis, or a link bracket, then a name.
+ * A braceless MDC component or bound prop (`:Toc`, `::Toc`, `:href`, `:1`): a colon run
+ * right after the start of a line, whitespace, emphasis, or a link bracket, then a name in
+ * the renderer's own name class, `[\w$-]` — digits, `$`, `-` and `_` included.
  */
-const MDC_NAME = /(?:^|[\s*_[])(:{1,2}[A-Za-z][\w-]*)/gm
+const MDC_NAME = /(?:^|[\s*_[])(:{1,2}[\w$-]+)/gm
 /** A link reference definition line (`[r]: target`), which can retarget any `[x][r]`. */
 const REFERENCE_DEFINITION = /^\[[^\]]*\]:/
 /**
@@ -365,6 +375,10 @@ function structuralLines(text: string): string[] {
     const line = raw.trim()
     const structural =
       SLOT_MARKER.test(line) ||
+      // Any line that starts with a colon: the MDC block rule accepts two or more colons
+      // and trims before reading a name (`:: toc`, `:::Toc`), and `:1 …` shorthand lines
+      // break the build outright. The slot marker above is one case of this.
+      line.startsWith(':') ||
       line.startsWith('---') ||
       line.startsWith('```') ||
       line.startsWith('~~~') ||
@@ -483,8 +497,10 @@ export function checkTranslation(
     warnings.push('code-span-divergence')
   }
   const targets = (text: string) =>
-    [...text.matchAll(LINK_TARGET)]
-      .map((match) => match[1] ?? '')
+    [
+      ...[...text.matchAll(LINK_TARGET)].map((match) => match[1] ?? ''),
+      ...[...text.matchAll(BARE_URL)].map((match) => match[0]),
+    ]
       .sort()
       .join(SEPARATOR)
   if (targets(source) !== targets(translation)) {
