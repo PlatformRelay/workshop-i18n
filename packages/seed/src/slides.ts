@@ -19,10 +19,16 @@
  *   own splitting rules, transcribed in `extract-slidev`); any difference misses the
  *   whole file rather than guessing which slide was added or dropped;
  * - every paired slide must then agree on its **non-prose frontmatter** (`layout`,
- *   `class`, … — everything but the declared text keys and `slideId`) and its **number
- *   of fenced blocks**, so two structurally different slides that happen to share a
- *   position are refused;
+ *   `class`, … — everything but the declared text keys and `slideId`) and on its
+ *   **language-independent fingerprint** (`fingerprint.ts`: unit keys, fence bodies without
+ *   comments, code spans, URLs, components), so two different slides that happen to share
+ *   a position are refused;
+ * - that fingerprint must be **unique in both decks**: look-alike slides can be swapped,
+ *   or one dropped and another added, without any trace, so position proves nothing about
+ *   them and they miss as `ambiguous-position`;
  * - and within a paired slide, units are paired by `alignContainer`'s scope rule.
+ *
+ * ADR 0016 records this bounded exception to constitution II.
  *
  * The borrowed id never leaves this module: drafts carry the English unit ids, and the
  * translated text itself is never written anywhere but into a catalog `msgstr`.
@@ -48,6 +54,12 @@ import {
 } from '@workshop-i18n/extract-slidev'
 import { parse as parseYaml } from 'yaml'
 import { alignContainer } from './align-container.js'
+import {
+  differingParts,
+  type FingerprintParts,
+  fingerprintKey,
+  fingerprintParts,
+} from './fingerprint.js'
 import {
   type AlignOptions,
   addDivergence,
@@ -78,11 +90,28 @@ export interface SlidesAlignOptions extends AlignOptions {
   readonly frontmatterTextKeys?: readonly string[]
 }
 
-/** A fenced-block delimiter line, backtick or tilde, at any indentation Slidev accepts. */
-const FENCE_LINE = /^[ \t]*(`{3,}|~{3,})/gm
+/**
+ * A slide's identity-proof key: its frontmatter machinery plus its language-independent
+ * fingerprint. Speaker-note structure is left out on purpose — translators re-wrap notes,
+ * and `alignContainer` already misses a note that diverged without costing the body.
+ */
+function slideKey(
+  source: string,
+  slide: ExtractedSlide,
+  units: readonly TranslationUnit[],
+  machine: string | undefined,
+): { readonly key: string | undefined; readonly parts: FingerprintParts } {
+  const parts = fingerprintParts(
+    source.slice(slide.range.bodyStart, slide.range.bodyEnd),
+    units.map((unit) => unit.id.unitKey).filter((key) => !key.startsWith('note/')),
+  )
+  return { key: machine === undefined ? undefined : `${machine}\n${fingerprintKey(parts)}`, parts }
+}
 
-function fenceLines(source: string, slide: ExtractedSlide): number {
-  return [...source.slice(slide.range.bodyStart, slide.range.bodyEnd).matchAll(FENCE_LINE)].length
+function tally(keys: Iterable<string | undefined>): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const key of keys) if (key !== undefined) counts.set(key, (counts.get(key) ?? 0) + 1)
+  return counts
 }
 
 /** Deterministic rendering of a parsed YAML value, with object keys sorted. */
@@ -258,6 +287,34 @@ function alignSlidesFile(
   const misses: SeedMiss[] = []
   let divergence = noDivergence()
 
+  // Fingerprint every slide of both decks first: pairing by position is only allowed for
+  // a slide whose fingerprint matches the one at its position *and* is unique in both
+  // decks, so that no drop, add or swap of look-alike slides can go unnoticed (ADR 0016).
+  const ourKeys = new Map(
+    english.slides.map((slide) => [
+      slide.range.index,
+      slideKey(
+        pair.english,
+        slide,
+        englishUnits.get(slide.slideId) ?? [],
+        machinery(pair.english, slide, textKeySet),
+      ),
+    ]),
+  )
+  const theirKeys = new Map(
+    located.slides.map((slide) => [
+      slide.range.index,
+      slideKey(
+        located.skeleton.source,
+        slide,
+        translatedUnits.get(slide.slideId) ?? [],
+        machinery(located.skeleton.source, slide, textKeySet),
+      ),
+    ]),
+  )
+  const ourCounts = tally([...ourKeys.values()].map((entry) => entry.key))
+  const theirCounts = tally([...theirKeys.values()].map((entry) => entry.key))
+
   for (const slide of english.slides) {
     const ours = englishUnits.get(slide.slideId) ?? []
     if (ours.length === 0) continue
@@ -281,10 +338,20 @@ function alignSlidesFile(
       )
       continue
     }
-    if (fenceLines(pair.english, slide) !== fenceLines(located.skeleton.source, theirSlide)) {
+    const ourKey = ourKeys.get(slide.range.index)
+    const theirKey = theirKeys.get(slide.range.index)
+    if (ourKey?.key === undefined || theirKey?.key === undefined || ourKey.key !== theirKey.key) {
+      const parts = ourKey && theirKey ? differingParts(ourKey.parts, theirKey.parts) : []
       miss(
         'structure-diverged',
-        'the slide has a different number of fenced blocks than the English',
+        `the slide at this position differs from the English in its ${parts.join(', ') || 'shape'}`,
+      )
+      continue
+    }
+    if ((ourCounts.get(ourKey.key) ?? 0) > 1 || (theirCounts.get(theirKey.key) ?? 0) > 1) {
+      miss(
+        'ambiguous-position',
+        'another slide in the deck looks exactly like this one, so its position cannot prove which translation is its own',
       )
       continue
     }

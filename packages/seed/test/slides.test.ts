@@ -239,6 +239,85 @@ describe('alignSlides', () => {
     ).toThrow(SeedInputError)
   })
 
+  describe('position pairing must be provable, never assumed', () => {
+    /** Four slides of identical shape: nothing but prose tells them apart. */
+    const lookalikes = (titles: readonly string[], ids?: readonly string[]) =>
+      titles
+        .map(
+          (title, index) =>
+            `---\n${ids === undefined ? '' : `slideId: ${ids[index]}\n`}layout: default\n---\n\n# ${title}\n\n${title} body.\n`,
+        )
+        .join('\n')
+    const IDS = ['s-a', 's-b', 's-c', 's-d']
+    const englishDeck = lookalikes(['Alpha', 'Beta', 'Gamma', 'Delta'], IDS)
+
+    it('misses indistinguishable slides when one is dropped and another appended', () => {
+      const translated = lookalikes(['Alfa', 'Gama', 'Delta pt', 'Novo'])
+      const section = only(
+        alignSlides([file('d.md', englishDeck)], [file('d.md', translated)]).sections,
+      )
+      expect(section.drafts).toEqual([])
+      expect(section.misses.map((miss) => [miss.reason, miss.containerId])).toEqual(
+        IDS.map((id) => ['ambiguous-position', id]),
+      )
+    })
+
+    it('misses indistinguishable slides when two are swapped', () => {
+      const translated = lookalikes(['Beta pt', 'Alfa', 'Gama', 'Delta pt'])
+      const section = only(
+        alignSlides([file('d.md', englishDeck)], [file('d.md', translated)]).sections,
+      )
+      expect(section.drafts).toEqual([])
+    })
+
+    /** Four slides a translator cannot change the fingerprint of: each has its own command. */
+    const distinct = (commands: readonly string[], ids?: readonly string[]) =>
+      commands
+        .map(
+          (command, index) =>
+            `---\n${ids === undefined ? '' : `slideId: ${ids[index]}\n`}---\n\n# Step\n\nRun \`${command}\`.\n`,
+        )
+        .join('\n')
+    const englishSteps = distinct(
+      ['kubectl get', 'kubectl apply', 'kubectl delete', 'kubectl logs'],
+      IDS,
+    )
+
+    it('pairs distinguishable slides, and misses the ones a drop-and-add shifted', () => {
+      const translated = distinct(['kubectl get', 'kubectl delete', 'kubectl logs', 'kubectl exec'])
+        .replaceAll('# Step', '# Passo')
+        .replaceAll('Run', 'Execute')
+      const section = only(
+        alignSlides([file('d.md', englishSteps)], [file('d.md', translated)]).sections,
+      )
+      expect(section.drafts.map((draft) => draft.id.containerId)).toEqual(['s-a', 's-a'])
+      expect(section.misses.map((miss) => [miss.reason, miss.containerId])).toEqual([
+        ['structure-diverged', 's-b'],
+        ['structure-diverged', 's-c'],
+        ['structure-diverged', 's-d'],
+      ])
+      expect(section.misses[0]?.detail).toContain('code')
+    })
+
+    it('misses a swapped pair of distinguishable slides and keeps the rest', () => {
+      const translated = distinct([
+        'kubectl apply',
+        'kubectl get',
+        'kubectl delete',
+        'kubectl logs',
+      ])
+        .replaceAll('# Step', '# Passo')
+        .replaceAll('Run', 'Execute')
+      const section = only(
+        alignSlides([file('d.md', englishSteps)], [file('d.md', translated)]).sections,
+      )
+      expect([...new Set(section.drafts.map((draft) => draft.id.containerId))]).toEqual([
+        's-c',
+        's-d',
+      ])
+    })
+  })
+
   it('aligns a CRLF translation of an LF deck without carrying carriage returns into drafts', () => {
     const multiline = EN.replace('A Pod is small.', 'A Pod is\nsmall.')
     const crlf = PT.replace('Um Pod é pequeno.', 'Um Pod é\npequeno.').replaceAll('\n', '\r\n')

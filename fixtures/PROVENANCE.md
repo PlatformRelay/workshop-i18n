@@ -195,7 +195,7 @@ in `corpus-quiz/` is left whole so the other 48 exercise `question-missing`.
 | --- | --- |
 | `slides/S12-statefulset.md` | A speaker note that translates the tag-shaped placeholder `web-<newhash>` to `web-<novohash>`: to a renderer that is a new element, so the unit is refused as `markup-divergence` — conservative, and visible in the report rather than silent; translated `<KwCard>` prose that is HTML skeleton and must never be imported |
 | `slides/S19-rbac.md` | Translated comments inside three-document YAML fences — skeleton divergence that is reported, never imported, and never by itself a miss |
-| `slides/S20-helm.md` | A speaker note whose re-wrapped translation starts a line with `+ `, which Markdown reads as a list item — an accidental structure change, so that slide's note is `structure-diverged` and listed (AS-2) while its body still seeds; the deck's only `{{ }}` mustache |
+| `slides/S20-helm.md` | A speaker note whose re-wrapped translation starts a line with `+ `, which Markdown reads as a list item — an accidental structure change, so that slide's note is `structure-diverged` and listed (AS-2) while its body still seeds; a slide whose code span the translator translated inside the backticks, so its fingerprint cannot prove the position pairing (ADR 0016) and it misses whole; the deck's only `{{ }}` mustache |
 | `slides/S24-kubebuilder.md` | The degenerate three-slide deck, with several units left in English (`identical-to-source`, reported and never seeded) |
 | `labs/day-1-08-ingress.md` | In-fence `---` document separators with translated comments around them |
 | `labs/day-2-12-statefulset.solution.md` | The heaviest inline HTML in the lab corpus, translated around `<code>` and `&lt;ns&gt;` |

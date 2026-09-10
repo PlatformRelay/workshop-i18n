@@ -12,7 +12,9 @@
  *   must not be imported;
  * - `S20-helm` — one speaker note whose re-wrapped translation starts a line with `+ `,
  *   which Markdown reads as a list item: an accidental structure change that must miss
- *   that note (`structure-diverged`, AS-2) and nothing else; the deck's `{{ }}` mustache;
+ *   that note (`structure-diverged`, AS-2) and nothing else; and a slide whose code span
+ *   the translator translated inside the backticks, so its fingerprint cannot prove it is
+ *   the English slide at that position and it misses whole (ADR 0016);
  * - `S19-rbac` — translated comments inside multi-document YAML fences;
  * - `S24-kubebuilder` and `day-3-24-kubebuilder` — the degenerate small files, where most
  *   units were left in English (`identical-to-source`, reported and never seeded);
@@ -22,7 +24,7 @@
  * - `quiz/questions.json` — six of the 54 questions, so 48 are `question-missing`.
  *
  * The counts were cross-checked against the full corpus run (every deck, lab and question
- * of PR #55), where the same rules align 84.7% of the English units.
+ * of PR #55), where the same rules align 84.4% of the English units.
  */
 
 import { readFileSync } from 'node:fs'
@@ -195,11 +197,11 @@ describe('seeding the PR #55 fixture slice', () => {
           },
         },
         "slides/S20-helm.md": {
-          "aligned": 58,
+          "aligned": 54,
           "englishUnits": 70,
           "missReasons": {
             "identical-to-source": 11,
-            "structure-diverged": 1,
+            "structure-diverged": 5,
           },
         },
         "slides/S24-kubebuilder.md": {
@@ -216,14 +218,14 @@ describe('seeding the PR #55 fixture slice', () => {
   it('matches the golden totals', () => {
     expect(golden(first.report.totals)).toMatchInlineSnapshot(`
       {
-        "aligned": 404,
+        "aligned": 400,
         "englishUnits": 937,
         "missReasons": {
           "identical-to-source": 80,
           "markup-divergence": 1,
           "no-translated-file": 67,
           "question-missing": 384,
-          "structure-diverged": 1,
+          "structure-diverged": 5,
         },
       }
     `)
@@ -252,7 +254,12 @@ describe('seeding the PR #55 fixture slice', () => {
     const helm = first.report.surfaces[0]?.sections.find(
       (section) => section.section === 'S20-helm.md',
     )
-    const miss = helm?.misses.find((item) => item.reason === 'structure-diverged')
+    const miss = helm?.misses.find(
+      (item) =>
+        item.reason === 'structure-diverged' &&
+        item.containerId === 's20-helm-two-ways-to-ship-a-chart',
+    )
+    expect(miss?.unitIds).toEqual(['slides:s20-helm-two-ways-to-ship-a-chart:note/p-1'])
     expect(miss?.containerId).toBe('s20-helm-two-ways-to-ship-a-chart')
     expect(formatSeedReport(first.report)).toContain('s20-helm-two-ways-to-ship-a-chart')
     const slides = first.catalogs[0] as Catalog

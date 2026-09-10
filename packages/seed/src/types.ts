@@ -34,6 +34,11 @@ export type SeedMissReason =
   | 'container-id-conflict'
   /** The container's (or heading scope's) unit structure differs from the English. */
   | 'structure-diverged'
+  /**
+   * The slide matches the English slide at its position, but another slide in either deck
+   * looks exactly the same, so position cannot prove which is which (ADR 0016).
+   */
+  | 'ambiguous-position'
   /** The translated quiz bank has no question with this id. */
   | 'question-missing'
   /** The translated text is byte-identical to the English: nothing was translated. */
@@ -53,6 +58,7 @@ export const SEED_MISS_REASONS: readonly SeedMissReason[] = Object.freeze([
   'slide-count-mismatch',
   'container-id-conflict',
   'structure-diverged',
+  'ambiguous-position',
   'question-missing',
   'markup-divergence',
   'length-divergence',
