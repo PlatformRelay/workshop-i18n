@@ -362,6 +362,25 @@ describe('composeSkeleton refuses a replacement that would break out of its hole
     }
   })
 
+  it('rejects a Slidev snippet import or a KaTeX block line the English does not have', () => {
+    // Both are Slidev block syntax that a real `slidev build` turned into live code: a
+    // snippet line imports a file (`<<< @/.env`) and binds its `{…}` options, and a `$$`
+    // line's `{…}` becomes a KaTexBlockWrapper `v-bind`.
+    for (const text of [
+      'eins\n<<< @/.env txt',
+      'eins\n   <<< @/probe.json json {1}',
+      'eins\n$$ x\ny\n$$',
+      'eins\n  $$',
+    ]) {
+      try {
+        composeSkeleton(skeleton, { 'slides:s1:body/p-1': text })
+        expect.unreachable(`${JSON.stringify(text)} should have been refused`)
+      } catch (error) {
+        expect((error as CompositionError).issues[0]?.reason, text).toBe('block-syntax')
+      }
+    }
+  })
+
   it('allows marker-shaped text that is not a line of its own', () => {
     expect(composeSkeleton(skeleton, { 'slides:s1:body/p-1': 'eins ::right:: zwei' })).toBe(
       'eins ::right:: zwei\n',
@@ -434,6 +453,88 @@ describe('composeSkeleton keeps the markup a unit carries (ADR 0015)', () => {
     }
     expect(reasonOf(`Nutze a < b${tail}`)).toBeUndefined()
     expect(reasonOf(`Nutze &lt;b&gt;${tail}`)).toBeUndefined()
+  })
+
+  it('compares the coarse tokens themselves, not only how many there are', () => {
+    // Neither the precise scanner (`<4` is text to it) nor the landing count (one `<`
+    // either way) sees this; only the coarse multiset does.
+    const heart = createSkeleton('Heart <3 always.\n', [
+      hole('slides:s1:body/p-1', 0, 16, 'Heart <3 always.'),
+    ])
+    expect(() => composeSkeleton(heart, { 'slides:s1:body/p-1': 'Herz <4 immer.' })).toThrow(
+      /markup/,
+    )
+  })
+
+  it('counts markup across the edge of the hole, where the skeleton continues it', () => {
+    // The translation alone carries no markup and neither does the English, but the `<`
+    // in front of the hole reads the hole's first character: `<AB` is a tag start, `< CD`
+    // is text. Only the count over the landing line sees the change.
+    const glued = createSkeleton('Tick <AB\n', [hole('slides:s1:body/p-1', 6, 8, 'AB')])
+    expect(() => composeSkeleton(glued, { 'slides:s1:body/p-1': ' CD' })).toThrow(/markup/)
+  })
+
+  it('lets the precise scanner add a refusal the coarse reading cannot see', () => {
+    // Coarsely `<a title="x>` ends at the quoted `>`, so an edit after it is invisible;
+    // the Vue-grammar scanner reads the whole tag and sees the attribute change.
+    const link = 'Use <a title="x>y">link</a> now.\n'
+    const linked = createSkeleton(link, [
+      hole('slides:s1:body/p-1', 0, link.length - 1, link.trimEnd()),
+    ])
+    expect(() =>
+      composeSkeleton(linked, { 'slides:s1:body/p-1': 'Nutze <a title="x>z">Link</a> jetzt.' }),
+    ).toThrow(/markup/)
+  })
+
+  it('counts markup across the edge of a prop hole, where only the raw landing count sees it', () => {
+    const tag = '<X a="<AB" />\n'
+    const prop = createSkeleton(tag, [
+      hole('slides:s1:body/x.1/prop:a', 7, 9, 'AB', {
+        kind: 'html-attribute',
+        quote: '"',
+        context: 'body',
+      }),
+    ])
+    expect(() => composeSkeleton(prop, { 'slides:s1:body/x.1/prop:a': ' CD' })).toThrow(/markup/)
+  })
+
+  it('counts a live brace pair formed with a reference in the skeleton next to the hole', () => {
+    // Raw bytes hold no `{{` before or after; decoded, `&#123;{AB` holds one and the
+    // translation removes it. Only the decoded landing count sees that.
+    const source = 'Tick &#123;{AB\n'
+    const glued = createSkeleton(source, [hole('slides:s1:body/p-1', 11, 14, '{AB')])
+    expect(() => composeSkeleton(glued, { 'slides:s1:body/p-1': 'CD' })).toThrow(/markup/)
+  })
+
+  it('refuses a character reference or escape that decodes to a live brace or dollar', () => {
+    // markdown-it decodes these in prose before Vue sees the HTML, so `&#123;&#123;` becomes
+    // a live `{{ }}` interpolation in the rendered slide (verified with markdown-exit).
+    for (const hidden of [
+      '&#123;&#123; alert(1) &#125;&#125;',
+      '&lbrace;&lbrace;x&rbrace;&rbrace;',
+      '&#x7b;&#x7B;x&#x7d;&#x7D;',
+      '&lcub;&lcub;x&rcub;&rcub;',
+      '\\{\\{ x \\}\\}',
+      '&#123&#123 x &#125&#125',
+      '&#0123;&#0123;x&#0125;&#0125;',
+      '&dollar;x&dollar;',
+      '&#36;x&#36;',
+    ]) {
+      expect(
+        reasonOf(
+          `Nutze ${hidden} <span class="kw-muted">das</span> {{ $slidev.nav.currentPage }}.`,
+        ),
+        hidden,
+      ).toBe('markup-changed')
+    }
+  })
+
+  it('refuses a brace or a dollar the English does not have, even alone', () => {
+    // `{1}{onVnodeMounted: …}` after a `$$` line is a KaTeX block's v-bind; no `{{` needed.
+    const tail = ' <span class="kw-muted">das</span> {{ $slidev.nav.currentPage }}.'
+    for (const added of ['{x}', 'a } b', '$x$', '\\$x']) {
+      expect(reasonOf(`Nutze ${added}${tail}`), added).toBe('markup-changed')
+    }
   })
 
   it('judges a multi-line tag against the English as written, not as re-indented', () => {

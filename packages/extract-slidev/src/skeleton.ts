@@ -136,6 +136,7 @@ export type ReplacementRejection =
   | 'markup-changed'
   | 'blank-line'
   | 'attribute-line-break'
+  | 'block-syntax'
 
 /** One refused replacement. */
 export interface CompositionIssue {
@@ -312,6 +313,45 @@ function spliceContextOf(source: string, hole: Hole): SpliceContext {
   }
 }
 
+/** A line Slidev reads as a snippet import or a KaTeX block, at any indentation. */
+const BLOCK_SYNTAX_LINE = /^\s*(?:<<<|\$\$)/
+
+/** Named references that decode to a character the renderer would not re-escape. */
+const LIVE_NAMED_REFERENCES: Readonly<Record<string, string>> = {
+  lbrace: '{',
+  lcub: '{',
+  rbrace: '}',
+  rcub: '}',
+  dollar: '$',
+}
+
+/** Characters that stay live when a reference or escape decodes to them. */
+const LIVE_CHARACTERS = new Set(['{', '}', '$'])
+
+/**
+ * `text` with every character reference and backslash escape that decodes to `{`, `}`
+ * or `$` decoded, the way markdown-it decodes them in prose — generously: the trailing
+ * `;` is optional and names match without case, so this reads more as live than the
+ * renderer does, never less. `<` and `>` are left encoded on purpose: markdown-it
+ * re-escapes them in its output, and inside a raw HTML block Vue decodes references only
+ * after it has found the tags and interpolations, so neither can become markup.
+ */
+export function decodeLiveCharacters(text: string): string {
+  return text
+    .replace(/&#([xX][0-9a-fA-F]+|[0-9]+);?/g, (match, digits: string) => {
+      const code =
+        digits[0] === 'x' || digits[0] === 'X'
+          ? Number.parseInt(digits.slice(1), 16)
+          : Number.parseInt(digits, 10)
+      const character = code <= 0x10ffff ? String.fromCodePoint(code) : ''
+      return LIVE_CHARACTERS.has(character) ? character : match
+    })
+    .replace(/&([A-Za-z]+);?/g, (match, name: string) => {
+      return LIVE_NAMED_REFERENCES[name.toLowerCase()] ?? match
+    })
+    .replace(/\\([{}$])/g, '$1')
+}
+
 /** True when `a` and `b` hold the same strings the same number of times. */
 function sameMultiset(a: readonly string[], b: readonly string[]): boolean {
   if (a.length !== b.length) return false
@@ -413,11 +453,45 @@ function rejectReplacement(
   // changes the text of the tag around it.)
   const english = hole.source.replace(/\r\n/g, '\n')
   const translated = translation.replace(/\r\n/g, '\n')
+  // Slidev block syntax the checks below do not model — a snippet import (`<<< @/.env`)
+  // or a KaTeX block (`$$ {1}{…}`, a live `v-bind`) — is judged by line: a translation
+  // may not produce one the landing lines do not already hold.
+  if (hole.encoding.kind !== 'html-attribute') {
+    const existing = new Set(splitLines(current).map((line) => line.trim()))
+    const added = splitLines(composed).find(
+      (line) => BLOCK_SYNTAX_LINE.test(line) && !existing.has(line.trim()),
+    )
+    if (added !== undefined) {
+      return reject(
+        'block-syntax',
+        `translation starts a line with Slidev block syntax (${JSON.stringify(added.trim().slice(0, 3))}), which imports a file or binds code — keep "<<<" and "$$" out of the start of a line`,
+      )
+    }
+  }
   const unnested = isWellNested(english) && !isWellNested(translated)
+  // In prose the markdown renderer decodes character references and backslash escapes
+  // before Vue compiles the HTML it emits, so `&#123;&#123;` is a live `{{` there. The
+  // markup counts are therefore also taken over the decoded text, and no brace or `$`
+  // may be added at all: `{1}{…}` binds options without any `{{`, and `$` opens math.
+  // A prop value is a static string to Vue, so it is judged on its bytes alone.
+  //
+  // Each check below catches something the others do not: the token multiset a changed
+  // token (`<3` → `<4`); the raw landing count a switch between a reference and the live
+  // character it stands for, and a `<` glued to the skeleton; the decoded landing count
+  // a live brace pair formed with a reference in the skeleton next to the hole.
+  const decodes = hole.encoding.kind !== 'html-attribute'
+  const decodedEnglish = decodes ? decodeLiveCharacters(english) : english
+  const decodedTranslation = decodes ? decodeLiveCharacters(translated) : translated
+  const grows = (character: string): boolean =>
+    countOccurrences(decodedTranslation, character) > countOccurrences(decodedEnglish, character)
   if (
     unnested ||
-    !sameMultiset(coarseMarkup(translated), coarseMarkup(english)) ||
+    !sameMultiset(coarseMarkup(decodedTranslation), coarseMarkup(decodedEnglish)) ||
     coarseMarkup(composed).length !== coarseMarkup(current).length ||
+    (decodes &&
+      coarseMarkup(decodeLiveCharacters(composed)).length !==
+        coarseMarkup(decodeLiveCharacters(current)).length) ||
+    (decodes && (grows('{') || grows('}') || grows('$'))) ||
     !sameMultiset(markupTokens(translated), markupTokens(english))
   ) {
     return reject(
