@@ -168,6 +168,34 @@ describe('discoverSurfaceFiles — hostile globs', () => {
     expect(fs.writes).toEqual([])
   })
 
+  it.each([
+    ["'.git/config'", '.git'],
+    ["'{labs,.git}/**/*'", '.git'],
+    ["'vendor/theme/.git/config'", '.git'],
+    ["'node_modules/pkg/README.md'", 'node_modules'],
+    ["'labs/node_modules/**/*.md'", 'node_modules'],
+  ])(
+    'refuses an include glob %s that starts inside a tree the walk never enters',
+    (glob, skipped) => {
+      const gitConfig = '[core]\n\tbare = false\n'
+      const fs = new MemoryFileSystem({
+        '/repo/.localization/workshop.yaml': MANIFEST.replace("'labs/**/*.md'", glob),
+        '/repo/.git/config': gitConfig,
+        '/repo/vendor/theme/.git/config': gitConfig,
+        '/repo/node_modules/pkg/README.md': '# Package\n',
+        '/repo/labs/node_modules/dep/x.md': '# Dep\n',
+        '/repo/labs/a.md': '# Lab\n',
+        '/repo/pages/S05-pod/index.md': '',
+        '/repo/quiz/questions.json': '{}',
+      })
+      const result = invoke(fs, ['init-ids'])
+      expect(result.code).toBe(EXIT.DATA)
+      expect(result.stderr).toContain(`surfaces.labs.include[0] reaches into ${skipped}/`)
+      expect(fs.writes).toEqual([])
+      expect(fs.text('/repo/.git/config')).toBe(gitConfig)
+    },
+  )
+
   it('names the manifest entry of a glob it refuses', () => {
     const fs = new MemoryFileSystem({
       '/repo/.localization/workshop.yaml': MANIFEST.replace("'labs/README.md'", "'labs/{a'"),

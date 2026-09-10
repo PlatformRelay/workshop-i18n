@@ -44,11 +44,15 @@ bytes as written, 64 alternatives and 2048 bytes once its braces are expanded, a
 any alternative — so testing a path costs a small constant times its length, and a hostile glob in
 a pull request cannot stall CI. A glob over a bound is refused (exit 65, naming the manifest
 entry). Repeated alternatives and runs of `**` are merged before counting, since they cannot change
-what a glob matches. The walk starts at each glob's literal
-base, never follows a symlink (a symlinked source is skipped with a warning; a symlinked glob base,
-catalog or `i18n/` directory is an error), and never enters `.git/`, `node_modules/`, or the tool's
-own `i18n/` and `.localization/` trees — so a broad `**/*.md` cannot extract a locale's overrides
-as English, and an include glob based inside either tree (`i18n/**/*.md`) is refused outright. A glob that matches nothing is warned about; a file two surfaces both claim is an error.
+what a glob matches.
+
+The walk starts at each glob's literal base, never follows a symlink (a symlinked source is skipped
+with a warning; a symlinked glob base, catalog or `i18n/` directory is an error), and never enters
+`.git/`, `node_modules/`, or the tool's own `i18n/` and `.localization/` trees — so a broad
+`**/*.md` cannot extract a locale's overrides as English. An include glob whose literal base lies
+inside any of these trees (`i18n/**/*.md`, `.git/config`, `labs/node_modules/**`) is refused
+outright (exit 65), since it would walk it directly. A glob that matches nothing is warned about; a
+file two surfaces both claim is an error.
 
 ## Commands
 

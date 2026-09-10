@@ -12,7 +12,7 @@
  *   `i18n/` and `.localization/`: an override under `i18n/<locale>/overrides/` is
  *   translated content, and extracting it as English would be a silent disaster that a
  *   broad `**\/*.md` glob would otherwise walk straight into — and an include glob whose
- *   base lies inside either tree is refused, since it would walk it directly;
+ *   base lies inside any of these trees is refused, since it would walk it directly;
  * - output is sorted by path, so everything downstream is deterministic.
  */
 
@@ -79,6 +79,34 @@ export function walkFiles(
   return { files, links }
 }
 
+/**
+ * Refuse an include glob whose literal base lies inside a tree the walk never enters.
+ * The walk only skips names it meets on the way, so a base spelled straight into one of
+ * these trees would otherwise be walked — and written: `init-ids` once put a `labId`
+ * marker into `.git/config` that way.
+ *
+ * @throws {CliError} (`DATA`) naming the manifest entry and the offending directory.
+ */
+function assertWalkableBase(base: string, entry: string): void {
+  const segments = base === '' ? [] : base.split('/')
+  const first = segments[0] ?? ''
+  if (RESERVED_ROOT_DIRECTORIES.has(first)) {
+    // The root walk skips these trees, but a glob based inside one would walk it
+    // directly — and extract a locale's overrides as English.
+    throw new CliError(
+      EXIT.DATA,
+      `${entry} reaches into ${first}/, which belongs to workshop-i18n (catalogs, overrides, the manifest) and is never English source`,
+    )
+  }
+  const skipped = segments.find((segment) => SKIPPED_ANYWHERE.has(segment))
+  if (skipped !== undefined) {
+    throw new CliError(
+      EXIT.DATA,
+      `${entry} reaches into ${skipped}/, which holds version-control or dependency files that workshop-i18n never reads or writes`,
+    )
+  }
+}
+
 /** Compile a manifest glob, turning a refusal into an error naming the manifest entry. */
 function compileManifestGlob(pattern: string, entry: string): Glob {
   try {
@@ -115,17 +143,7 @@ export function discoverSurfaceFiles(workspace: Workspace): Discovery {
     spec.include.forEach((pattern, index) => {
       const entry = `surfaces.${spec.surface}.include[${index}]`
       const matcher = compileManifestGlob(pattern, entry)
-      for (const base of matcher.bases) {
-        const first = base.split('/')[0] ?? ''
-        if (RESERVED_ROOT_DIRECTORIES.has(first)) {
-          // The root walk skips these trees, but a glob based inside one would walk it
-          // directly — and extract a locale's overrides as English.
-          throw new CliError(
-            EXIT.DATA,
-            `${entry} reaches into ${first}/, which belongs to workshop-i18n (catalogs, overrides, the manifest) and is never English source`,
-          )
-        }
-      }
+      for (const base of matcher.bases) assertWalkableBase(base, entry)
       let matched = 0
       for (const base of matcher.bases) {
         const { files, links } = walkFiles(workspace, base)
