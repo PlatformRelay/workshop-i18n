@@ -18,7 +18,10 @@
  * renderer is trusted to *clear* a translation, because every such model tried so far was
  * narrower than markdown-it plus Slidev plus Vue. Context — where code spans are — is
  * consulted only to add refusals (an interpolation moved out of a code span into prose),
- * never to remove one.
+ * never to remove one. `test/slidev-build.smoke.test.ts` checks the rules against a real
+ * `slidev build` when `WORKSHOP_I18N_SLIDEV_SMOKE` names a directory with a Slidev
+ * install: every hostile case that has ever been live must be refused, or build exactly
+ * like its English.
  *
  * Two tiers:
  *
