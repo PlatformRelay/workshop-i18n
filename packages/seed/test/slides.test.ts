@@ -239,6 +239,15 @@ describe('alignSlides', () => {
     ).toThrow(SeedInputError)
   })
 
+  it('aligns a CRLF translation of an LF deck without carrying carriage returns into drafts', () => {
+    const multiline = EN.replace('A Pod is small.', 'A Pod is\nsmall.')
+    const crlf = PT.replace('Um Pod é pequeno.', 'Um Pod é\npequeno.').replaceAll('\n', '\r\n')
+    const section = only(alignSlides([file('S05.md', multiline)], [file('S05.md', crlf)]).sections)
+    expect(section.misses).toEqual([])
+    expect(section.drafts.map((draft) => draft.translation)).toContain('Um Pod é\npequeno.')
+    expect(section.drafts.some((draft) => draft.translation.includes('\r'))).toBe(false)
+  })
+
   it('is deterministic and independent of input order', () => {
     const second = EN.replaceAll('s05-', 's06-')
     const a = alignSlides(
