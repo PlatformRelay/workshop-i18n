@@ -114,36 +114,39 @@ function normalize(text: string): string {
   return text.replace(CHARACTER_REFERENCE, decodeReference).replace(ESCAPABLE, '$1')
 }
 
-/** Inline code spans: a backtick run closed by a run of exactly the same length. */
+/**
+ * Inline code spans: a backtick run closed by the next run of exactly the same length.
+ *
+ * Linear by construction: every run is found in one pass, and each run's closer is
+ * precomputed by walking the runs backwards. Searching forward from each opener instead
+ * costs a rescan per unmatched run, which a crafted msgstr of runs of many lengths turns
+ * into a stall.
+ */
 function codeSpans(text: string): readonly string[] {
+  const runs: { readonly start: number; readonly end: number }[] = []
+  for (const match of text.matchAll(/`+/g)) {
+    runs.push({ start: match.index, end: match.index + match[0].length })
+  }
+  const closer: (number | undefined)[] = new Array(runs.length)
+  const nextOfLength = new Map<number, number>()
+  for (let index = runs.length - 1; index >= 0; index -= 1) {
+    const run = runs[index] as { start: number; end: number }
+    const length = run.end - run.start
+    closer[index] = nextOfLength.get(length)
+    nextOfLength.set(length, index)
+  }
   const spans: string[] = []
   let index = 0
-  while (index < text.length) {
-    const open = text.indexOf('`', index)
-    if (open === -1) break
-    let runEnd = open
-    while (text.charAt(runEnd) === '`') runEnd += 1
-    const run = runEnd - open
-    // Look for a closing run of exactly `run` backticks.
-    let search = runEnd
-    let close = -1
-    while (search < text.length) {
-      const next = text.indexOf('`', search)
-      if (next === -1) break
-      let nextEnd = next
-      while (text.charAt(nextEnd) === '`') nextEnd += 1
-      if (nextEnd - next === run) {
-        close = nextEnd
-        break
-      }
-      search = nextEnd
-    }
-    if (close === -1) {
-      index = runEnd
+  while (index < runs.length) {
+    const close = closer[index]
+    if (close === undefined) {
+      index += 1
       continue
     }
-    spans.push(text.slice(open, close))
-    index = close
+    spans.push(
+      text.slice((runs[index] as { start: number }).start, (runs[close] as { end: number }).end),
+    )
+    index = close + 1
   }
   return spans
 }
@@ -209,12 +212,20 @@ function angleTokens(text: string): { tags: string[]; autolinks: string[] } {
 
 /** `{{ … }}` expressions, plus any `{{` or `}}` left unbalanced after pairing them. */
 function mustacheTokens(text: string): { tokens: string[]; rest: string } {
+  // A scan rather than `/\{\{[\s\S]*?\}\}/g`: the lazy regex retries from every `{{` to
+  // the end of the text when none closes, which is quadratic on a crafted msgstr.
   const tokens: string[] = []
-  const rest = text.replace(/\{\{[\s\S]*?\}\}/g, (match) => {
-    tokens.push(match)
-    return ' '
-  })
-  const residual = rest.replace(/\{\{|\}\}/g, (match) => {
+  let rest = ''
+  let index = 0
+  for (;;) {
+    const open = text.indexOf('{{', index)
+    const close = open === -1 ? -1 : text.indexOf('}}', open + 2)
+    if (close === -1) break
+    rest += `${text.slice(index, open)} `
+    tokens.push(text.slice(open, close + 2))
+    index = close + 2
+  }
+  const residual = (rest + text.slice(index)).replace(/\{\{|\}\}/g, (match) => {
     tokens.push(match)
     return ' '
   })
@@ -236,12 +247,14 @@ function linkDestinations(text: string): readonly string[] {
     let cursor = open + 2
     while (text.charAt(cursor) === ' ' || text.charAt(cursor) === '\t') cursor += 1
     let destination = ''
+    let end: number
     if (text.charAt(cursor) === '<') {
       const close = text.indexOf('>', cursor)
-      destination = close === -1 ? text.slice(cursor + 1) : text.slice(cursor + 1, close)
+      end = close === -1 ? text.length : close
+      destination = text.slice(cursor + 1, end)
     } else {
       let depth = 0
-      let end = cursor
+      end = cursor
       while (end < text.length) {
         const character = text.charAt(end)
         if (/\s/.test(character)) break
@@ -255,7 +268,10 @@ function linkDestinations(text: string): readonly string[] {
       destination = text.slice(cursor, end)
     }
     if (destination !== '') found.push(destination)
-    index = open + 2
+    // Resume after the destination, not inside it: a `](` within a destination is part
+    // of that one link to a renderer too, and rescanning from each one is quadratic on a
+    // crafted `](x](x…`.
+    index = Math.max(open + 2, end)
   }
   return found
 }

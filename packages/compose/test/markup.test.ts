@@ -59,6 +59,23 @@ describe('markupTokens', () => {
     ])
   })
 
+  // A catalog is hostile input, and a gate that goes quadratic on a crafted msgstr is a
+  // way to stall every compose and verify run. Each shape below defeated a naive scan.
+  it.each([
+    [
+      'backtick runs of every length',
+      Array.from({ length: 600 }, (_, i) => '`'.repeat(i + 1)).join('a'),
+    ],
+    ['unclosed mustache openers', '{{ '.repeat(70_000)],
+    ['link destinations that never end', '](x'.repeat(70_000)],
+    ['angle brackets', '<'.repeat(200_000)],
+    ['unclosed tags', '<a '.repeat(70_000)],
+  ])('stays linear on %s', (_label, text) => {
+    const started = performance.now()
+    markupTokens(text)
+    expect(performance.now() - started).toBeLessThan(1_000)
+  })
+
   it('is empty for plain prose', () => {
     expect(markupTokens('Ein Pod ist die kleinste Einheit — 100 % „sicher“.')).toEqual([])
   })
