@@ -37,7 +37,7 @@ import { fileURLToPath } from 'node:url'
 import { formatUnitId } from '@workshop-i18n/core'
 import { describe, expect, it } from 'vitest'
 import { findSpeakerNote, parseSlidevDeck } from '../src/deck.js'
-import { extractSlidevFile } from '../src/extract.js'
+import { extractSlidevFile, type SlidevExtractOptions } from '../src/extract.js'
 import { planSlideIds } from '../src/init-ids.js'
 import { CompositionError, composeSkeleton, type Hole, type Skeleton } from '../src/skeleton.js'
 import { decodeSource } from '../src/source.js'
@@ -174,6 +174,11 @@ const DOCUMENTED_DIVERGENCES = new Map<
 
 const CORPUS = [...loadFixtures('corpus-k8s'), ...loadFixtures('adversarial')]
 
+/** The component text props the deck would declare (ADR 0015), kept in step with corpus.test.ts. */
+const CORPUS_OPTIONS: SlidevExtractOptions = {
+  componentTextProps: { KwCard: ['heading'], CodeNote: ['label'] },
+}
+
 /**
  * Translator text that would restructure a deck if composition let it through.
  *
@@ -216,6 +221,13 @@ function markupOf(text: string): readonly string[] {
   return [...text.matchAll(pattern)].map((match) => match[0]).sort()
 }
 
+/** The same markup in document order — what a translator carries across, tags still nested. */
+function markupInOrder(text: string): readonly string[] {
+  const pattern =
+    /<\/?[A-Za-z][A-Za-z0-9-]*(?=[\s/>])(?:[^<>"']|"[^"]*"|'[^']*')*>|\{\{[\s\S]*?\}\}/g
+  return [...text.matchAll(pattern)].map((match) => match[0])
+}
+
 /**
  * True when replacing this hole's whole text with `payload` *must* be refused.
  *
@@ -225,12 +237,16 @@ function markupOf(text: string): readonly string[] {
  * by one hand-written test each. This says which pairs have no second option.
  */
 function mustBeRefused(hole: Hole, payload: string): boolean {
-  if (hole.encoding.kind !== 'markdown') return false
+  if (hole.encoding.kind === 'yaml-scalar') return false
   const count = (text: string, token: string): number => text.split(token).length - 1
   for (const token of ['<!--', '-->']) {
     if (count(payload, token) !== count(hole.source, token)) return true
   }
+  if (hole.encoding.kind === 'html-attribute') return /[\r\n]/.test(payload)
   if (markupOf(payload).join('\n') !== markupOf(hole.source).join('\n')) return true
+  if (hole.encoding.kind === 'html-text') {
+    return payload.split(/\r?\n/).some((line) => line.trim() === '')
+  }
   const barePipes = (text: string): number => count(text.replace(/\\\|/g, ''), '|')
   return hole.encoding.cell && barePipes(payload) > barePipes(hole.source)
 }
@@ -263,7 +279,7 @@ function markerFor(source: string, index: number): string {
   const count = (token: string): number => source.split(token).length - 1
   return [
     `de-${index}`,
-    ...markupOf(source),
+    ...markupInOrder(source),
     ...Array.from({ length: count('<!--') }, () => '<!--'),
     ...Array.from({ length: count('-->') }, () => '-->'),
   ].join(' ')
@@ -389,7 +405,7 @@ describe.skipIf(parseSync === undefined)('slide splitting agrees with @slidev/pa
         divergence === undefined ? sample.source : divergence.normalize(sample.source),
         { sectionId: sample.name },
       ).text
-      const extraction = extractSlidevFile(adopted)
+      const extraction = extractSlidevFile(adopted, CORPUS_OPTIONS)
       const translations = Object.fromEntries(
         extraction.units.map((unit, index) => [
           formatUnitId(unit.id),
@@ -412,7 +428,7 @@ describe.skipIf(parseSync === undefined)('slide splitting agrees with @slidev/pa
           divergence === undefined ? sample.source : divergence.normalize(sample.source),
           { sectionId: sample.name },
         ).text
-        const extraction = extractSlidevFile(adopted)
+        const extraction = extractSlidevFile(adopted, CORPUS_OPTIONS)
         if (extraction.units.length === 0) continue
         const baseline = structureOf(parse, adopted)
         // One hole at a time, one per splice context. Translating everything at once let a

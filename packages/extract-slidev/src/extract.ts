@@ -21,6 +21,8 @@
  */
 
 import {
+  type ComponentTextProps,
+  componentNameKey,
   formatUnitId,
   type TranslationUnit,
   type UnitId,
@@ -33,6 +35,7 @@ import {
   type FrontmatterField,
   locateFrontmatter,
 } from './frontmatter.js'
+import type { TextPropTable } from './html.js'
 import { locateProse, type ProseSpan } from './prose.js'
 import {
   createSkeleton,
@@ -51,6 +54,28 @@ export interface SlidevExtractOptions {
    * own list rather than having the tool guess from key names.
    */
   readonly frontmatterTextKeys?: readonly string[]
+  /**
+   * Which static props of which components carry translatable text — the manifest's
+   * `surfaces.slides.componentTextProps` (ADR 0015). Defaults to
+   * {@link DEFAULT_COMPONENT_TEXT_PROPS}, which declares none: a prop is machinery until
+   * the consumer says otherwise.
+   */
+  readonly componentTextProps?: ComponentTextProps
+}
+
+/** No component prop is text unless declared (ADR 0015). */
+export const DEFAULT_COMPONENT_TEXT_PROPS: ComponentTextProps = Object.freeze({})
+
+/** Fold a declaration onto the names Vue resolves, so every spelling of a tag matches. */
+function textPropTable(declared: ComponentTextProps): TextPropTable {
+  const table = new Map<string, Set<string>>()
+  for (const [component, props] of Object.entries(declared)) {
+    const key = componentNameKey(component)
+    const set = table.get(key) ?? new Set<string>()
+    for (const prop of props) set.add(componentNameKey(prop))
+    table.set(key, set)
+  }
+  return table
 }
 
 /** One slide that produced units, with the identity it carries in the source. */
@@ -118,6 +143,7 @@ function encodingOf(span: ProseSpan, context: HoleContext): Hole['encoding'] {
   if (span.kind === 'html-text') {
     return { kind: 'html-text', continuationPrefix: span.continuationPrefix, context }
   }
+  if (span.kind === 'html-attribute') return { kind: 'html-attribute', quote: span.quote, context }
   return { kind: 'markdown', continuationPrefix: span.continuationPrefix, context, cell: span.cell }
 }
 
@@ -177,6 +203,7 @@ export function locateSlidevFile(
   options: SlidevExtractOptions = {},
 ): SlidevExtraction {
   const textKeys = new Set(options.frontmatterTextKeys ?? DEFAULT_FRONTMATTER_TEXT_KEYS)
+  const textProps = textPropTable(options.componentTextProps ?? DEFAULT_COMPONENT_TEXT_PROPS)
   const deck = parseSlidevDeck(source)
   const diagnostics: Diagnostic[] = [...deck.diagnostics]
   const holes: Hole[] = []
@@ -227,7 +254,12 @@ export function locateSlidevFile(
 
     const note = findSpeakerNote(source, slide.bodyStart, slide.bodyEnd)
     const bodyEnd = note?.start ?? slide.bodyEnd
-    const body = locateProse(source, { start: slide.bodyStart, end: bodyEnd, root: 'body' })
+    const body = locateProse(source, {
+      start: slide.bodyStart,
+      end: bodyEnd,
+      root: 'body',
+      textProps,
+    })
     diagnostics.push(...body.diagnostics)
     holes.push(...proseHoles(source, diagnostics, slideId, body.spans, 'body'))
 
@@ -236,6 +268,7 @@ export function locateSlidevFile(
         start: note.innerStart,
         end: note.innerEnd,
         root: 'note',
+        textProps,
       })
       diagnostics.push(...noteProse.diagnostics)
       holes.push(...proseHoles(source, diagnostics, slideId, noteProse.spans, 'note'))

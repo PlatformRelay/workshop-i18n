@@ -24,6 +24,7 @@ export {
   hasErrors,
 } from './diagnostic.js'
 export {
+  DEFAULT_COMPONENT_TEXT_PROPS,
   type ExtractedSlide,
   extractSlidevFile,
   locateSlidevFile,

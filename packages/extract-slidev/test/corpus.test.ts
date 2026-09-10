@@ -17,7 +17,12 @@ import { describe, expect, it } from 'vitest'
 import { parse as parseYaml } from 'yaml'
 import { parseSlidevDeck } from '../src/deck.js'
 import type { DiagnosticCode } from '../src/diagnostic.js'
-import { extractSlidevFile, locateSlidevFile, SlidevExtractionError } from '../src/extract.js'
+import {
+  extractSlidevFile,
+  locateSlidevFile,
+  SlidevExtractionError,
+  type SlidevExtractOptions,
+} from '../src/extract.js'
 import { locateFrontmatter } from '../src/frontmatter.js'
 import { planSlideIds, type SlideIdPlan } from '../src/init-ids.js'
 import { CompositionError, composeSkeleton, type Hole, type Skeleton } from '../src/skeleton.js'
@@ -50,6 +55,14 @@ function load(directory: string): readonly Fixture[] {
 
 /** Every fixture that must round-trip. */
 const CORPUS: readonly Fixture[] = [...load('corpus-k8s'), ...load('adversarial')]
+
+/**
+ * The component text props the Kubernetes-Workshop deck would declare (ADR 0015), so the
+ * properties below run over prop holes too, not only over what the default extracts.
+ */
+const CORPUS_OPTIONS: SlidevExtractOptions = {
+  componentTextProps: { KwCard: ['heading'], CodeNote: ['label'] },
+}
 
 /** Fixtures that must be refused, and the diagnostic each must raise. */
 const REJECTED: readonly (readonly [string, DiagnosticCode])[] = [
@@ -177,6 +190,13 @@ function markupOf(text: string): readonly string[] {
   return [...text.matchAll(pattern)].map((match) => match[0]).sort()
 }
 
+/** The same markup in document order — what a translator carries across, tags still nested. */
+function markupInOrder(text: string): readonly string[] {
+  const pattern =
+    /<\/?[A-Za-z][A-Za-z0-9-]*(?=[\s/>])(?:[^<>"']|"[^"]*"|'[^']*')*>|\{\{[\s\S]*?\}\}/g
+  return [...text.matchAll(pattern)].map((match) => match[0])
+}
+
 /**
  * True when replacing this hole's whole text with `payload` *must* be refused.
  *
@@ -186,13 +206,16 @@ function markupOf(text: string): readonly string[] {
  * by one hand-written test each. This says which pairs have no second option.
  */
 function mustBeRefused(hole: Hole, payload: string): boolean {
-  if (hole.encoding.kind !== 'markdown' && hole.encoding.kind !== 'html-text') return false
+  if (hole.encoding.kind === 'yaml-scalar') return false
   const count = (text: string, token: string): number => text.split(token).length - 1
   for (const token of ['<!--', '-->']) {
     if (count(payload, token) !== count(hole.source, token)) return true
   }
+  if (hole.encoding.kind === 'html-attribute') return /[\r\n]/.test(payload)
   if (markupOf(payload).join('\n') !== markupOf(hole.source).join('\n')) return true
-  if (hole.encoding.kind === 'html-text') return /\n[ \t]*(?:\n|$)/.test(payload)
+  if (hole.encoding.kind === 'html-text') {
+    return payload.split(/\r?\n/).some((line) => line.trim() === '')
+  }
   const barePipes = (text: string): number => count(text.replace(/\\\|/g, ''), '|')
   return hole.encoding.cell && barePipes(payload) > barePipes(hole.source)
 }
@@ -288,7 +311,7 @@ function markerFor(source: string, index: number): string {
   const count = (token: string): number => source.split(token).length - 1
   return [
     `de-${index}`,
-    ...markupOf(source),
+    ...markupInOrder(source),
     ...Array.from({ length: count('<!--') }, () => '<!--'),
     ...Array.from({ length: count('-->') }, () => '-->'),
   ].join(' ')
@@ -309,14 +332,14 @@ function structureOf(text: string): unknown {
 }
 
 function idsOf(text: string): readonly string[] {
-  return extractSlidevFile(text).units.map((unit) => formatUnitId(unit.id))
+  return extractSlidevFile(text, CORPUS_OPTIONS).units.map((unit) => formatUnitId(unit.id))
 }
 
 describe.each(CORPUS.map((fixture) => [fixture.name, fixture] as const))(
   'round-trip properties over %s',
   (_name, fixture) => {
     const adopted = adopt(fixture)
-    const extraction = extractSlidevFile(adopted)
+    const extraction = extractSlidevFile(adopted, CORPUS_OPTIONS)
 
     // Group 1 — losslessness.
     it('decodes and re-encodes without losing a byte', () => {
@@ -383,6 +406,20 @@ describe.each(CORPUS.map((fixture) => [fixture.name, fixture] as const))(
       expect(structureOf(composed)).toEqual(structureOf(adopted))
     })
 
+    it('keys the translated deck exactly as the English one', () => {
+      // Structure inside a slide — slot scopes, HTML element paths, prop keys — must not
+      // move either: re-extracting a fully translated locale gives back every identity.
+      // A quote in every translation reaches prop holes, where it must be escaped.
+      const translations = Object.fromEntries(
+        extraction.units.map((unit, index) => [
+          formatUnitId(unit.id),
+          `${markerFor(unit.source, index)} "quoted" 'too'`,
+        ]),
+      )
+      const composed = composeSkeleton(extraction.skeleton, translations)
+      expect(idsOf(composed)).toEqual(idsOf(adopted))
+    })
+
     it('either refuses hostile translator text or leaves the structure untouched', () => {
       const baseline = structureOf(adopted)
       const baselineLines = structuralLines(adopted)
@@ -420,8 +457,16 @@ describe.each(CORPUS.map((fixture) => [fixture.name, fixture] as const))(
 
     it('hands a translator prose from an HTML block, never its machinery (ADR 0015)', () => {
       for (const hole of extraction.skeleton.holes) {
-        if (hole.encoding.kind !== 'html-text') continue
         const where = formatUnitId(hole.id)
+        if (hole.encoding.kind === 'html-attribute') {
+          // Only a declared prop, and only one that holds words.
+          expect(hole.id.unitKey, where).toMatch(
+            /\/(?:kw-card\.\d+\/prop:heading|code-note\.\d+\/prop:label)$/,
+          )
+          expect(hole.source, where).toMatch(/\p{L}/u)
+          continue
+        }
+        if (hole.encoding.kind !== 'html-text') continue
         for (const tag of markupOf(hole.source).filter((token) => token.startsWith('<'))) {
           expect(tag, where).toMatch(PHRASING_TAG)
           expect(tag, where).not.toMatch(/\s(?:v-[\w-]+|:[\w-]+|@[\w-]+|#[\w-]+)(?:=|[\s/>])/)
@@ -444,7 +489,7 @@ describe.each(CORPUS.map((fixture) => [fixture.name, fixture] as const))(
       const hole = extraction.skeleton.holes.find((item) => item.encoding.kind === 'markdown')
       if (hole === undefined) return
       const edited = `${adopted.slice(0, hole.end)} (edited)${adopted.slice(hole.end)}`
-      const after = extractSlidevFile(edited).units
+      const after = extractSlidevFile(edited, CORPUS_OPTIONS).units
       expect(after.map((unit) => formatUnitId(unit.id))).toEqual(
         extraction.units.map((unit) => formatUnitId(unit.id)),
       )
@@ -472,7 +517,9 @@ describe.each(CORPUS.map((fixture) => [fixture.name, fixture] as const))(
 
     // Group 4 — determinism.
     it('yields identical output for identical input (FR-006)', () => {
-      expect(extractSlidevFile(adopted)).toEqual(extractSlidevFile(adopted))
+      expect(extractSlidevFile(adopted, CORPUS_OPTIONS)).toEqual(
+        extractSlidevFile(adopted, CORPUS_OPTIONS),
+      )
       expect(planSlideIds(fixture.source, { sectionId: fixture.sectionId })).toEqual(
         planSlideIds(fixture.source, { sectionId: fixture.sectionId }),
       )
@@ -492,7 +539,7 @@ describe('the hostile corpus describes the corpus it claims to test', () => {
   it('is large enough to be worth running', () => {
     expect(CORPUS.length).toBeGreaterThanOrEqual(20)
     const units = CORPUS.reduce(
-      (total, fixture) => total + extractSlidevFile(adopt(fixture)).units.length,
+      (total, fixture) => total + extractSlidevFile(adopt(fixture), CORPUS_OPTIONS).units.length,
       0,
     )
     expect(units).toBeGreaterThan(500)
@@ -545,7 +592,7 @@ describe('the hostile corpus describes the corpus it claims to test', () => {
         /\p{L}/u.test((match[1] ?? '').replace(/<[^>]*>/g, '')),
       ).length
       const keyed = new Set<string>()
-      for (const unit of extractSlidevFile(adopted).units) {
+      for (const unit of extractSlidevFile(adopted, CORPUS_OPTIONS).units) {
         const card = /^(.*\/kw-card\.\d+)\//.exec(unit.id.unitKey)?.[1]
         if (card !== undefined) keyed.add(`${unit.id.containerId}:${card}`)
       }
