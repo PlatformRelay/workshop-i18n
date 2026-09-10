@@ -89,9 +89,25 @@ const CASES: readonly (readonly [string, string])[] = [
   ['Kubernetes schedules Pods.', 'O Kubernetes agenda Pods.\n\n::Toc\n::'],
   ['- See\n- the docs', '- Veja\n- ```plantuml\n@startuml\nA -> B\n@enduml'],
   ['See the docs.', 'Veja\n> ```mermaid\ngraph TD\nA --> B'],
+  // Every spelling the MDC block rule accepts, with the English funding the line breaks.
+  ['See\nthis\nnow\nplease.', 'Veja isto.\n:: Toc\n::'],
+  ['See\nthis\nnow\nplease.', 'Veja isto.\n:: toc\n::'],
+  ['See\nthis\nnow\nplease.', 'Veja isto.\n  ::   Toc\n::'],
+  ['See\nthis\nnow\nplease.', 'Veja isto.\n:::Toc\n:::'],
+  ['See\nthis\nnow\nplease.', 'Veja isto.\n::::Toc\n::::'],
+  ['See\nthis\nnow\nplease.', 'Veja isto.\n:1 texto'],
   // Benign controls: accepted, and must build exactly like their English.
   ['Press <kbd>Enter</kbd> now.', 'Pressione <kbd>Enter</kbd> agora.'],
   ['Render `{{ x }}` in a chart.', 'Renderize `{{ x }}` no chart.'],
+  ['Run `kubectl get pods` to **list** them.', 'Rode `kubectl get pods` para **listar** os Pods.'],
+  [
+    'See [the docs](https://kubernetes.io/docs) before you start.',
+    'Veja [a documentação](https://kubernetes.io/docs) antes de começar.',
+  ],
+  [
+    'Use <kbd>Ctrl</kbd>+<kbd>C</kbd> to stop, then\nrun it again.',
+    'Use <kbd>Ctrl</kbd>+<kbd>C</kbd> para parar e\nrode de novo.',
+  ],
 ]
 
 /** Translations seed must never accept, forced into the "teeth" deck to prove detection works. */
@@ -100,6 +116,7 @@ const KNOWN_LIVE: readonly string[] = [
   'O Kubernetes agenda Pods.\n$$ {1}{onVnodeMounted: () => seedSmokeProbe()}\nx\n$$',
   'O Kubernetes agenda {{ seedSmokeProbe() }} Pods.',
   'O Kubernetes agenda :Toc Pods.',
+  'Veja isto.\n:: toc\n::',
   'Imprima nomes com **kubectl**{onclick="seedSmokeProbe()"} hoje.',
 ]
 
@@ -220,6 +237,6 @@ describe.skipIf(INSTALL === undefined)('seed against a real slidev build', () =>
     // The claim: whatever seed accepted builds to the same live structure as the English.
     expect(Object.fromEntries(seededDeck)).toEqual(Object.fromEntries(englishDeck))
     // And the benign controls were in fact accepted, so the comparison is not vacuous.
-    expect(verdicts.filter((item) => item.accepted)).toHaveLength(2)
+    expect(verdicts.filter((item) => item.accepted)).toHaveLength(5)
   }, 900_000)
 })
