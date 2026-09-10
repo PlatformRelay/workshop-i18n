@@ -1,0 +1,96 @@
+{
+  "$schema": "./questions.schema.json",
+  "schemaVersion": 1,
+  "questions": [
+    {
+      "id": "S12-Q-RET-01",
+      "section": "S12",
+      "prompt": "O que um StatefulSet dá a cada réplica que um Deployment não dá?",
+      "options": [
+        { "id": "stable-id", "text": "Um nome ordinal estável, DNS estável e (com volumeClaimTemplates) sua própria PVC.", "rationale": "web-0, web-1, … mais storage e DNS por ordinal são o contrato do StatefulSet." },
+        { "id": "same-as-deploy", "text": "Nada — StatefulSet é só um novo nome para Deployment, por marketing.", "rationale": "As semânticas de identidade e de storage são diferentes." },
+        { "id": "shared-pvc", "text": "Uma única PVC compartilhada, na qual todas as réplicas precisam escrever no mesmo path simultaneamente por padrão.", "rationale": "volumeClaimTemplates cria uma PVC por ordinal, e não um disco compartilhado, a menos que você projete isso separadamente." }
+      ],
+      "answer": "stable-id",
+      "explanation": "A identidade do StatefulSet é ordinal: hostname, DNS e, em geral, uma claim dedicada por réplica.",
+      "difficulty": "introductory",
+      "learningObjective": "Enunciar o contrato de identidade estável de um StatefulSet.",
+      "references": ["https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/"]
+    },
+    {
+      "id": "S12-Q-SCN-01",
+      "section": "S12",
+      "prompt": "Os peers precisam resolver cada réplica como web-0.web, web-1.web, e não um único ClusterIP. Qual Service é necessário?",
+      "options": [
+        { "id": "headless", "text": "Um Service headless (clusterIP: None) que o StatefulSet referencia por serviceName.", "rationale": "Services headless publicam DNS por Pod em vez de um único IP virtual." },
+        { "id": "loadbalancer", "text": "Um Service LoadBalancer, porque DNS ordinal só existe atrás de um IP de nuvem.", "rationale": "DNS por Pod é um recurso do Service headless, independente de LoadBalancer." },
+        { "id": "no-service", "text": "Nenhum Service: o StatefulSet cria nomes de DNS apenas a partir do UID do Pod.", "rationale": "O nome do Service governante faz parte da spec do StatefulSet e do esquema de DNS." }
+      ],
+      "answer": "headless",
+      "explanation": "clusterIP: None junto com serviceName dá DNS estável por Pod para o conjunto.",
+      "difficulty": "intermediate",
+      "learningObjective": "Anexar um Service headless para que as réplicas do StatefulSet tenham DNS por Pod.",
+      "references": ["https://kubernetes.io/docs/concepts/services-networking/service/#headless-services"]
+    },
+    {
+      "id": "S19-Q-RET-01",
+      "section": "S19",
+      "prompt": "O RBAC concede uma permissão quando quais três peças são unidas por um binding?",
+      "options": [
+        { "id": "who-verb-resource", "text": "Um subject (quem), verbs e resources — vinculados a uma Role ou ClusterRole.", "rationale": "Role/ClusterRole lista verbs×resources; RoleBinding/ClusterRoleBinding anexa os subjects." },
+        { "id": "only-secret", "text": "Apenas um token em um Secret; bindings são metadados opcionais.", "rationale": "Um token autentica; a autorização ainda precisa de regras RBAC." },
+        { "id": "node-label", "text": "Um selector de label de node; RBAC é agendamento, não autorização.", "rationale": "Node selectors não são RBAC." }
+      ],
+      "answer": "who-verb-resource",
+      "explanation": "quem × verb × resource, amarrados por um binding. Roles de namespace ficam em um namespace; ClusterRoles têm escopo de cluster (ou são usadas via RoleBinding).",
+      "difficulty": "introductory",
+      "learningObjective": "Descrever o RBAC como subject, verb, resource e binding.",
+      "references": ["https://kubernetes.io/docs/reference/access-authn-authz/rbac/"]
+    },
+    {
+      "id": "S19-Q-SCN-01",
+      "section": "S19",
+      "prompt": "Você criou uma Role e uma ServiceAccount. Os workloads continuam recebendo Forbidden. Qual objeto está faltando?",
+      "options": [
+        { "id": "binding", "text": "Um RoleBinding (ou ClusterRoleBinding) que vincula a ServiceAccount como subject daquela Role.", "rationale": "Sem um binding, a Role fica sem uso." },
+        { "id": "new-user", "text": "Um objeto User do Kubernetes no etcd com o mesmo nome da ServiceAccount.", "rationale": "ServiceAccounts já são subjects da API; não existe um CR User separado para elas." },
+        { "id": "clusterrole-only", "text": "Você precisa converter a Role em uma ClusterRole, senão a API a ignora.", "rationale": "Roles com escopo de namespace são válidas; elas só precisam de um RoleBinding naquele namespace." }
+      ],
+      "answer": "binding",
+      "explanation": "Role + ServiceAccount + RoleBinding é o padrão de três objetos que o lab aplica. auth can-i / impersonation verifica isso.",
+      "difficulty": "intermediate",
+      "learningObjective": "Vincular uma Role a uma ServiceAccount antes de esperar que a autorização funcione.",
+      "references": ["https://kubernetes.io/docs/reference/access-authn-authz/rbac/#rolebinding-and-clusterrolebinding"]
+    },
+    {
+      "id": "S20-Q-RET-01",
+      "section": "S20",
+      "prompt": "Quais três arquivos formam um Helm chart mínimo, como ensinado aqui?",
+      "options": [
+        { "id": "chart-values-template", "text": "Chart.yaml, values.yaml e pelo menos um template (por exemplo, templates/deployment.yaml).", "rationale": "Metadados do chart, valores padrão e templates são o chart." },
+        { "id": "dockerfile-only", "text": "Apenas um Dockerfile; o Helm infere um chart a partir do nome da image.", "rationale": "O Helm empacota YAML do Kubernetes, não Dockerfiles." },
+        { "id": "crd-only", "text": "Apenas um CRD chamado HelmRelease; templates são opcionais.", "rationale": "HelmRelease é um CR do Flux (ou similar); um chart em si é o layout de três arquivos." }
+      ],
+      "answer": "chart-values-template",
+      "explanation": "Chart.yaml nomeia o chart, values.yaml fornece os padrões e os templates renderizam objetos do Kubernetes.",
+      "difficulty": "introductory",
+      "learningObjective": "Identificar os arquivos que constituem um Helm chart.",
+      "references": ["https://helm.sh/docs/topics/charts/"]
+    },
+    {
+      "id": "S20-Q-SCN-01",
+      "section": "S20",
+      "prompt": "Você quer ver o que um chart aplicaria sem contatar o cluster e, depois, validar contra a API sem instalar. Qual par corresponde a isso?",
+      "options": [
+        { "id": "template-dryrun", "text": "helm template (render local) e depois helm install/upgrade --dry-run=server (ou um dry-run equivalente de client/server) para validar.", "rationale": "template nunca precisa de um cluster; o dry-run de server conversa com a API sem persistir um release." },
+        { "id": "uninstall-first", "text": "helm uninstall --keep-history é o único preview seguro.", "rationale": "Uninstall não é um preview." },
+        { "id": "kubectl-run", "text": "O helm não tem caminho de render; você precisa fazer kubectl run no tarball do chart.", "rationale": "helm template é o caminho de render local ensinado na seção." }
+      ],
+      "answer": "template-dryrun",
+      "explanation": "Renderize localmente e depois faça o dry-run contra a API. install/upgrade então criam revisions numeradas às quais você pode fazer rollback.",
+      "difficulty": "intermediate",
+      "learningObjective": "Pré-visualizar um chart com helm template e dry-run na API antes de instalar.",
+      "references": ["https://helm.sh/docs/intro/using_helm/"]
+    }
+  ]
+}

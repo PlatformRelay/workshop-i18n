@@ -169,3 +169,39 @@ translated.
 
 Hand-built banks for JSON shapes neither consumer writes today, and banks the extractor
 must refuse. See `packages/extract-quiz/test/corpus.test.ts` for what each one proves.
+
+## `corpus-k8s-pt-BR/`
+
+A slice of the **Brazilian Portuguese translation of Kubernetes-Workshop** contributed by
+**João Brito ([@juniorjbn](https://github.com/juniorjbn))** as
+[PlatformRelay/kubernetes-workshop PR #55](https://github.com/PlatformRelay/kubernetes-workshop/pull/55),
+pinned at the PR's head commit `7d5ed3d` (translated against English commit `bc45b04`,
+whose slides and labs are byte-identical to the `b4fb2e2` snapshot the English fixtures
+above were taken from). The translation is a *parallel tree*: the same relative paths as
+the English, translated in place and carrying no identities. It is the golden input for
+`packages/seed` (spec 004 User Story 1). Copyright in the translation remains with its
+author; it was contributed to that project under the project's licence (0BSD), and is
+vendored here only as a test input — the seeded catalogs credit the author in every
+entry's provenance.
+
+Files keep the name of their English counterpart in `corpus-k8s/` or `corpus-k8s-labs/`,
+under a `slides/`, `labs/` or `quiz/` directory. Every Markdown file is a verbatim copy of
+the PR's `pages/<section>/index.md` or `labs/day-N/NN-topic.md`. The quiz is **not**
+verbatim: `quiz/questions.json` keeps only the six `S12`, `S19` and `S20` questions of the
+PR's 54, cut out line for line so the retained bytes are unchanged, and the English bank
+in `corpus-quiz/` is left whole so the other 48 exercise `question-missing`.
+
+| Fixture | What it makes seeding do |
+| --- | --- |
+| `slides/S12-statefulset.md` | A speaker note that translates the tag-shaped placeholder `web-<newhash>` to `web-<novohash>`: to a renderer that is a new element, so the unit is refused as `markup-divergence` — conservative, and visible in the report rather than silent; translated `<KwCard>` prose that is HTML skeleton and must never be imported |
+| `slides/S19-rbac.md` | Translated comments inside three-document YAML fences — skeleton divergence that is reported, never imported, and never by itself a miss |
+| `slides/S20-helm.md` | A speaker note whose re-wrapped translation starts a line with `+ `, which Markdown reads as a list item — an accidental structure change, so that slide's note is `structure-diverged` and listed (AS-2) while its body still seeds; the deck's only `{{ }}` mustache |
+| `slides/S24-kubebuilder.md` | The degenerate three-slide deck, with several units left in English (`identical-to-source`, reported and never seeded) |
+| `labs/day-1-08-ingress.md` | In-fence `---` document separators with translated comments around them |
+| `labs/day-2-12-statefulset.solution.md` | The heaviest inline HTML in the lab corpus, translated around `<code>` and `&lt;ns&gt;` |
+| `labs/day-3-24-kubebuilder.md` | The deferred stub: a multi-line HTML comment and almost no translatable prose |
+| `labs/labs-README.md` | A file in the labs tree that is not a lab |
+| `quiz/questions.json` | Six translated questions whose option ids and answers must match the English |
+
+`corpus-k8s/S09-gateway-api.md` deliberately has **no** counterpart here, so the suite
+also exercises `no-translated-file`.
