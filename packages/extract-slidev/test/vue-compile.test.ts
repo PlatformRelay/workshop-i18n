@@ -19,10 +19,15 @@
  * notes are rendered the same way; Slidev uses its own markdown-exit 1.1.0-beta.2 for them,
  * whose prose handling this oracle does not distinguish.
  *
- * What this oracle cannot see: Slidev's own markdown extensions — snippet imports
- * (`<<< @/file`), KaTeX blocks (`$$ {…}`), slot sugar, code-block wrappers. Their sinks are
- * held by direct tests in `skeleton.test.ts` and by the hostile payloads below, which the
- * guard must refuse before any renderer runs.
+ * An added image (`<img src>`, an asset import at build time) and an added fence (`<pre>`)
+ * are counted like any other element: markdown produces them, but no translation may add
+ * one the English lacks.
+ *
+ * What this oracle cannot see: Slidev's own markdown extensions and code-block
+ * transformers — snippet imports (`<<< @/file`), KaTeX blocks (`$$ {…}`), slot sugar,
+ * Mermaid/PlantUML/twoslash/Monaco fences, v-drag. Their sinks are held by direct tests in
+ * `skeleton.test.ts` and by the hostile payloads below, which the guard must refuse before
+ * any renderer runs.
  */
 
 import { readdirSync, readFileSync } from 'node:fs'
@@ -70,6 +75,13 @@ const MARKUP_PAYLOADS: readonly string[] = [
   'Hallo\n<<< @/probe.json json {1}{onVnodeMounted: () => $slidev.nav.go(9)}',
   'Hallo\n<<< @/.env txt',
   'Hallo\n$$ {1}{onVnodeMounted: () => $slidev.nav.go(3)}\nx\n$$',
+  'Hallo ![x](./.env?raw) Welt',
+  'Hallo Welt\n\n[r]: ./.env?raw\n\n![x][r]',
+  '```plantuml\n@startuml\nA -> B\n@enduml',
+  '~~~ts twoslash\nconst x = 1',
+  'Hallo :Button Welt',
+  'Hallo v-drag Welt',
+  'Hallo evil.com Welt',
   'Hallo Welt',
 ]
 
@@ -164,7 +176,6 @@ const MARKDOWN_ELEMENTS = new Set([
   'tr',
   'th',
   'td',
-  'pre',
 ])
 const MARKDOWN_ATTRIBUTES = new Set(['href', 'title', 'style', 'start'])
 
