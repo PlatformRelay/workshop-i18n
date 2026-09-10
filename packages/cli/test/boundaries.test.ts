@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 /**
- * Two promises the CLI makes that no behavioural test can prove by absence, so they are
+ * Promises the CLI makes that no behavioural test can prove by absence, so they are
  * checked statically:
  *
  * - **No third-party runtime dependency.** The CLI is the package consumers install; every
@@ -13,10 +13,13 @@ import { describe, expect, it } from 'vitest'
  * - **No network, no code execution** (spec 001 FR-007, constitution IV). Consumer content
  *   is hostile input; the CLI reads it, parses it and writes text, and none of its modules
  *   may reach for a socket, a subprocess or an evaluator.
+ * - **Reviewable sources.** No file here carries a raw control byte; a test that needs one
+ *   spells it as an escape, so a diff never shows the file as binary.
  */
 
 const PACKAGE = fileURLToPath(new URL('../package.json', import.meta.url))
 const SOURCES = fileURLToPath(new URL('../src', import.meta.url))
+const TESTS = fileURLToPath(new URL('.', import.meta.url))
 
 const FORBIDDEN = [
   /from 'node:(child_process|net|http|https|http2|dgram|dns|tls|vm|worker_threads|cluster)'/,
@@ -43,6 +46,25 @@ describe('cli package boundaries', () => {
     )
     expect(outside).toEqual([])
     expect(Object.keys(runtime).length).toBeGreaterThan(0)
+  })
+
+  it('keeps its sources and tests plain text, spelling control characters as escapes', () => {
+    // A literal NUL makes git treat the file as binary, and a pull request then shows no
+    // diff for it at all — the one file a reviewer most needs to read.
+    const files = [SOURCES, TESTS].flatMap((directory) =>
+      readdirSync(directory)
+        .filter((name) => name.endsWith('.ts'))
+        .map((name) => join(directory, name)),
+    )
+    expect(files.length).toBeGreaterThan(10)
+    const offenders = files.flatMap((path) => {
+      const bytes = readFileSync(path)
+      const index = bytes.findIndex(
+        (byte) => (byte < 0x20 && byte !== 0x0a && byte !== 0x09) || byte === 0x7f,
+      )
+      return index < 0 ? [] : [`${path}: control byte 0x${bytes[index]?.toString(16)} at ${index}`]
+    })
+    expect(offenders).toEqual([])
   })
 
   it('never imports network, subprocess or evaluation facilities', () => {
