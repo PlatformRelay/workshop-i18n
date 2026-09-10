@@ -72,8 +72,21 @@ describe('scanHtml', () => {
     expect(kinds('a < b and a<b')).toEqual(['text:a < b and a<b'])
   })
 
-  it('reads an autolink as text, not a tag', () => {
-    expect(kinds('see <https://example.com> now')).toEqual(['text:see <https://example.com> now'])
+  it('reads a tag name the way Vue does: a letter, then anything up to space, / or >', () => {
+    // A narrower grammar once read these as text while Vue compiled them as elements.
+    for (const name of ['x_y', 'Foo.Bar', 'svg:a', 'a"b', 'https:']) {
+      const [open] = scanHtml(`<${name} v-html="x">`)
+      expect(open?.kind === 'open' && open.name, name).toBe(name)
+    }
+  })
+
+  it('reads a closer that does not start with a letter as a bogus comment, never text', () => {
+    expect(kinds('a </ div> b </1')).toEqual([
+      'text:a ',
+      'opaque:</ div>',
+      'text: b ',
+      'opaque:</1',
+    ])
   })
 
   it('makes an unterminated tag opaque to the end instead of guessing where it ends', () => {
