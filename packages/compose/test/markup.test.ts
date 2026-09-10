@@ -134,7 +134,7 @@ describe('checkMarkupParity', () => {
   it('rejects a new mustache expression, which Vue would evaluate', () => {
     const result = checkMarkupParity('Hello', 'Hallo {{ constructor.constructor("x")() }}')
     expect(result.ok).toBe(false)
-    expect(result.added.map((token) => token.kind)).toEqual(['mustache'])
+    expect(result.added.map((token) => token.kind)).toContain('mustache')
   })
 
   // The next two assert the *kind*, not just the verdict: the brace and entity kinds

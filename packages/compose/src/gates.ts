@@ -38,7 +38,7 @@ export function contentGateFailures(
     if (parity.removed.length > 0) parts.push(`drops ${describeTokens(parity.removed)}`)
     failures.push({
       code: 'markup-parity',
-      message: `translation ${parts.join(' and ')}; code spans, tags, {{ }} expressions, URLs and character references must match the English exactly`,
+      message: `translation ${parts.join(' and ')}; code spans, tags, {{ }} expressions, URLs and character references must match the English exactly, and a translation may not add link-shaped text (hosts, emails, #123, [labels]), $ ^[ [^ ]: syntax or invisible format characters`,
     })
   }
   const missing = missingProtectedTerms(english, translation, protectedTerms)

@@ -46,11 +46,22 @@
  */
 
 import LinkifyIt from 'linkify-it'
-import MarkdownIt from 'markdown-it'
-import type Token from 'markdown-it/lib/token.mjs'
+
+import { formatTokens, linkLikeTokens, syntaxTokens } from './coarse.js'
+import { rendererLinks } from './renderer.js'
 
 /** What a token is. Kinds are compared separately so a report can say what changed. */
-export type MarkupTokenKind = 'code' | 'tag' | 'mustache' | 'brace' | 'url' | 'entity'
+export type MarkupTokenKind =
+  | 'code'
+  | 'tag'
+  | 'mustache'
+  | 'brace'
+  | 'url'
+  | 'linklike'
+  | 'syntax'
+  | 'format'
+  | 'entity'
+  | 'oversize'
 
 /** One piece of markup found in a unit. */
 export interface MarkupToken {
@@ -68,7 +79,18 @@ export interface MarkupParity {
   readonly removed: readonly MarkupToken[]
 }
 
-const KIND_ORDER: readonly MarkupTokenKind[] = ['code', 'tag', 'mustache', 'brace', 'url', 'entity']
+const KIND_ORDER: readonly MarkupTokenKind[] = [
+  'code',
+  'tag',
+  'mustache',
+  'brace',
+  'url',
+  'linklike',
+  'syntax',
+  'format',
+  'entity',
+  'oversize',
+]
 
 /** CommonMark's escapable characters: ASCII punctuation. */
 const ESCAPABLE = /\\([!-/:-@[-`{-~])/g
@@ -306,16 +328,10 @@ const EXTRA_FUZZY_TLDS: readonly string[] = Object.freeze([
 
 /**
  * A lexical linkify pass over the *unescaped* text, with schemeless IPs and the extra
- * TLDs above — an over-report layered on top of {@link rendererLinks}. It covers a
- * renderer configured more generously than Slidev's default, and one that joins escaped
- * characters back into text before linkifying (markdown-it 14 does not; `evil\.com` stays
- * unlinked there, and is still counted here).
- *
- * On its own this pass is **not** enough, and once was the whole gate: linkify-it run over
- * a whole string will not start a match right after `_`, `*` or `~`, while the renderer
- * linkifies each text token *after* emphasis delimiters are split off — so
- * `_attacker.io_` rendered as a live link and passed. That is why the renderer's own
- * token stream is the primary source.
+ * TLDs above — an over-report. It covers a renderer configured more generously than
+ * Slidev's default, and one that joins escaped characters back into text before
+ * linkifying (markdown-it 14 does not; `evil\.com` stays unlinked there, and is still
+ * counted here).
  */
 const LINKIFY = new LinkifyIt({ fuzzyLink: true, fuzzyEmail: true, fuzzyIP: true }).tlds(
   [...EXTRA_FUZZY_TLDS],
@@ -327,45 +343,26 @@ function linkifiedUrls(text: string): readonly string[] {
   return (LINKIFY.match(text) ?? []).map((match) => match.raw)
 }
 
-/**
- * The renderer, configured the way `@slidev/cli` 52.19 configures its markdown engine:
- * `html: true, xhtmlOut: true, linkify: true` and Slidev's quotes. No plugin in Slidev's
- * default set creates links (its `MarkdownItLink` only rewrites existing ones); MDC/Comark
- * is opt-in and not modelled (see the README's known gaps).
- *
- * Slidev 52 renders through markdown-exit, a port of markdown-it 14 that uses the same
- * linkify-it; this package runs markdown-it 14.3.0 — the upstream it ports, by the same
- * maintainers as linkify-it, so no new trust party — and a differential test holds both
- * engines to "every link they create is counted here". It is a runtime dependency, not a
- * dev one, because the gate itself calls it on every translation.
- */
-const RENDERER = new MarkdownIt({ html: true, xhtmlOut: true, linkify: true, quotes: `""''` })
-
-/** The `href` of every link and the `src` of every image the renderer creates from `text`. */
-function rendererLinks(text: string): readonly string[] {
-  const found: string[] = []
-  const walk = (tokens: readonly Token[]): void => {
-    for (const token of tokens) {
-      const attribute =
-        token.type === 'link_open' ? 'href' : token.type === 'image' ? 'src' : undefined
-      const value = attribute === undefined ? null : token.attrGet(attribute)
-      if (value !== null) found.push(value)
-      if (token.children !== null) walk(token.children)
-    }
-  }
-  // Inline parsing is the unit's real context: the skeleton gate guarantees a unit stays
-  // the inline content of the same block it came from.
-  walk(RENDERER.parseInline(text, {}))
-  return found
-}
-
 function entityTokens(text: string): readonly string[] {
   return text.match(CHARACTER_REFERENCE) ?? []
 }
 
 /**
+ * The longest text any scan runs on. markdown-it is superlinear on some crafted inputs
+ * (`http://a` repeated 40 000 times took 16.7 s), so the renderer model only ever sees
+ * text up to this length, and {@link checkMarkupParity} refuses a translation longer than
+ * `max(MAX_SCANNED_LENGTH, 4 × English)` before any parser runs. Real units are far
+ * shorter; a translation four times its English is not a translation.
+ */
+export const MAX_SCANNED_LENGTH = 8_192
+
+/**
  * Every piece of markup in `text` that a renderer acts on, grouped by kind in a fixed
  * kind order and in order of appearance within each kind. Deterministic.
+ *
+ * URL tokens are the union of the coarse and lexical passes and, for text within
+ * {@link MAX_SCANNED_LENGTH}, the renderer model's own links (see `renderer.ts`). The
+ * model only ever adds: the coarse layer (`linklike`, `syntax`, `format`) is the barrier.
  */
 export function markupTokens(text: string): readonly MarkupToken[] {
   const normalized = normalize(text)
@@ -380,12 +377,32 @@ export function markupTokens(text: string): readonly MarkupToken[] {
       ...linkDestinations(normalized),
       ...autolinks,
       ...linkifiedUrls(normalized),
-      ...rendererLinks(text),
+      ...(text.length <= MAX_SCANNED_LENGTH ? rendererLinks(text) : []),
     ],
+    linklike: linkLikeTokens(normalized),
+    syntax: syntaxTokens(normalized),
+    format: formatTokens(normalized),
     entity: entityTokens(text),
+    oversize: [],
   }
   return KIND_ORDER.flatMap((kind) => byKind[kind].map((token) => ({ kind, text: token })))
 }
+
+/**
+ * Kinds judged in one direction only: a translation may not *introduce* them, but may
+ * drop them. The coarse layer's job is to stop new links and new parser features; a
+ * translation that leaves out an English `e.g.`, `i.e.`, `#1` or a dotted identifier the
+ * target language phrases differently creates nothing. Measured, not guessed: on the real
+ * pt-BR corpus (1 399 aligned translations), comparing these kinds in both directions
+ * rejected 18 more translations, every one of them for a *dropped* token and none for an
+ * added one. The other kinds stay two-way — dropping a code span drops a command, and
+ * dropping a tag unbalances the Vue template.
+ */
+const INTRODUCTION_ONLY_KINDS: ReadonlySet<MarkupTokenKind> = new Set([
+  'linklike',
+  'syntax',
+  'format',
+])
 
 function keyOf(token: MarkupToken): string {
   return JSON.stringify([token.kind, token.text])
@@ -410,12 +427,24 @@ function multisetDifference(
 /**
  * Compare the markup of an English unit with that of its translation.
  *
- * `ok` is true only when both carry exactly the same tokens (as multisets, per kind).
+ * `ok` is true only when both carry exactly the same tokens (as multisets, per kind). A
+ * translation longer than `max(MAX_SCANNED_LENGTH, 4 × English)` is refused with a single
+ * `oversize` token before anything scans it.
  */
 export function checkMarkupParity(english: string, translation: string): MarkupParity {
+  const limit = Math.max(MAX_SCANNED_LENGTH, english.length * 4)
+  if (translation.length > limit) {
+    return {
+      ok: false,
+      added: [{ kind: 'oversize', text: `${translation.length} characters (limit ${limit})` }],
+      removed: [],
+    }
+  }
   const source = markupTokens(english)
   const target = markupTokens(translation)
   const added = multisetDifference(target, source)
-  const removed = multisetDifference(source, target)
+  const removed = multisetDifference(source, target).filter(
+    (token) => !INTRODUCTION_ONLY_KINDS.has(token.kind),
+  )
   return { ok: added.length === 0 && removed.length === 0, added, removed }
 }
