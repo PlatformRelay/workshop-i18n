@@ -59,6 +59,14 @@ export function readText(
  */
 export function loadWorkspace(io: CliIo, root: string): Workspace {
   const rootKind = io.fs.kind(root)
+  if (rootKind === 'symlink') {
+    // Every path check below is relative to the root, and a linked root would make "inside
+    // the repository" mean "inside wherever the link points". Say what to do instead.
+    throw new CliError(
+      EXIT.NO_INPUT,
+      `repository root ${root} is a symlink; pass its real path with --root`,
+    )
+  }
   if (rootKind !== 'directory') {
     throw new CliError(EXIT.NO_INPUT, `repository root ${root} is not a directory`)
   }
