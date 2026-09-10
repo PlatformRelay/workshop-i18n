@@ -238,17 +238,20 @@ export function planLocale(
     const kept = leftovers(path)
     const entries: CatalogEntry[] = [...kept.entries]
     const obsolete: CatalogEntry[] = [...kept.obsolete]
+    let donor: string | undefined
     for (const unit of file.units) {
       const pooled = pool.get(formatUnitId(unit.id))
       if (pooled === undefined) continue
+      donor ??= pooled.path
       ;(pooled.entry.obsolete ? obsolete : entries).push(pooled.entry)
     }
-    const previous: Catalog = {
-      identity,
-      header: ownExisting?.catalog.header ?? emptyCatalog(identity).header,
-      entries,
-      obsolete,
-    }
+    // A new catalog whose entries came from elsewhere (a moved or renamed file) inherits
+    // that catalog's header, so fields a TMS wrote there are not silently dropped.
+    const header =
+      ownExisting?.catalog.header ??
+      (donor === undefined ? undefined : existing.get(donor)?.catalog.header) ??
+      emptyCatalog(identity).header
+    const previous: Catalog = { identity, header, entries, obsolete }
     planned.push(plan(path, file.file.path, identity, ownExisting, previous, file.units))
   }
 

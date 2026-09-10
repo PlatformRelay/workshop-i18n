@@ -10,6 +10,7 @@
  * change — the CI gate for "somebody edited English and did not run extract".
  */
 
+import { formatUnitId } from '@workshop-i18n/core'
 import {
   assertDistinctCatalogs,
   isChanged,
@@ -78,11 +79,27 @@ function surfaceLines(plan: ExtractPlan): readonly string[] {
 function localeLine(plan: LocalePlan): string {
   const total = (key: 'added' | 'fuzzied' | 'obsoleted' | 'resurrected' | 'unchanged') =>
     plan.catalogs.reduce((sum, planned) => sum + planned.summary[key].length, 0)
+  // A resurrected unit whose English changed while it was obsolete comes back fuzzy; the
+  // update summary files it under `resurrected` only, so count it into `fuzzy` as well —
+  // otherwise the fuzzy figure under-reports what now needs a translator.
+  const resurrectedFuzzy = plan.catalogs.reduce((sum, planned) => {
+    const revived = new Set(planned.summary.resurrected)
+    return (
+      sum +
+      planned.catalog.entries.filter(
+        (entry) => entry.state === 'fuzzy' && revived.has(formatUnitId(entry.id)),
+      ).length
+    )
+  }, 0)
+  const fuzzy =
+    resurrectedFuzzy === 0
+      ? `${total('fuzzied')} fuzzy`
+      : `${total('fuzzied') + resurrectedFuzzy} fuzzy (${resurrectedFuzzy} resurrected)`
   const changed = plan.catalogs.filter(isChanged)
   const removed = changed.filter((planned) => planned.text === undefined).length
   const kept = plan.catalogs.filter((planned) => planned.text !== undefined).length
   return (
-    `${plan.locale}: ${total('fuzzied')} fuzzy, ${total('added')} added, ` +
+    `${plan.locale}: ${fuzzy}, ${total('added')} added, ` +
     `${total('obsoleted')} obsoleted, ${total('resurrected')} resurrected, ` +
     `${total('unchanged')} unchanged; ${count(kept, 'catalog')}, ` +
     `${changed.length - removed} written, ${removed} removed`

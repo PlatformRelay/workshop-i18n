@@ -256,6 +256,45 @@ describe('extract — updating catalogs (spec 002 US-1)', () => {
     expect(result.stdout).toMatch(/pt-BR: .*\b0 obsoleted/)
   })
 
+  it('carries the header of the catalog entries came from into a new catalog', () => {
+    const fs = corpus()
+    invoke(fs, ['extract'])
+    fs.put(
+      SLIDES_PO,
+      fs
+        .text(SLIDES_PO)
+        .replace(
+          '"X-Generator: workshop-i18n\\n"\n',
+          '"X-Generator: workshop-i18n\\n"\n"X-Weblate-Component: s05\\n"\n',
+        ),
+    )
+    fs.put('/repo/pages/S05-pods/index.md', POD_SLIDES)
+    fs.files.delete('/repo/pages/S05-pod/index.md')
+    invoke(fs, ['extract'])
+    expect(fs.text('/repo/i18n/pt-BR/pages/S05-pods/index.po')).toContain(
+      '"X-Weblate-Component: s05\\n"\n',
+    )
+  })
+
+  it('counts a resurrected unit whose English changed as fuzzy', () => {
+    const fs = corpus()
+    invoke(fs, ['extract'])
+    const po = fs.text(SLIDES_PO)
+    const id = idOf(po, 'Pending, Running, Succeeded.')
+    fs.put(SLIDES_PO, translate(po, id, 'Pendente, Em execução, Concluído.'))
+    const [first] = POD_SLIDES.split('\n---\nslideId: s05-pod-lifecycle')
+    fs.put('/repo/pages/S05-pod/index.md', first ?? '')
+    invoke(fs, ['extract'])
+    fs.put(
+      '/repo/pages/S05-pod/index.md',
+      POD_SLIDES.replace('Pending, Running, Succeeded.', 'Pending, Running, Failed.'),
+    )
+    const result = invoke(fs, ['extract'])
+    expect(result.stdout).toContain(
+      'pt-BR: 1 fuzzy (1 resurrected), 0 added, 0 obsoleted, 2 resurrected',
+    )
+  })
+
   it('removes the catalog of a renamed file once every entry has followed it', () => {
     const fs = corpus()
     invoke(fs, ['extract'])
