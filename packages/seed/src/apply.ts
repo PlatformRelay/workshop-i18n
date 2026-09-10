@@ -37,6 +37,13 @@ import { type SeedDraft, SeedInputError } from './types.js'
 /** `#.` key carrying the seed source an entry was drafted from. */
 export const SEED_COMMENT_KEY = 'workshop-i18n-seed'
 
+/**
+ * `#.` key carrying the warnings a seeded draft was accepted with (`code-span-divergence`,
+ * …). TMS products show extracted comments next to the string, so the reviewer who decides
+ * on the draft sees why it deserves a closer look.
+ */
+export const SEED_WARNING_COMMENT_KEY = 'workshop-i18n-seed-warning'
+
 /** Longest accepted provenance label; it is one PO comment line. */
 export const MAX_PROVENANCE_LENGTH = 200
 
@@ -121,20 +128,37 @@ export function assertSafeProvenance(label: unknown): string {
   return label
 }
 
-/** True for the `#.` comment a seed run writes. */
-function isSeedComment(comment: PoComment): boolean {
-  return comment.marker === '.' && comment.text.trimStart().startsWith(`${SEED_COMMENT_KEY}:`)
+/** True for a `#.` comment under `key`. */
+function hasKey(comment: PoComment, key: string): boolean {
+  return comment.marker === '.' && comment.text.trimStart().startsWith(`${key}:`)
 }
 
-/** The seed comment, replacing an earlier one in place or appended after the others. */
-function withSeedComment(comments: readonly PoComment[], label: string): readonly PoComment[] {
-  const fresh: PoComment = { marker: '.', text: ` ${SEED_COMMENT_KEY}: ${label}` }
-  const isSeed = isSeedComment
-  const index = comments.findIndex(isSeed)
-  if (index < 0) return [...comments, fresh]
-  return comments
-    .filter((comment, at) => at === index || !isSeed(comment))
-    .map((comment) => (isSeed(comment) ? fresh : comment))
+/** True for the `#.` comment a seed run writes. */
+function isSeedComment(comment: PoComment): boolean {
+  return hasKey(comment, SEED_COMMENT_KEY)
+}
+
+/**
+ * The seed comments — provenance, then any warnings — replacing earlier ones at the
+ * position the first of them held, or appended after the other comments.
+ */
+function withSeedComments(
+  comments: readonly PoComment[],
+  label: string,
+  warnings: readonly string[],
+): readonly PoComment[] {
+  const fresh: PoComment[] = [
+    { marker: '.', text: ` ${SEED_COMMENT_KEY}: ${label}` },
+    ...(warnings.length === 0
+      ? []
+      : [{ marker: '.' as const, text: ` ${SEED_WARNING_COMMENT_KEY}: ${warnings.join(', ')}` }]),
+  ]
+  const owned = (comment: PoComment) =>
+    hasKey(comment, SEED_COMMENT_KEY) || hasKey(comment, SEED_WARNING_COMMENT_KEY)
+  const index = comments.findIndex(owned)
+  const kept = comments.filter((comment) => !owned(comment))
+  const at = index < 0 ? kept.length : comments.slice(0, index).filter((c) => !owned(c)).length
+  return [...kept.slice(0, at), ...fresh, ...kept.slice(at)]
 }
 
 function outcomeFor(entry: CatalogEntry, draft: SeedDraft): SeedOutcomeKind | undefined {
@@ -225,7 +249,7 @@ export function applySeedDrafts(
     const entries = drafted.entries.map((item) =>
       formatUnitId(item.id) === id
         ? toCatalogEntry(
-            { ...item.po, comments: withSeedComment(item.po.comments, label) },
+            { ...item.po, comments: withSeedComments(item.po.comments, label, draft.warnings) },
             item.id,
           )
         : item,

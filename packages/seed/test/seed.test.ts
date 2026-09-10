@@ -4,6 +4,7 @@ import {
   serializeCatalog,
   updateCatalog,
 } from '@workshop-i18n/catalog-po'
+import { extractLabFile } from '@workshop-i18n/extract-markdown'
 import { extractSlidevFile } from '@workshop-i18n/extract-slidev'
 import { describe, expect, it } from 'vitest'
 import { formatSeedReport } from '../src/report.js'
@@ -149,6 +150,40 @@ describe('seed', () => {
       serializeCatalog(b.catalogs[0] as Catalog),
     )
     expect(formatSeedReport(a.report)).toBe(formatSeedReport(b.report))
+  })
+
+  it('lists warned and untranslated units by id, so a reviewer can find them', () => {
+    const lab = '# Lab\n\n<!-- labId: l1 -->\n\nRun `kubectl get pods` now.\n\nStay here.\n'
+    const translatedLab = '# Laboratório\n\nExecute kubectl get pods agora.\n\nStay here.\n'
+    const labs = updateCatalog({
+      identity: { locale: 'pt-BR', name: 'labs' },
+      units: extractLabFile(lab).units,
+    }).catalog
+    const { catalogs, report } = seed({
+      locale: 'pt-BR',
+      provenance: LABEL,
+      labs: {
+        english: [{ path: 'l1.md', text: lab }],
+        translated: [{ path: 'l1.md', text: translatedLab }],
+      },
+      catalogs: [labs],
+    })
+    const section = report.surfaces[0]?.sections[0]
+    expect(section?.warnedUnits).toEqual([
+      { id: 'labs:l1:body/h1-1/p-1', warnings: ['code-span-divergence'] },
+    ])
+    const text = formatSeedReport(report)
+    expect(text).toContain('labs:l1:body/h1-1/p-1')
+    expect(text).toContain('code-span-divergence')
+    expect(text).toContain('labs:l1:body/h1-1/p-2')
+    // The warning also travels with the entry, where a Weblate reviewer sees it.
+    const warned = (catalogs[0] as Catalog).entries.find(
+      (entry) => entry.id.unitKey === 'body/h1-1/p-1',
+    )
+    expect(warned?.po.comments).toContainEqual({
+      marker: '.',
+      text: ' workshop-i18n-seed-warning: code-span-divergence',
+    })
   })
 
   it('renders untrusted paths without their control characters', () => {

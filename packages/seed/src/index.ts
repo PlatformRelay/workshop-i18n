@@ -33,6 +33,7 @@ export {
   MAX_PROVENANCE_LENGTH,
   SEED_COMMENT_KEY,
   SEED_OUTCOMES,
+  SEED_WARNING_COMMENT_KEY,
   type SeedOutcome,
   type SeedOutcomeKind,
 } from './apply.js'

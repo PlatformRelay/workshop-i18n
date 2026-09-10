@@ -58,6 +58,11 @@ export interface SeedSectionReport extends SeedCounts {
   readonly section: string
   /** Every miss, with the unit ids it covers. */
   readonly misses: readonly SeedMiss[]
+  /** Every aligned unit that carries a warning, by id, so a reviewer can find it. */
+  readonly warnedUnits: readonly {
+    readonly id: string
+    readonly warnings: readonly SeedWarningCode[]
+  }[]
 }
 
 /** One surface's block in the report. */
@@ -121,13 +126,15 @@ function sectionReport(
 ): SeedSectionReport {
   const outcomes = zeroes(SEED_OUTCOMES)
   const warnings = zeroes(WARNING_CODES)
+  const warnedUnits: { id: string; warnings: SeedWarningCode[] }[] = []
   for (const draft of section.drafts) {
-    const outcome = outcomeById.get(
-      `${draft.id.surface}:${draft.id.containerId}:${draft.id.unitKey}`,
-    )
+    const id = `${draft.id.surface}:${draft.id.containerId}:${draft.id.unitKey}`
+    const outcome = outcomeById.get(id)
     if (outcome !== undefined) outcomes[outcome] += 1
     for (const warning of draft.warnings) warnings[warning] += 1
+    if (draft.warnings.length > 0) warnedUnits.push({ id, warnings: [...draft.warnings] })
   }
+  warnedUnits.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   const missReasons = zeroes(SEED_MISS_REASONS)
   let missed = 0
   for (const miss of section.misses) {
@@ -145,6 +152,7 @@ function sectionReport(
     warnings,
     skeletonDivergence: { ...section.skeletonDivergence },
     misses: section.misses.map((miss) => ({ ...miss, unitIds: [...miss.unitIds] })),
+    warnedUnits,
   }
 }
 
@@ -209,9 +217,6 @@ function countsLine(counts: SeedCounts): string {
   )
 }
 
-/** Misses worth listing one by one: everything but per-unit "nothing was translated". */
-const LISTED = (miss: SeedMiss): boolean => miss.reason !== 'identical-to-source'
-
 /** Render the report for a terminal. Deterministic: same report, same text. */
 export function formatSeedReport(report: SeedReport): string {
   const lines: string[] = [
@@ -227,11 +232,20 @@ export function formatSeedReport(report: SeedReport): string {
         `  ${printable(section.section)}: ${section.aligned}/${section.englishUnits} aligned` +
           (section.missed > 0 ? `, missed ${nonZero(section.missReasons)}` : ''),
       )
-      for (const miss of section.misses.filter(LISTED)) {
+      for (const miss of section.misses) {
         const where = miss.containerId === undefined ? 'whole file' : printable(miss.containerId)
+        if (miss.reason === 'identical-to-source') {
+          // Per-unit, and usually numerous: list the ids, so each can be found and filled.
+          lines.push(`    - ${where}: left in English, not seeded:`)
+          for (const id of miss.unitIds) lines.push(`        ${printable(id)}`)
+          continue
+        }
         lines.push(
           `    - ${where}: ${miss.reason}, ${miss.unitIds.length} unit(s) — ${printable(miss.detail)}`,
         )
+      }
+      for (const unit of section.warnedUnits) {
+        lines.push(`    ! ${printable(unit.id)}: seeded with ${unit.warnings.join(', ')}`)
       }
     }
     if (surface.unpairedTranslated.length > 0) {
