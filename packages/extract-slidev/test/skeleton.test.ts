@@ -386,6 +386,56 @@ describe('composeSkeleton refuses a replacement that would break out of its hole
   })
 })
 
+describe('composeSkeleton keeps the markup a unit carries (ADR 0015)', () => {
+  const source = 'Use <span class="kw-muted">this</span> with {{ $slidev.nav.currentPage }}.\n'
+  const text = source.trimEnd()
+  const skeleton = createSkeleton(source, [hole('slides:s1:body/p-1', 0, text.length, text)])
+  const reasonOf = (translation: string): string | undefined => {
+    try {
+      composeSkeleton(skeleton, { 'slides:s1:body/p-1': translation })
+      return undefined
+    } catch (error) {
+      return (error as CompositionError).issues[0]?.reason
+    }
+  }
+
+  it('allows a translation that moves the markup to other words', () => {
+    expect(
+      reasonOf('Mit {{ $slidev.nav.currentPage }} nutze <span class="kw-muted">das</span>.'),
+    ).toBeUndefined()
+  })
+
+  it('rejects a translation that edits, drops or adds a tag', () => {
+    expect(reasonOf('Nutze <span class="kw-ok">das</span> {{ $slidev.nav.currentPage }}.')).toBe(
+      'markup-changed',
+    )
+    expect(reasonOf('Nutze das {{ $slidev.nav.currentPage }}.')).toBe('markup-changed')
+    expect(
+      reasonOf(
+        'Nutze <span class="kw-muted">das</span> {{ $slidev.nav.currentPage }} <img src=x onerror=alert(1)>.',
+      ),
+    ).toBe('markup-changed')
+  })
+
+  it('rejects a translation that edits or adds an interpolation, which Vue would execute', () => {
+    expect(reasonOf('Nutze <span class="kw-muted">das</span> {{ alert(1) }}.')).toBe(
+      'markup-changed',
+    )
+    expect(
+      reasonOf('Nutze <span class="kw-muted">das</span> {{ $slidev.nav.currentPage }} {{ x }}.'),
+    ).toBe('markup-changed')
+  })
+
+  it('rejects a tag the translation leaves unterminated, which would swallow the skeleton', () => {
+    expect(
+      reasonOf('Nutze <span class="kw-muted">das</span> {{ $slidev.nav.currentPage }} <b'),
+    ).toBe(undefined)
+    expect(
+      reasonOf('Nutze <span class="kw-muted">das</span> {{ $slidev.nav.currentPage }} <b class="x'),
+    ).toBe('markup-changed')
+  })
+})
+
 describe('composeSkeleton re-encodes a YAML scalar', () => {
   const source = "---\nkicker: Why Pods?\nheading: 'It''s here'\n---\n"
   const skeleton = createSkeleton(source, [

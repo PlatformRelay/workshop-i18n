@@ -197,8 +197,24 @@ const HOSTILE_TRANSLATIONS: readonly (readonly [string, string])[] = [
   ['a trailing double hyphen', '--'],
   ['a bare pipe', 'eins | zwei'],
   ['a slot marker line', 'eins\n::right::\nzwei'],
+  ['an injected tag', 'eins <img src=x onerror=alert(1)> zwei'],
+  ['an injected interpolation', 'eins {{ $slidev.nav.next() }} zwei'],
+  ['an unterminated tag', 'eins <b class="x'],
+  ['a blank line', 'eins\n\nzwei'],
+  ['both quote characters', 'eins "zwei" \'drei\''],
   ['plain words that carry nothing across', 'schlicht'],
 ]
+
+/**
+ * The HTML tags and `{{ }}` interpolations in `text`, sorted — an independent reading of
+ * what composition requires a translation to keep (ADR 0015), deliberately not the
+ * package's own scanner, so weakening that scanner cannot move the oracle with it.
+ */
+function markupOf(text: string): readonly string[] {
+  const pattern =
+    /<\/?[A-Za-z][A-Za-z0-9-]*(?=[\s/>])(?:[^<>"']|"[^"]*"|'[^']*')*>|\{\{[\s\S]*?\}\}/g
+  return [...text.matchAll(pattern)].map((match) => match[0]).sort()
+}
 
 /**
  * True when replacing this hole's whole text with `payload` *must* be refused.
@@ -214,6 +230,7 @@ function mustBeRefused(hole: Hole, payload: string): boolean {
   for (const token of ['<!--', '-->']) {
     if (count(payload, token) !== count(hole.source, token)) return true
   }
+  if (markupOf(payload).join('\n') !== markupOf(hole.source).join('\n')) return true
   const barePipes = (text: string): number => count(text.replace(/\\\|/g, ''), '|')
   return hole.encoding.cell && barePipes(payload) > barePipes(hole.source)
 }
@@ -246,6 +263,7 @@ function markerFor(source: string, index: number): string {
   const count = (token: string): number => source.split(token).length - 1
   return [
     `de-${index}`,
+    ...markupOf(source),
     ...Array.from({ length: count('<!--') }, () => '<!--'),
     ...Array.from({ length: count('-->') }, () => '-->'),
   ].join(' ')
@@ -375,7 +393,8 @@ describe.skipIf(parseSync === undefined)('slide splitting agrees with @slidev/pa
       const translations = Object.fromEntries(
         extraction.units.map((unit, index) => [
           formatUnitId(unit.id),
-          `${markerFor(unit.source, index)} — Ü "3" ✓ 🧑‍🚀 <b>x</b>: y`,
+          // A literal `a < b`, not a tag: composition refuses markup the English lacks.
+          `${markerFor(unit.source, index)} — Ü "3" ✓ 🧑‍🚀 a < b: y`,
         ]),
       )
       expect(structureOf(parse, composeSkeleton(extraction.skeleton, translations))).toEqual(
