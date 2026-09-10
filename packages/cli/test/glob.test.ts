@@ -221,11 +221,91 @@ describe('compileGlob bounds (work is bounded, not merely non-exponential)', () 
     expect(elapsed).toBeLessThan(5_000)
   }, 30_000)
 
+  it('stops testing a path at the first segment that cannot match', async () => {
+    // The shape of a hostile manifest entry against an unchanged tree: a wildcard base
+    // (so the whole repository is walked), the most alternatives and segments the bounds
+    // admit, and segments no real file name satisfies. Over a workshop-sized tree this
+    // must cost about what a plain `**/*.md` does, not seconds.
+    const elapsed = await timeInWorker(
+      `
+      const star = '*a'.repeat(12) + '*b'
+      const pattern = '{*a,*b}{*c,*d}/**/' + Array(15).fill(star).join('/**/')
+      const glob = compileGlob(pattern)
+      const names = ['pages', 'labs', 'S05-pod', 'day-1', 'components', 'public', 'img']
+      let matched = 0
+      for (let file = 0; file < 9000; file += 1) {
+        const depth = 2 + (file % 4)
+        const dirs = Array.from({ length: depth }, (_, level) => names[(file + level) % names.length])
+        if (glob.test(dirs.join('/') + '/file-' + file + '-kubernetes-networking-and-service-diagram.md')) matched += 1
+      }
+      if (matched !== 0) throw new Error('matched ' + matched)
+      `,
+      20_000,
+    )
+    expect(elapsed).toBeLessThan(300)
+  }, 30_000)
+
   it('refuses a glob whose alternatives add up to more than the expanded-bytes limit', () => {
     const star = `${'*a'.repeat(12)}*b`
     const pattern = `{a,b}{a,b}{a,b}/**/${Array(15).fill(star).join('/**/')}`
     expect(new TextEncoder().encode(pattern).length).toBeLessThanOrEqual(MAX_GLOB_BYTES)
     expect(() => compileGlob(pattern)).toThrow(`more than ${MAX_GLOB_EXPANDED_BYTES}`)
+  })
+})
+
+/** The glob semantics written as plainly as possible — exponential, fine for tiny inputs. */
+function referenceMatch(pattern: readonly string[], path: readonly string[]): boolean {
+  const [segment, ...rest] = pattern
+  const [name, ...below] = path
+  if (segment === undefined) return name === undefined
+  if (segment === '**') {
+    return (
+      referenceMatch(rest, path) ||
+      (name !== undefined && !name.startsWith('.') && referenceMatch(pattern, below))
+    )
+  }
+  return name !== undefined && referenceSegment(segment, name) && referenceMatch(rest, below)
+}
+
+function referenceSegment(pattern: string, name: string): boolean {
+  if (/^[*?]/.test(pattern) && name.startsWith('.')) return false
+  const from = (p: number, n: number): boolean => {
+    if (p === pattern.length) return n === name.length
+    const token = pattern.charAt(p)
+    if (token === '*') return from(p + 1, n) || (n < name.length && from(p, n + 1))
+    return n < name.length && (token === '?' || token === name.charAt(n)) && from(p + 1, n + 1)
+  }
+  return from(0, 0)
+}
+
+describe('compileGlob agrees with the reference semantics', () => {
+  it('on thousands of small generated globs and paths', () => {
+    let seed = 20260910
+    const random = (below: number) => {
+      seed = (seed * 1103515245 + 12345) % 2 ** 31
+      return seed % below
+    }
+    const word = (alphabet: string, max: number) => {
+      let out = ''
+      const length = 1 + random(max)
+      for (let index = 0; index < length; index += 1)
+        out += alphabet.charAt(random(alphabet.length))
+      return out
+    }
+    const safe = (segment: string) => segment !== '.' && segment !== '..'
+    const mismatches: string[] = []
+    for (let round = 0; round < 5000; round += 1) {
+      const pattern = Array.from({ length: 1 + random(4) }, () =>
+        random(4) === 0 ? '**' : word('ab*?.', 5),
+      ).filter(safe)
+      const path = Array.from({ length: 1 + random(4) }, () => word('ab.', 4)).filter(safe)
+      if (pattern.length === 0 || path.length === 0) continue
+      const expected = referenceMatch(pattern, path)
+      if (compileGlob(pattern.join('/')).test(path.join('/')) !== expected) {
+        mismatches.push(`${pattern.join('/')} vs ${path.join('/')}: expected ${expected}`)
+      }
+    }
+    expect(mismatches).toEqual([])
   })
 })
 

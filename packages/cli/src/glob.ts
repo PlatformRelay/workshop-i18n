@@ -119,24 +119,51 @@ function expandBraces(pattern: string): readonly string[] {
   return sequence(false)
 }
 
-/** Match one segment against `*`/`?` wildcards: greedy two-pointer, no backtracking blowup. */
+/** Whether `literal` (`?` matching any one character) matches `name` at `offset`. */
+function matchesAt(literal: string, name: string, offset: number): boolean {
+  for (let index = 0; index < literal.length; index += 1) {
+    const token = literal.charAt(index)
+    if (token !== '?' && token !== name.charAt(offset + index)) return false
+  }
+  return true
+}
+
+/**
+ * Match one segment against `*`/`?` wildcards. The text before the first `*` and after
+ * the last one can only match the name's two ends, so they are checked first, in time
+ * linear in their length — which rejects nearly every name a hostile segment is tried
+ * against. What lies between the outer stars goes to the greedy two-pointer: no
+ * backtracking blowup.
+ */
 function matchSegment(pattern: string, name: string): boolean {
   const first = pattern.charAt(0)
   if ((first === '*' || first === '?') && name.startsWith('.')) return false
+  const firstStar = pattern.indexOf('*')
+  if (firstStar < 0) return pattern.length === name.length && matchesAt(pattern, name, 0)
+  const lastStar = pattern.lastIndexOf('*')
+  const head = pattern.slice(0, firstStar)
+  const tail = pattern.slice(lastStar + 1)
+  if (head.length + tail.length > name.length) return false
+  if (!matchesAt(head, name, 0) || !matchesAt(tail, name, name.length - tail.length)) {
+    return false
+  }
+  // `inner` is matched against `middle` with a star on either side of it.
+  const inner = pattern.slice(firstStar + 1, lastStar)
+  const middle = name.slice(head.length, name.length - tail.length)
   let p = 0
   let n = 0
-  let star = -1
+  let star = -1 // the outer leading star
   let resume = 0
-  while (n < name.length) {
-    const token = pattern.charAt(p)
-    if (p < pattern.length && token === '*') {
+  while (p < inner.length) {
+    const token = inner.charAt(p)
+    if (token === '*') {
       star = p
       resume = n
       p += 1
-    } else if (p < pattern.length && (token === '?' || token === name.charAt(n))) {
+    } else if (n < middle.length && (token === '?' || token === middle.charAt(n))) {
       p += 1
       n += 1
-    } else if (star >= 0) {
+    } else if (resume < middle.length) {
       p = star + 1
       resume += 1
       n = resume
@@ -144,36 +171,34 @@ function matchSegment(pattern: string, name: string): boolean {
       return false
     }
   }
-  while (p < pattern.length && pattern.charAt(p) === '*') p += 1
-  return p === pattern.length
+  // Everything in `inner` matched; the outer trailing star takes the rest of `middle`.
+  return true
 }
 
-/** Match segment lists, `**` included, with a table instead of recursion. */
+/**
+ * Match segment lists, `**` included: a memoised walk from the first segment, so a path
+ * is abandoned at the first segment that cannot match, and no (segment, name) pair is
+ * ever tried twice.
+ */
 function matchSegments(pattern: readonly string[], path: readonly string[]): boolean {
   const width = path.length + 1
-  // can[i * width + j]: pattern[i..] matches path[j..]
-  const can = new Uint8Array((pattern.length + 1) * width)
-  can[pattern.length * width + path.length] = 1
-  for (let i = pattern.length - 1; i >= 0; i -= 1) {
-    const segment = pattern[i] as string
-    for (let j = path.length; j >= 0; j -= 1) {
-      const name = path[j]
-      let result: number
-      if (segment === '**') {
-        const skip = can[(i + 1) * width + j] ?? 0
-        const consume =
-          name !== undefined && !name.startsWith('.') ? (can[i * width + j + 1] ?? 0) : 0
-        result = skip | consume
-      } else {
-        result =
-          name !== undefined && matchSegment(segment, name)
-            ? (can[(i + 1) * width + j + 1] ?? 0)
-            : 0
-      }
-      can[i * width + j] = result
-    }
+  // known[i * width + j]: 0 = not asked yet, 1 = pattern[i..] matches path[j..], 2 = not
+  const known = new Uint8Array((pattern.length + 1) * width)
+  const from = (i: number, j: number): boolean => {
+    const segment = pattern[i]
+    if (segment === undefined) return j === path.length
+    const cell = i * width + j
+    const answer = known[cell]
+    if (answer !== 0) return answer === 1
+    const name = path[j]
+    const result =
+      segment === '**'
+        ? from(i + 1, j) || (name !== undefined && !name.startsWith('.') && from(i, j + 1))
+        : name !== undefined && matchSegment(segment, name) && from(i + 1, j + 1)
+    known[cell] = result ? 1 : 2
+    return result
   }
-  return can[0] === 1
+  return from(0, 0)
 }
 
 /** `a/**\/**\/b` → `a/**\/b`: consecutive `**` segments match exactly what one does. */
