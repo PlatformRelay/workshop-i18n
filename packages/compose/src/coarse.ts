@@ -134,6 +134,65 @@ export function syntaxTokens(text: string): readonly string[] {
   return text.match(SYNTAX) ?? []
 }
 
+/**
+ * An inline MDC component reference: a `:` immediately followed by a component-name letter,
+ * at a boundary (start of text, or after whitespace, `*`, `_`, `[`). Live under `mdc: true`
+ * — off in the consumer today, refused defensively (re-review 4 addendum). `:` is a free
+ * character (a prose colon), so the per-character budget cannot see this; it is its own rule.
+ * Block `::Name` lines are already refused as structural.
+ */
+const MDC_INLINE = /(?<=^|[\s*_[]):[A-Za-z][\w-]*/gu
+
+export function mdcTokens(text: string): readonly string[] {
+  return text.match(MDC_INLINE) ?? []
+}
+
+/**
+ * The characters a translation may spend freely: it may add as many as it likes without
+ * creating markup in any Markdown, Slidev or Vue context. Everything else is budgeted —
+ * see {@link budgetTokens}. Letters, marks and decimal digits are free by category; the
+ * literals below are ordinary prose punctuation and the two ordinary spaces.
+ */
+const FREE_PUNCTUATION = new Set(
+  [...'.,;:!?\'"()-–—…«»“”‘’¿¡%', ' ', ' '].map((character) => character.codePointAt(0) as number),
+)
+const FREE_CATEGORY = /[\p{L}\p{M}\p{Nd}]/u
+
+function isFree(character: string): boolean {
+  const code = character.codePointAt(0) as number
+  return FREE_PUNCTUATION.has(code) || FREE_CATEGORY.test(character)
+}
+
+/**
+ * The backbone rule (re-review 4, coordinator refinement): every character a translation
+ * adds that is **not** in the free set is budgeted against the English unit's count of
+ * that same character. Reviewers kept finding new Slidev syntax built from characters the
+ * enumerated classes had not listed (`![`, container fences, `:Name`, symbol hosts); this
+ * stops enumerating syntax and enumerates what prose may freely add instead. One token per
+ * budgeted character occurrence, so the ordinary added-vs-English multiset makes "may not
+ * exceed the English count" fall out for free.
+ *
+ * Tab, line feed and carriage return are line structure, already governed by the
+ * structural-line and skeleton gates, and are omitted here so they do not double-report.
+ * Every symbol and emoji, every backtick/brace/bracket/star/slash/etc., every non-ordinary
+ * space and every format character is budgeted. A character with no printable glyph is
+ * reported by code point.
+ */
+export function budgetTokens(text: string): readonly string[] {
+  const tokens: string[] = []
+  for (const character of text) {
+    const code = character.codePointAt(0) as number
+    if (code === 0x09 || code === 0x0a || code === 0x0d) continue
+    if (isFree(character)) continue
+    tokens.push(
+      code < 0x20 || code === 0x7f || /[\p{Cf}\p{Zl}\p{Zp}]/u.test(character)
+        ? `U+${code.toString(16).toUpperCase().padStart(4, '0')}`
+        : character,
+    )
+  }
+  return tokens
+}
+
 /** Unicode format characters in `text`, spelled as code points so reports are readable. */
 export function formatTokens(text: string): readonly string[] {
   return (text.match(FORMAT) ?? []).map(

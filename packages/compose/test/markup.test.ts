@@ -81,8 +81,13 @@ describe('markupTokens', () => {
     expect(performance.now() - started).toBeLessThan(1_000)
   })
 
-  it('is empty for plain prose', () => {
-    expect(markupTokens('Ein Pod ist die kleinste Einheit — 100 % „sicher“.')).toEqual([])
+  it('finds no markup in plain prose', () => {
+    // The over-approximating coarse kinds (budget, linklike, …) list benign characters by
+    // design; what "plain prose" means is that none of the *markup* kinds fire.
+    const markupKinds = new Set(['code', 'tag', 'mustache', 'brace', 'url', 'entity'])
+    const prose = 'Ein Pod ist die kleinste Einheit — 100 % sicher.'
+    expect(markupTokens(prose).filter((token) => markupKinds.has(token.kind))).toEqual([])
+    expect(checkMarkupParity(prose, prose)).toEqual({ ok: true, added: [], removed: [] })
   })
 })
 
@@ -96,10 +101,13 @@ describe('checkMarkupParity', () => {
     expect(checkMarkupParity(english, german)).toEqual({ ok: true, added: [], removed: [] })
   })
 
+  const tags = (tokens: readonly { kind: string; text: string }[]): readonly string[] =>
+    tokens.filter((token) => token.kind === 'tag').map((token) => token.text)
+
   it('rejects an added <script> tag', () => {
     const result = checkMarkupParity(english, `${english} <script>alert(1)</script>`)
     expect(result.ok).toBe(false)
-    expect(result.added.map((token) => token.text)).toEqual(['<script>', '</script>'])
+    expect(tags(result.added)).toEqual(['<script>', '</script>'])
   })
 
   it('rejects an event handler attribute added to an existing tag', () => {
@@ -108,8 +116,8 @@ describe('checkMarkupParity', () => {
       english.replace('<v-click>', '<v-click onclick="steal()">'),
     )
     expect(result.ok).toBe(false)
-    expect(result.added.map((token) => token.text)).toEqual(['<v-click onclick="steal()">'])
-    expect(result.removed.map((token) => token.text)).toEqual(['<v-click>'])
+    expect(tags(result.added)).toEqual(['<v-click onclick="steal()">'])
+    expect(tags(result.removed)).toEqual(['<v-click>'])
   })
 
   it('does not let a quoted ">" hide an attribute after it', () => {
@@ -252,7 +260,9 @@ describe('checkMarkupParity', () => {
   it('compares multisets: duplicating a token the English has once is an addition', () => {
     const result = checkMarkupParity('Page {{ a }}', 'Seite {{ a }} und {{ a }}')
     expect(result.ok).toBe(false)
-    expect(result.added).toEqual([{ kind: 'mustache', text: '{{ a }}' }])
+    expect(result.added.filter((token) => token.kind === 'mustache')).toEqual([
+      { kind: 'mustache', text: '{{ a }}' },
+    ])
     expect(result.removed).toEqual([])
   })
 

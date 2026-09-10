@@ -175,7 +175,7 @@ function isStructuralOnly(source: string): boolean {
 /** Keeps every token the gates compare: the English, with prose-only words around it. */
 function markupPreserving(source: string, index: number): string {
   if (hasControlCharacter(source) || isStructuralOnly(source)) return source
-  return `${source} ‹de ${index}›`
+  return `${source} (traducao ${index})`
 }
 
 /** Findings other than the extractor's coverage-gap warnings, which are the English's own. */
@@ -188,6 +188,11 @@ const HOSTILE_SUFFIXES: readonly string[] = [
   ' {{ $slidev.nav.go(1) }}',
   ' [klick](javascript:alert(1))',
   ' <a href="https://evil.example">x</a>',
+  '\n<<< @/.env txt',
+  ' ![x](./.env?raw)',
+  '\n- ```plantuml',
+  ' :Toc',
+  ' 😈.ws',
 ]
 
 describe.each(CORPUS.map((fixture) => [fixture.name, fixture] as const))(

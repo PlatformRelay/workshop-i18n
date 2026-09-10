@@ -58,7 +58,14 @@
 
 import LinkifyIt from 'linkify-it'
 
-import { formatTokens, linkLikeTokens, structuralTokens, syntaxTokens } from './coarse.js'
+import {
+  budgetTokens,
+  formatTokens,
+  linkLikeTokens,
+  mdcTokens,
+  structuralTokens,
+  syntaxTokens,
+} from './coarse.js'
 import { rendererLinks } from './renderer.js'
 
 /** What a token is. Kinds are compared separately so a report can say what changed. */
@@ -72,6 +79,8 @@ export type MarkupTokenKind =
   | 'syntax'
   | 'format'
   | 'structural'
+  | 'mdc'
+  | 'budget'
   | 'entity'
   | 'oversize'
 
@@ -101,6 +110,8 @@ const KIND_ORDER: readonly MarkupTokenKind[] = [
   'syntax',
   'format',
   'structural',
+  'mdc',
+  'budget',
   'entity',
   'oversize',
 ]
@@ -399,6 +410,8 @@ export function markupTokens(text: string): readonly MarkupToken[] {
     linklike: linkLikeTokens(normalized),
     syntax: syntaxTokens(normalized),
     structural: structuralTokens(normalized),
+    mdc: mdcTokens(normalized),
+    budget: budgetTokens(normalized),
     format: formatTokens(normalized),
     entity: entityTokens(text),
     oversize: [],
@@ -421,6 +434,8 @@ const INTRODUCTION_ONLY_KINDS: ReadonlySet<MarkupTokenKind> = new Set([
   'syntax',
   'format',
   'structural',
+  'mdc',
+  'budget',
 ])
 
 function keyOf(token: MarkupToken): string {

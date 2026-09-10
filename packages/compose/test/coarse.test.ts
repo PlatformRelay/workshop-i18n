@@ -144,6 +144,68 @@ describe('structural lines a translation may not introduce', () => {
   })
 })
 
+/**
+ * The per-character budget (re-review 4, coordinator refinement): every character a
+ * translation adds that is not letters, marks, digits, ordinary spaces or prose
+ * punctuation is budgeted against the English unit's count. This subsumes the image `![`,
+ * container-fence, MDC-attribute-brace and fence-run findings — each is kept as its own
+ * test below, but the mechanism is one rule.
+ */
+describe('the per-character budget on non-prose characters', () => {
+  it.each([
+    ['a markdown image (asset import)', '![x](./.env?raw)'],
+    ['a reference-style image', '![x][r]'],
+    ['a link-to-image flip on an English target', '![docs](./probe.json)'],
+    ['a container-prefixed fence', '- ```mermaid'],
+    ['a blockquote-prefixed fence', '> ```plantuml'],
+    ['an unclosed tilde fence after a list marker', '- ~~~ts twoslash'],
+    ['an MDC attribute brace funded from an English code span', '**kubectl**{onclick="x"}'],
+    ['a bare backtick run', 'veja ``` agora'],
+    ['an added angle bracket', 'veja < agora'],
+    ['an added pipe', 'a | b'],
+    ['an added backslash', 'a \\ b'],
+  ])('refuses %s', (_label, translation) => {
+    // English carries the same code span (`jsonpath={.items[*]}`) and target, so the
+    // funding attack — spending English's braces or backticks on prose — cannot work.
+    const english = 'See `jsonpath={.items[*]}` and [docs](./probe.json)'
+    expect(addedKinds(english, `${english} ${translation}`)).toContain('budget')
+  })
+
+  it('lets a translation spend letters, digits and prose punctuation freely', () => {
+    expect(
+      checkMarkupParity(
+        'A Pod runs — see the guide (chapter 2): 100% ready.',
+        'Ein Pod läuft — siehe den Leitfaden (Kapitel 2): 100% bereit… „wirklich“? Ja!',
+      ).ok,
+    ).toBe(false) // the German low quote „ is budgeted; see the README's monitored set
+    expect(
+      checkMarkupParity(
+        'A Pod runs — see the guide (chapter 2): 100% ready.',
+        'Ein Pod läuft — siehe den Leitfaden (Kapitel 2): 100% bereit, wirklich? Ja!',
+      ),
+    ).toEqual({ ok: true, added: [], removed: [] })
+  })
+
+  it('reports a non-printing budgeted character by code point', () => {
+    const result = checkMarkupParity('Deploy it', 'Implante\u{2028}isso')
+    expect(result.added.map((token) => token.text)).toContain('U+2028')
+  })
+})
+
+describe('inline MDC components a translation may not introduce', () => {
+  it.each([
+    ['a bare component', 'veja :Toc hier'],
+    ['a component after emphasis', 'veja *:Alert*'],
+    ['a component after a bracket', 'veja [:Button]'],
+  ])('refuses %s', (_label, translation) => {
+    expect(addedKinds('See the docs', translation)).toContain('mdc')
+  })
+
+  it('does not trip on a prose colon followed by a space or a digit', () => {
+    expect(checkMarkupParity('Timeout', 'Tempo limite: 5 segundos, veja: aqui').ok).toBe(true)
+  })
+})
+
 describe('syntax sequences a translation may not introduce', () => {
   it.each([
     ['inline math', 'Das kostet $x$'],

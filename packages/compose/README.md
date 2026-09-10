@@ -81,18 +81,36 @@ and again on the emitted output.
 
   1. **The barrier — coarse and renderer-independent.** A translation may not
      *introduce*, beyond what its English unit has (as a multiset):
-     - `linklike` — dotted host-like runs (`evil.com`, `пример.рф`, `xn--…`; digits-only
-       decimals such as `1.5` exempt), an `@` touching a word (emails, `@user`), `://`,
-       `mailto:`, a GitHub issue reference `#123`, or a bracket label that is not
-       inline-link text (`[admin]`, which resolves against any reference definition in
-       the file);
-     - `syntax` — `$` (KaTeX), `^[` and `[^` (footnotes), `]:` (definitions);
-     - `format` — any Unicode format character (Cf: zero-width and bidi controls,
-       U+FEFF, U+00AD, …).
+     - `budget` — **the backbone.** After decoding character references and backslash
+       escapes, every character that is not in the *free set* is budgeted against the
+       English unit's count of that character. The free set is Unicode letters, marks and
+       decimal digits; the two ordinary spaces (U+0020, U+00A0); and prose punctuation
+       ``. , ; : ! ? ' " ( ) - – — … « » “ ” ‘ ’ ¿ ¡ %``. Everything else — `` ` ~ < > { }
+       [ ] $ * _ # | @ / \ & ^ = + ``, every symbol and emoji, every other space, every
+       format character — is budgeted. This is what makes the barrier robust to *new*
+       Slidev syntax: reviewers repeatedly found constructs (`![` images, container
+       fences `` - ```mermaid ``, braceless `<<< @/.env`, symbol hosts `😈.ws`) built from
+       characters an enumerated list had not foreseen. Enumerating what prose may freely
+       *add* closes all of them at once.
+     - `linklike` — dotted host-like runs in any script including symbols/emoji
+       (`evil.com`, `пример.рф`, `xn--…`, `😈.ws`; ASCII, fullwidth and ideographic dots;
+       digits-only decimals such as `1.5` exempt), an `@` touching a word (emails,
+       `@user`), `://`, `mailto:`, a GitHub issue reference `#123`, or a bracket label
+       that is not inline-link text. Hosts use only free characters, so this stays
+       essential on top of the budget.
+     - `structural` — a line (split on `\n`, `\r\n`, `\r`) that, after ≤3 leading spaces
+       or tabs, starts with `<<<` (snippet import — reads a build-machine file), `$$`
+       (KaTeX block), `::` (slot marker / MDC block), `---` (separator) or a fence opener,
+       unless the identical line is in the English unit.
+     - `mdc` — an inline MDC component `:Name` at a boundary (`:` is a free character, so
+       the budget cannot see it); live under `mdc: true`, refused defensively.
+     - `syntax` (`$`, `^[`, `[^`, `]:`) and `format` (any Cf character) remain as named
+       classes; the budget now covers them too.
 
-     Dropping these is allowed — a translation that leaves out an English `e.g.` creates
-     nothing. A translation longer than `max(8192, 4 × English)` is refused before any
-     parser runs.
+     Dropping any of these is allowed — a translation that leaves out an English `e.g.`
+     creates nothing. A translation longer than `MAX_SCANNED_LENGTH` (8192) is refused
+     before any parser runs; the cap is absolute, never scaled, so no layer is ever
+     skipped for a translation that is then accepted.
   2. **Exact tokens, two-way:** inline code spans, HTML tags and Vue components
      (attributes included), `{{ }}` expressions, attribute braces, character references
      and URL tokens must match the English as multisets. URL tokens are inline and
@@ -111,11 +129,22 @@ and again on the emitted output.
   creates is counted *and* trips the coarse layer on its own.
 
   **Measured false-positive cost.** On the 1 399 real pt-BR translations the seed lane
-  aligns from Kubernetes-Workshop PR #55, the coarse layer rejects **no** translation
-  the gate did not already reject (11 before and after: 9 changed code spans, 2 added
-  character references). Judged two-way it would have rejected 18 more, all for a
-  *dropped* `e.g.`, `i.e.`, `a.m.`, `#1` or dotted identifier — which is why it is
-  introduction-only.
+  aligns from Kubernetes-Workshop PR #55, the gate rejects 14 (1.0%): 9 changed code
+  spans, 2 added character references, and 5 that add a budgeted character the English
+  lacks (3 overlap the first two, so the per-character budget newly rejects 3 units,
+  0.2%). Those are: an added `→` arrow (3), an added `/` (2), an added unbalanced
+  `` ` `` (1) — each a marked English fallback a reviewer can see and fix. `→` and `/`
+  cannot create markup alone, but budgeting all symbols is the point of the backbone, and
+  the cost is small enough not to carve exceptions without stronger evidence. The coarse
+  classes are introduction-only: judged two-way the budget alone would reject far more
+  for merely *dropped* punctuation.
+
+  **Monitored (budgeted, not free).** Typographic characters that cannot create markup
+  but are outside the free set are budgeted, so a translation that *introduces* them
+  falls back: the German low quote `„`, single guillemets `‹ ›`, the middle dot `·`, the
+  bullet `•`, and arrows. Source workshops are English and translations rarely add these
+  where the English has none; if a target language makes this costly, widen the free set
+  with evidence that the character is inert in Markdown, Slidev and Vue.
 - **Protected terms** — `missingProtectedTerms(english, translation, manifest.protectedTerms)`:
   every term the English uses must appear unaltered (case-sensitive, whole-word).
 - **Length budget** — slides only, `lengthBudgetFor(manifest, layout)` against the code
@@ -148,8 +177,10 @@ Stated so nobody mistakes the gates for more than they are.
   Shiki and the code-block transformers, `MarkdownItLink` (turns existing links with
   `./`, `/`, `#` or digit-only targets into router links and adds `target="_blank"` to
   the rest — it creates none), task lists, GitHub alerts, v-drag, slot sugar, scoped
-  styles, and MDC/Comark (opt-in via `mdc`/`comark`; its `{…}` attribute blocks are
-  caught as `brace` tokens). Speaker notes are rendered separately, by Slidev's own
+  styles, and MDC/Comark (opt-in via `mdc`/`comark`, off in the consumer; its `{…}`
+  attribute blocks, inline `:Name` components and `::Name` blocks are refused defensively
+  by the budget, `mdc` and `structural` classes anyway). Speaker notes are rendered
+  separately, by Slidev's own
   markdown-exit 1.1.0-beta.2 with `html` on and `linkify` off. A consumer
   `markdownSetup` can add anything. None of this weakens the barrier, which assumes no
   renderer; it bounds only which links are also counted by their exact `href`.
