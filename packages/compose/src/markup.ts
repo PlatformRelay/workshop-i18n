@@ -294,7 +294,7 @@ export function markupTokens(text: string): readonly MarkupToken[] {
 }
 
 function keyOf(token: MarkupToken): string {
-  return `${token.kind}${token.text}`
+  return JSON.stringify([token.kind, token.text])
 }
 
 /** Tokens of `from` not matched one-for-one by a token of `against`. */
