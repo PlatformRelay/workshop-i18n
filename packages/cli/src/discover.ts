@@ -23,11 +23,33 @@ import { assertNoSymlink, insideRoot, repoJoin } from './paths.js'
 import { compareStrings } from './report.js'
 import type { Workspace } from './workspace.js'
 
-/** Directory names never entered, at any depth. */
+/** Directory names never entered, at any depth. Compared with {@link foldName}. */
 const SKIPPED_ANYWHERE: ReadonlySet<string> = new Set(['.git', 'node_modules'])
 
-/** Directories at the repository root that belong to this tool, never to the source. */
+/**
+ * Directories at the repository root that belong to this tool, never to the source.
+ * Compared with {@link foldName}.
+ */
 export const RESERVED_ROOT_DIRECTORIES: ReadonlySet<string> = new Set(['i18n', '.localization'])
+
+/**
+ * A directory name reduced to what a case-insensitive file system compares: on macOS and
+ * Windows `I18N/` *is* `i18n/`, so the protected names must match in any letter case.
+ * Unicode-aware (`ſ` folds to `s`, the Kelvin sign to `k`) rather than ASCII-only,
+ * because those file systems fold Unicode too. On a case-sensitive file system this only
+ * ever refuses more — a genuine `I18N/` source directory is not worth the ambiguity.
+ */
+function foldName(name: string): string {
+  return name.normalize('NFC').toUpperCase().toLowerCase()
+}
+
+function isSkippedAnywhere(name: string): boolean {
+  return SKIPPED_ANYWHERE.has(foldName(name))
+}
+
+function isReservedAtRoot(name: string): boolean {
+  return RESERVED_ROOT_DIRECTORIES.has(foldName(name))
+}
 
 /** One source file a surface covers. */
 export interface SurfaceFile {
@@ -67,8 +89,8 @@ export function walkFiles(
     const directory = pending.pop() as string
     const absolute = directory === '' ? root : insideRoot(root, directory)
     for (const name of fs.readDirectory(absolute)) {
-      if (SKIPPED_ANYWHERE.has(name)) continue
-      if (directory === '' && RESERVED_ROOT_DIRECTORIES.has(name)) continue
+      if (isSkippedAnywhere(name)) continue
+      if (directory === '' && isReservedAtRoot(name)) continue
       const path = repoJoin(directory, name)
       const kind = fs.kind(insideRoot(root, path))
       if (kind === 'symlink') links.push(path)
@@ -90,7 +112,7 @@ export function walkFiles(
 function assertWalkableBase(base: string, entry: string): void {
   const segments = base === '' ? [] : base.split('/')
   const first = segments[0] ?? ''
-  if (RESERVED_ROOT_DIRECTORIES.has(first)) {
+  if (isReservedAtRoot(first)) {
     // The root walk skips these trees, but a glob based inside one would walk it
     // directly — and extract a locale's overrides as English.
     throw new CliError(
@@ -98,7 +120,7 @@ function assertWalkableBase(base: string, entry: string): void {
       `${entry} reaches into ${first}/, which belongs to workshop-i18n (catalogs, overrides, the manifest) and is never English source`,
     )
   }
-  const skipped = segments.find((segment) => SKIPPED_ANYWHERE.has(segment))
+  const skipped = segments.find(isSkippedAnywhere)
   if (skipped !== undefined) {
     throw new CliError(
       EXIT.DATA,

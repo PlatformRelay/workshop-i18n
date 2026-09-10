@@ -153,6 +153,57 @@ describe('discoverSurfaceFiles — hostile globs', () => {
     expect(fs.writes).toEqual([])
   })
 
+  it.each([
+    ["'I18N/**/*.md'", 'I18N', 'which belongs to workshop-i18n'],
+    ["'{labs,I18n}/pt-BR/**/*.md'", 'I18n', 'which belongs to workshop-i18n'],
+    ["'.Localization/*.md'", '.Localization', 'which belongs to workshop-i18n'],
+    ["'.GIT/config'", '.GIT', 'which holds version-control or dependency files'],
+    [
+      "'labs/Node_Modules/**/*.md'",
+      'Node_Modules',
+      'which holds version-control or dependency files',
+    ],
+    ["'node_moduleſ/x.md'", 'node_moduleſ', 'which holds version-control or dependency files'],
+  ])(
+    'refuses %s in any letter case, since a case-insensitive file system resolves it to the real tree',
+    (glob, written, reason) => {
+      const fs = new MemoryFileSystem({
+        '/repo/.localization/workshop.yaml': MANIFEST.replace("'labs/**/*.md'", glob),
+        '/repo/labs/a.md': '',
+        '/repo/pages/S05-pod/index.md': '',
+        '/repo/quiz/questions.json': '{}',
+      })
+      const result = invoke(fs, ['extract'])
+      expect(result.code).toBe(EXIT.DATA)
+      expect(result.stderr).toContain(
+        `surfaces.labs.include[0] reaches into ${written}/, ${reason}`,
+      )
+      expect(fs.writes).toEqual([])
+    },
+  )
+
+  it('skips the reserved and dependency trees in any letter case during the walk', () => {
+    // On a case-insensitive file system an existing `I18n/` is where catalogs and
+    // overrides land, and a directory listing reports it as `I18n`, not `i18n`.
+    const fs = new MemoryFileSystem({
+      '/repo/.localization/workshop.yaml': MANIFEST.replace("'labs/**/*.md'", "'**/*.md'").replace(
+        "'labs/README.md'",
+        "'pages/**'",
+      ),
+      '/repo/labs/a.md': '',
+      '/repo/I18n/pt-BR/overrides/s.md': '# Sobrescrita\n',
+      '/repo/.Localization/notes.md': '',
+      '/repo/labs/Node_Modules/x.md': '',
+      '/repo/.GIT/x.md': '',
+      '/repo/pages/S01/index.md': '',
+      '/repo/quiz/questions.json': '{}',
+    })
+    const found = discoverSurfaceFiles(workspaceOf(fs))
+    expect(found.files.filter((file) => file.surface === 'labs').map((file) => file.path)).toEqual([
+      'labs/a.md',
+    ])
+  })
+
   it('refuses a glob over the size bounds before walking anything, naming the entry', () => {
     const hostile = `{${Array(64).fill('*').join(',')}}/${'*/'.repeat(500)}x.md`
     const fs = new MemoryFileSystem({

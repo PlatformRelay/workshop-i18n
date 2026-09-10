@@ -51,8 +51,9 @@ with a warning; a symlinked glob base, catalog or `i18n/` directory is an error)
 `.git/`, `node_modules/`, or the tool's own `i18n/` and `.localization/` trees — so a broad
 `**/*.md` cannot extract a locale's overrides as English. An include glob whose literal base lies
 inside any of these trees (`i18n/**/*.md`, `.git/config`, `labs/node_modules/**`) is refused
-outright (exit 65), since it would walk it directly. A glob that matches nothing is warned about; a
-file two surfaces both claim is an error.
+outright (exit 65), since it would walk it directly. These names are compared in any letter case
+(`I18N/`, `.GIT/`), because on a case-insensitive file system that is the same directory. A glob
+that matches nothing is warned about; a file two surfaces both claim is an error.
 
 ## Commands
 
