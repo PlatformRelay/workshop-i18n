@@ -35,15 +35,24 @@ export interface ExtractPlan {
   readonly warnings: readonly string[]
 }
 
-/** Extract and plan every declared locale, writing nothing. */
-export function planExtract(context: CommandContext): ExtractPlan {
+/**
+ * Extract and plan the declared locales, writing nothing.
+ *
+ * `selectLocales` narrows which locales are planned — and therefore which catalogs are
+ * read at all, so `status --locale de` cannot fail on a broken `pt-BR` catalog. It runs
+ * after the manifest is loaded and before any catalog is touched; it may throw.
+ */
+export function planExtract(
+  context: CommandContext,
+  selectLocales: (workspace: Workspace) => readonly string[] = (workspace) =>
+    workspace.manifest.locales.targets,
+): ExtractPlan {
   const workspace = loadWorkspace(context.io, context.root)
+  const locales = selectLocales(workspace)
   const sources = readSources(workspace)
   const extraction = extractCorpus(workspace, sources)
   assertDistinctCatalogs(extraction)
-  const plans = workspace.manifest.locales.targets.map((locale) =>
-    planLocale(workspace, extraction, locale),
-  )
+  const plans = locales.map((locale) => planLocale(workspace, extraction, locale))
   // Extractor warnings arrive formatted (`path:line:col: warning: …`); the rest get the
   // same `warning:` marker here so every line on stderr can be grepped the same way.
   const warnings = [

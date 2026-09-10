@@ -85,8 +85,11 @@ from the catalogs `extract` *would* write: an English edit nobody has extracted 
 as `fuzzy`, and a warning plus `"catalogsCurrent": false` say the files on disk are stale.
 
 `--policy release` fails (exit 1) on any missing, fuzzy or needs-review unit and lists every gating
-unit id with its section; `--policy preview` gates nothing. A catalog directory for a locale the
-manifest does not declare is warned about and excluded.
+unit id with its section. It also fails while the committed catalogs differ from what `extract`
+would write (a `stale-catalogs` violation): a release is built from the committed files, and the
+plan can be more lenient than they are. `--policy preview` gates nothing, stale or not.
+`--locale` narrows the report — and which catalogs are read — to one declared target. A catalog
+directory for a locale the manifest does not declare is warned about and excluded.
 
 The `--json` document (`schemaVersion: 1`) has a fixed key order and is byte-identical across runs:
 
@@ -112,7 +115,9 @@ The `--json` document (`schemaVersion: 1`) has a fixed key order and is byte-ide
 ```
 
 With `--policy`, `policy` is `{ "name", "satisfied", "violations": [{ "kind": "state", "locale",
-"state", "limit", "count", "units": [{ "id", "section" }] }] }`.
+"state", "limit", "count", "units": [{ "id", "section" }] }] }`, plus
+`{ "kind": "stale-catalogs", "catalogs": [paths] }` when the committed catalogs are behind. Treat an
+unknown `kind` as a violation.
 
 ## Catalog layout
 

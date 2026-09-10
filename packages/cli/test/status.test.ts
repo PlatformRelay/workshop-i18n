@@ -245,6 +245,64 @@ describe('status --policy (spec 002 US-2)', () => {
   })
 })
 
+describe('status --policy — stale catalogs (ADR 0014)', () => {
+  function reviewedThenEnglishRemoved(): MemoryFileSystem {
+    const fs = extracted()
+    for (const locale of ['pt-BR', 'de']) {
+      for (const path of [SLIDES_PO, LAB_PO].map((p) => p.replace('/pt-BR/', `/${locale}/`))) {
+        fs.put(path, translateAll(fs.text(path)))
+      }
+    }
+    // Deleting English leaves every remaining unit reviewed: the plan passes release, but
+    // the committed catalogs still carry the removed entry as live.
+    fs.put('/repo/labs/day-1/05-pod.md', POD_LAB.replace('Run a Pod.\n', ''))
+    return fs
+  }
+
+  it('fails a gating policy when committed catalogs are behind the English', () => {
+    const fs = reviewedThenEnglishRemoved()
+    const result = json(fs, ['--policy', 'release'])
+    expect(result.code).toBe(EXIT.FAILED)
+    expect(result.report.catalogsCurrent).toBe(false)
+    expect(result.report.totals.reviewed).toBe(result.report.total)
+    expect(result.report.policy?.violations).toEqual([
+      {
+        kind: 'stale-catalogs',
+        catalogs: ['i18n/de/labs/day-1/05-pod.po', 'i18n/pt-BR/labs/day-1/05-pod.po'],
+      },
+    ])
+  })
+
+  it('says so in the human report', () => {
+    const result = invoke(reviewedThenEnglishRemoved(), ['status', '--policy', 'release'])
+    expect(result.code).toBe(EXIT.FAILED)
+    expect(result.stdout).toContain('catalogs out of date — run workshop-i18n extract and commit:')
+    expect(result.stdout).toContain('    i18n/pt-BR/labs/day-1/05-pod.po')
+  })
+
+  it('passes the same tree once extract has run', () => {
+    const fs = reviewedThenEnglishRemoved()
+    invoke(fs, ['extract'])
+    expect(invoke(fs, ['status', '--policy', 'release']).code).toBe(EXIT.OK)
+  })
+
+  it('does not fail preview, which gates nothing', () => {
+    expect(invoke(reviewedThenEnglishRemoved(), ['status', '--policy', 'preview']).code).toBe(
+      EXIT.OK,
+    )
+  })
+})
+
+describe('status --locale', () => {
+  it('never reads another locale’s catalogs, so its breakage cannot fail this report', () => {
+    const fs = extracted()
+    fs.put(LAB_PO, `${fs.text(LAB_PO)}\nmsgid "unterminated\n`)
+    const result = json(fs, ['--locale', 'de'])
+    expect(result.code).toBe(EXIT.OK)
+    expect(result.report.locales.map((locale) => locale.locale)).toEqual(['de'])
+  })
+})
+
 describe('status — usage errors', () => {
   it('rejects an unknown policy with 64, listing the known ones', () => {
     const result = invoke(extracted(), ['status', '--policy', 'relase'])
