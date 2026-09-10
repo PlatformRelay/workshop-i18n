@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { EXIT } from '../src/exit-codes.js'
 import { invoke, MemoryFileSystem } from './memory-fs.js'
@@ -371,5 +372,59 @@ describe('status — usage errors', () => {
     const result = invoke(fs, ['status'])
     expect(result.code).toBe(EXIT.DATA)
     expect(result.stderr).toMatch(/i18n\/pt-BR\/labs\/day-1\/05-pod\.po:\d+:/)
+  })
+})
+
+describe('status --json — the README example', () => {
+  it('is exactly what the CLI prints for the tree the README describes', () => {
+    const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8')
+    const example = /The `--json` document[\s\S]*?```json\n([\s\S]*?)```/.exec(readme)?.[1]
+    expect(example).toBeDefined()
+    const fs = new MemoryFileSystem({
+      '/repo/.localization/workshop.yaml': [
+        'apiVersion: workshop-i18n/v1',
+        'locales:',
+        '  source: en',
+        '  targets: [pt-BR]',
+        'surfaces:',
+        '  slides:',
+        "    include: ['pages/**/index.md']",
+        '  labs:',
+        "    include: ['labs/**/*.md']",
+        '',
+      ].join('\n'),
+      '/repo/pages/S05-pod/index.md': [
+        '# Pods',
+        '',
+        'A Pod wraps one or more containers.',
+        '',
+        '<div class="callout">',
+        'Every container in a Pod shares its network namespace.',
+        '</div>',
+        '',
+      ].join('\n'),
+      '/repo/labs/day-1/05-pod.md': [
+        '# Lab 05 — Pod',
+        '',
+        'Run a Pod.',
+        '',
+        '```bash',
+        'kubectl run web --image=nginx',
+        '```',
+        '',
+      ].join('\n'),
+    })
+    expect(invoke(fs, ['init-ids']).code).toBe(EXIT.OK)
+    expect(invoke(fs, ['extract']).code).toBe(EXIT.OK)
+    fs.put(
+      LAB_PO,
+      fs
+        .text(LAB_PO)
+        .replace('msgid "Run a Pod."\nmsgstr ""', 'msgid "Run a Pod."\nmsgstr "Execute um Pod."')
+        .replace('msgid "Lab 05 — Pod"\nmsgstr ""', 'msgid "Lab 05 — Pod"\nmsgstr "Lab 05 — Pod"'),
+    )
+    const result = invoke(fs, ['status', '--json'])
+    expect(result.code).toBe(EXIT.OK)
+    expect(result.stdout).toBe(example)
   })
 })

@@ -130,23 +130,62 @@ show that. Status reports the count per section (the `gaps` column, `coverageGap
 locale cannot look fully reviewed while part of its slides silently stays English (ADR 0009). They
 are reported, not gated; `extract` lists each one with its location.
 
-The `--json` document (`schemaVersion: 1`) has a fixed key order and is byte-identical across runs:
+The `--json` document (`schemaVersion: 1`) has a fixed key order and is byte-identical across runs.
+Captured from a `pt-BR` tree with one slide file — a heading and a paragraph, plus a paragraph
+inside an HTML block (the coverage gap) — and one lab whose two units are translated:
 
 ```json
 {
   "schemaVersion": 1,
   "sourceLocale": "en",
   "catalogsCurrent": true,
-  "total": 5,
-  "totals": { "missing": 3, "fuzzy": 0, "needs-review": 0, "reviewed": 2 },
-  "coverageGaps": { "total": 1, "sections": [{ "section": "pages/S05-pod/index.md", "count": 1 }] },
+  "total": 4,
+  "totals": {
+    "missing": 2,
+    "fuzzy": 0,
+    "needs-review": 0,
+    "reviewed": 2
+  },
+  "coverageGaps": {
+    "total": 1,
+    "sections": [
+      {
+        "section": "pages/S05-pod/index.md",
+        "count": 1
+      }
+    ]
+  },
   "locales": [
     {
       "locale": "pt-BR",
-      "total": 5,
-      "counts": { "missing": 3, "fuzzy": 0, "needs-review": 0, "reviewed": 2 },
+      "total": 4,
+      "counts": {
+        "missing": 2,
+        "fuzzy": 0,
+        "needs-review": 0,
+        "reviewed": 2
+      },
       "sections": [
-        { "section": "labs/day-1/05-pod.md", "total": 2, "counts": { "missing": 0, "fuzzy": 0, "needs-review": 0, "reviewed": 2 } }
+        {
+          "section": "labs/day-1/05-pod.md",
+          "total": 2,
+          "counts": {
+            "missing": 0,
+            "fuzzy": 0,
+            "needs-review": 0,
+            "reviewed": 2
+          }
+        },
+        {
+          "section": "pages/S05-pod/index.md",
+          "total": 2,
+          "counts": {
+            "missing": 2,
+            "fuzzy": 0,
+            "needs-review": 0,
+            "reviewed": 0
+          }
+        }
       ]
     }
   ],
