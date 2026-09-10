@@ -207,6 +207,9 @@ const HOSTILE_TRANSLATIONS: readonly (readonly [string, string])[] = [
   ['an unterminated tag', 'eins <b class="x'],
   ['a blank line', 'eins\n\nzwei'],
   ['both quote characters', 'eins "zwei" \'drei\''],
+  ['an entity-encoded interpolation', 'eins &#123;&#123; x &#125;&#125; zwei'],
+  ['a snippet import line', 'eins\n<<< @/.env txt'],
+  ['a KaTeX block', 'eins\n$$ {1}{onVnodeMounted: () => x}\nx\n$$'],
   ['plain words that carry nothing across', 'schlicht'],
 ]
 
