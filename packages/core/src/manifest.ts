@@ -393,7 +393,10 @@ export function textPropRejection(prop: unknown): string | undefined {
   if (resolved.startsWith('v-')) {
     return `${JSON.stringify(prop)} is the directive ${JSON.stringify(resolved)} to Vue — directives are code, never text`
   }
-  if (resolved.startsWith('on')) {
+  // Vue reads `on` + an upper-case letter (hyphenated to `on-…`) as a listener, and an
+  // all-lower-case `on…` attribute is a live handler on a native element. `onboardingTitle`
+  // is neither; `online` has the handler's shape and stays refused.
+  if (resolved.startsWith('on-') || /^on[a-z]+$/.test(prop)) {
     return `${JSON.stringify(prop)} is read as an event listener — events are code, never text`
   }
   if (NEVER_TEXT_PROPS.has(resolved)) {
