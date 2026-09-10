@@ -31,6 +31,11 @@ surfaces:
     schema: kubernetes-workshop
 ```
 
+Each surface takes `include` globs and optional `exclude` globs; a file is covered when it matches
+an include and no exclude. Mind what a broad glob catches: `labs/**/*.md` also covers
+`labs/README.md` (and `.solution.md` companions), which then become labs with a `labId` of their
+own — add `exclude: ['labs/README.md']` if an index page should not be a translation unit.
+
 Globs are repository-relative and support `*`, `?`, `**` (whole segments) and `{a,b}` (which may
 nest, up to 64 alternatives); every other character is literal. A wildcard never matches a leading
 `.` — name a dot-path literally, e.g. `{.github,docs}/*.md`. Unbalanced braces, `./` and `..`
@@ -62,7 +67,11 @@ banks) and unsafe id with its file and line. Run it in CI.
 
 ### `extract`
 
-Extracts every surface and updates the catalogs of every target locale. Nothing is written until
+Extracts every surface and updates the catalogs of every target locale. What counts as translatable
+prose is the extractor packages' decision (spec 001 FR-004/FR-005); the CLI passes their units
+through unchanged. One known gap: Slidev slot markers such as `::notes::` and `::right::` are
+currently offered as msgids, so spec 001 FR-005 ("protected skeleton never appears as translatable
+text") holds for the CLI only once the `extract-slidev` fix for that lands. Nothing is written until
 the whole corpus has extracted cleanly and every existing catalog has parsed; every extractor error
 is listed in one run. Extractor coverage warnings (prose left English inside an HTML block, …) are
 printed to stderr with their location.
