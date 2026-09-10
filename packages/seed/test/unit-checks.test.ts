@@ -28,6 +28,20 @@ describe('checkTranslation', () => {
     ['mustache interpolation', 'Run it.', 'Execute {{ secret }}.'],
     ['an HTML comment', 'Run it.', 'Execute <!-- x --> isso.'],
     ['a tag in a different case', 'Use <code>x</code>.', 'Use <SCRIPT>x</SCRIPT>.'],
+    [
+      'an attribute injected into a tag the English has',
+      'Use <code>x</code>.',
+      'Use <code onclick="alert(1)">x</code>.',
+    ],
+    ['a Vue directive on a tag the English has', 'A <span>b</span>', 'A <span v-html="x">b</span>'],
+    ['a different mustache expression', 'Hi {{ name }}.', 'Oi {{ secret() }}.'],
+    [
+      'a javascript: link target',
+      'See [docs](https://k8s.io).',
+      'Veja [docs](javascript:alert(1)).',
+    ],
+    ['a data: link target', 'See [docs](https://k8s.io).', 'Veja [docs]( DATA:text/html,x ).'],
+    ['an autolink with a script scheme', 'See the docs.', 'Veja <javascript:alert(1)>.'],
   ])('refuses %s', (_label, source, translation) => {
     expect(check(source, translation).miss).toBe('markup-divergence')
   })
@@ -36,6 +50,16 @@ describe('checkTranslation', () => {
     expect(
       check('Use <code>kubectl</code> and {{ name }}.', 'Use <code>kubectl</code> e {{ name }}.')
         .miss,
+    ).toBeUndefined()
+  })
+
+  it('does not mistake a comparison for a tag', () => {
+    expect(check('Keep a < b and b > c.', 'Mantenha a < b e b > c.').miss).toBeUndefined()
+  })
+
+  it('accepts a tag the English has, respelled only in whitespace', () => {
+    expect(
+      check('Set <span class="kw">x</span>.', 'Defina <span  class="kw">x</span>.').miss,
     ).toBeUndefined()
   })
 

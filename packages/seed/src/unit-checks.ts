@@ -12,8 +12,9 @@
  * Two tiers, on purpose:
  *
  * - **Refusals** (`markup-divergence`, `length-divergence`, …) — the string would change
- *   what the page *does* (a new tag, a Vue interpolation, a comment that could end a
- *   speaker note), or its length says it is almost certainly not this unit's text.
+ *   what the page *does* (a tag, attribute or Vue directive the English does not carry, a
+ *   `{{ }}` interpolation, a comment that could end a speaker note, a `javascript:` or
+ *   `data:` link), or its length says it is almost certainly not this unit's text.
  * - **Warnings** (`code-span-divergence`, `link-divergence`) — translators legitimately
  *   rephrase around inline code and point links at localized docs. Refusing those would
  *   discard good work; the draft carries the warning into the report instead.
@@ -28,20 +29,36 @@ export interface TranslationCheck {
   readonly warnings: readonly SeedWarningCode[]
 }
 
-/** An HTML/Vue tag opener or closer, or an HTML comment opener. */
-const TAG = /<(!--|\/?\s*[A-Za-z][A-Za-z0-9:_.-]*)/g
-const MUSTACHE = /\{\{/g
+/**
+ * An HTML/Vue tag opener or closer (a letter must follow `<` or `</`, as in HTML, so a
+ * comparison like `a < b` is not a tag), an autolink, or an HTML comment opener.
+ */
+const TAG = /<!--|<\/?[A-Za-z][^<>]*>?/g
+/** A complete `{{ … }}` interpolation, and a bare opener. */
+const MUSTACHE = /\{\{[\s\S]*?\}\}/g
+const MUSTACHE_OPEN = /\{\{/g
 /** An inline code span: a backtick run, content, and a run of the same length. */
 const CODE_SPAN = /(`+)([\s\S]*?[^`])\1(?!`)/g
 /** An inline link or image target. */
 const LINK_TARGET = /\]\(\s*([^)\s]+)/g
+/** URL schemes that execute or embed rather than navigate. */
+const ACTIVE_SCHEME = /^\s*(?:javascript|vbscript|data|file):/i
 
-function tagNames(text: string): ReadonlySet<string> {
-  const names = new Set<string>()
-  for (const match of text.matchAll(TAG)) {
-    names.add((match[1] ?? '').replace(/^\/\s*/, '').toLowerCase())
+/** Tags and interpolations are compared by their whole text, whitespace-collapsed. */
+function tokens(text: string, pattern: RegExp): string[] {
+  return [...text.matchAll(pattern)].map((match) => match[0].replace(/\s+/g, ' ').toLowerCase())
+}
+
+/** True when every token of `theirs` occurs in `ours` at least as often. */
+function isSubMultiset(theirs: readonly string[], ours: readonly string[]): boolean {
+  const budget = new Map<string, number>()
+  for (const token of ours) budget.set(token, (budget.get(token) ?? 0) + 1)
+  for (const token of theirs) {
+    const left = budget.get(token) ?? 0
+    if (left === 0) return false
+    budget.set(token, left - 1)
   }
-  return names
+  return true
 }
 
 function count(text: string, pattern: RegExp): number {
@@ -57,11 +74,15 @@ function multiset(text: string, pattern: RegExp, group: number): string {
 
 /** True when `translation` introduces markup `source` does not carry. */
 export function hasMarkupDivergence(source: string, translation: string): boolean {
-  const allowed = tagNames(source)
-  for (const name of tagNames(translation)) {
-    if (!allowed.has(name)) return true
-  }
-  return count(translation, MUSTACHE) > count(source, MUSTACHE)
+  // Tags are compared whole: an attribute or a Vue directive added to a tag the English
+  // already has changes what the page does as much as a new tag would.
+  if (!isSubMultiset(tokens(translation, TAG), tokens(source, TAG))) return true
+  if (!isSubMultiset(tokens(translation, MUSTACHE), tokens(source, MUSTACHE))) return true
+  if (count(translation, MUSTACHE_OPEN) > count(source, MUSTACHE_OPEN)) return true
+  const ourTargets = new Set([...source.matchAll(LINK_TARGET)].map((match) => match[1]))
+  return [...translation.matchAll(LINK_TARGET)].some(
+    (match) => ACTIVE_SCHEME.test(match[1] ?? '') && !ourTargets.has(match[1]),
+  )
 }
 
 /**
