@@ -179,6 +179,103 @@ describe('checkTranslation', () => {
     expect(check('`a` then `b`', 'primeiro `b` depois `a`').warnings).toEqual([])
   })
 
+  describe('a construct that eats the opening backtick, so no code span opens', () => {
+    // markdown-it gives the first backtick to the construct before it, so the text the
+    // scanner thinks is a code span is live prose — each with a markup-free English and
+    // with an English that carries `{{ x }}` inside a real code span.
+    const eaters = [
+      ['a link destination', '[docs](/a`)'],
+      ['a link title', '[a](/b "`")'],
+      ['a reference label', '[a][`]'],
+      ['a footnote label', '[^`]'],
+      ['an image alt text', '![a`](a.png)'],
+      ['a bare URL', 'https://kubernetes.io/`'],
+      ['an autolink', '<https://kubernetes.io/`>'],
+      ['a processing instruction', '<? ` ?>'],
+      ['a declaration', '<!X `>'],
+      ['a CDATA section', '<![CDATA[`]]>'],
+      ['an attribute value', '<kbd title="`">Enter</kbd>'],
+      ['inline math', '$`$'],
+    ]
+    it.each(eaters)('refuses a references-spelled interpolation after %s', (_label, eater) => {
+      expect(
+        check('Use helm now.', `Use ${eater} &#123;&#123; $slidev.nav.next() &#125;&#125; \`.`)
+          .miss,
+      ).toBe('markup-divergence')
+    })
+    it.each(eaters)(
+      'refuses an English code-span interpolation moved live after %s',
+      (_label, eater) => {
+        expect(check('Render `{{ x }}` here.', `Renderize ${eater} {{ x }} \` aqui.`).miss).toBe(
+          'markup-divergence',
+        )
+      },
+    )
+  })
+
+  it('refuses a bare opener moved out of an English code span into live prose', () => {
+    // Complete interpolations and whole-unit counts agree; only the live-opener guard sees it.
+    expect(check('Type `{{` to start.', 'Digite {{ para começar.').miss).toBe('markup-divergence')
+  })
+
+  it.each([
+    ['a processing instruction', '<?x onclick?>'],
+    ['a declaration', '<!X onclick>'],
+    ['a CDATA section', '<![CDATA[x]]>'],
+    ['an upper-case spelling of an English tag (Vue reads it as a component)', '<KBD>Enter</KBD>'],
+  ])('refuses %s the English does not have', (_label, markup) => {
+    expect(
+      check('Press <kbd>Enter</kbd> now.', `Pressione <kbd>Enter</kbd> ${markup} agora.`).miss,
+    ).toBe('markup-divergence')
+  })
+
+  it.each([
+    ['a slot marker', 'Pressione\n::right::\ntexto'],
+    ['a slot marker with spaces', 'Pressione\n  :: right ::  \ntexto'],
+    ['a slide separator', 'Pressione\n---\ntexto'],
+    ['a fence opener', 'Pressione\n```js\nalert(1)'],
+    ['a tilde fence opener', 'Pressione\n~~~\nx'],
+  ])('refuses a line that is %s, unless the English has it', (_label, translation) => {
+    expect(check('Press it\nand see.', translation).miss).toBe('markup-divergence')
+  })
+
+  it.each([
+    ['a zero-width space', 0x200b],
+    ['a soft hyphen', 0xad],
+    ['a byte-order mark', 0xfeff],
+    ['a word joiner', 0x2060],
+    ['a right-to-left override', 0x202e],
+    ['a left-to-right isolate', 0x2066],
+  ])('refuses %s the English does not have', (_label, code) => {
+    const hidden = String.fromCodePoint(code)
+    expect(check('See https://k8s.io now.', `Veja https://k8s.io${hidden}/x agora.`).miss).toBe(
+      'markup-divergence',
+    )
+    expect(check(`See k8s${hidden}io now.`, `Veja k8s${hidden}io agora.`).miss).toBeUndefined()
+  })
+
+  it('refuses a format character spelled as a character reference', () => {
+    expect(check('Run {x} now.', 'Execute {&#8203;{ x }} agora.').miss).toBe('markup-divergence')
+    expect(check('Run x now.', 'Execute x&shy;y agora.').miss).toBe('markup-divergence')
+  })
+
+  it.each([
+    ['a reference definition', 'Veja [x][r].\n\n[r]: javascript:alert(1)'],
+    ['a character-reference spelling', 'Veja [x](java&#115;cript:alert(1)).'],
+    ['a mixed-case scheme', 'Veja [x](JaVaScRiPt:alert(1)).'],
+    ['a data URL', 'Veja ![x](data:text/html,x).'],
+  ])('refuses an active link scheme in %s', (_label, translation) => {
+    expect(check('See [x](https://k8s.io).', translation).miss).toBe('markup-divergence')
+  })
+
+  it('does not mistake the Portuguese word "Data:" for a data URL', () => {
+    expect(check('Date: 2026-09-10', 'Data: 2026-09-10').miss).toBeUndefined()
+  })
+
+  it('does not mistake a less-than number for a tag', () => {
+    expect(check('Takes <5 min.', 'Leva <5 min, no máximo.').miss).toBeUndefined()
+  })
+
   it('stays fast on hostile backtick and brace runs', () => {
     const limits = { ...DEFAULT_SEED_LIMITS, lengthRatio: 100 }
     const started = performance.now()

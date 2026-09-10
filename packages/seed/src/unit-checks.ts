@@ -4,19 +4,41 @@
  *
  * The translated tree is untrusted input. Alignment can only establish *where* a string
  * belongs; these checks decide whether the string itself is something a reviewer should
- * be handed. They are deliberately a first line, not the gate: `compose`/`verify` own
- * the hard markup and fence-identity gates on everything that ships. What this refuses
- * never reaches a catalog, so a reviewer skimming a Weblate queue cannot accept it by
- * accident.
+ * be handed. They are a pre-filter, not the gate: `compose`/`verify` own the hard markup
+ * and fence-identity gates on everything that ships. What this refuses is never written
+ * to a catalog by `seed`; what it accepts is not thereby proven safe.
  *
- * Two tiers, on purpose:
+ * ## Coarse rules first, context only to refuse more
  *
- * - **Refusals** (`markup-divergence`, `length-divergence`, …) — the string would change
- *   what the page *does* (a tag, attribute or Vue directive the English does not carry, a
- *   `{{ }}` interpolation however it is spelled, a character reference that could spell
- *   one, an HTML comment opener `<!--` — the only comment marker checked, because it is
- *   the one that can end a speaker note — or a `javascript:`/`data:`/`vbscript:`/`file:`
- *   link), or its length says it is almost certainly not this unit's text.
+ * Every rule that decides *acceptance* is coarse and renderer-independent: it compares
+ * the translation against the English over the **whole unit**, as plain text, and asks
+ * only whether the translation carries anything the English does not. No model of the
+ * renderer is trusted to *clear* a translation, because every such model tried so far was
+ * narrower than markdown-it plus Slidev plus Vue. Context — where code spans are — is
+ * consulted only to add refusals (an interpolation moved out of a code span into prose),
+ * never to remove one.
+ *
+ * Two tiers:
+ *
+ * - **Refusals** (`markup-divergence`, `length-divergence`, …). A translation is refused
+ *   when, compared with its English unit, it adds any of:
+ *   - a `<` followed by a non-space character — a tag, closing tag, autolink, comment,
+ *     processing instruction, declaration or CDATA section — compared as whole, case-
+ *     and whitespace-sensitive tokens (so an added attribute, a Vue directive, or `<KBD>`
+ *     for `<kbd>` are all new);
+ *   - a character reference that decodes to `{`, `}`, `<` or `>`, or that this module
+ *     cannot decode;
+ *   - a `{{ … }}` interpolation or a bare `{{`, spelled literally, with backslash
+ *     escapes, or with character references (all decoded before counting);
+ *   - a line that is a Slidev slot marker (`::name::`), a slide separator (`---…`) or a
+ *     fence opener;
+ *   - a Unicode format character (general category Cf: zero-width characters, the soft
+ *     hyphen, the byte-order mark, bidirectional controls), literal or as a character
+ *     reference, which can hide text from a linkifier or a reviewer;
+ *   - a `javascript:`, `vbscript:`, `file:` or `data:<type>/` URL, found anywhere in the
+ *     decoded unit, whitespace removed.
+ *
+ *   It is also refused when its length says it is almost certainly not this unit's text.
  * - **Warnings** (`code-span-divergence`, `link-divergence`) — translators legitimately
  *   rephrase around inline code and point links at localized docs. Refusing those would
  *   discard good work; the draft carries the warning into the report instead.
@@ -33,14 +55,33 @@ export interface TranslationCheck {
 }
 
 /**
- * An HTML/Vue tag opener or closer (a letter must follow `<` or `</`, as in HTML, so a
- * comparison like `a < b` is not a tag), an autolink, or an HTML comment opener.
+ * Anything markdown-it could read as HTML, or that starts to look like it: `<` followed
+ * by `!` or `?` (comment, declaration, CDATA, processing instruction — up to the next
+ * `>`), by a letter or `/` (a tag or autolink — up to the next `<` or `>`), or by any
+ * other non-space character (just the two characters, so prose such as `<5 min` compares
+ * as `<5`). `a < b` is not a token.
  */
-const TAG = /<!--|<\/?[A-Za-z][^<>]*>?/g
-/** An inline link or image target. */
+const MARKUP = /<[!?][^>]*>?|<\/?[A-Za-z][^<>]*>?|<[^\s<]/g
+/** An inline link or image target, for the link warning. */
 const LINK_TARGET = /\]\(\s*([^)\s]+)/g
-/** URL schemes that execute or embed rather than navigate. */
-const ACTIVE_SCHEME = /^\s*(?:javascript|vbscript|data|file):/i
+/** URL schemes that execute or embed, searched for in the decoded, whitespace-free unit. */
+const ACTIVE_SCHEME = /(?:javascript|vbscript|file):|data:[a-z-]+\//g
+/** Unicode format characters. */
+const FORMAT_CHARACTER = /\p{Cf}/gu
+/** A Slidev slot marker line, as `@slidev/parser`'s slot sugar matches it (trimmed here). */
+const SLOT_MARKER = /^::\s*[\w.\-:]+\s*::$/
+/**
+ * The starts of constructs that can take the opening backtick of what looks like a code
+ * span, so that the "span" is live prose to the renderer: any `[` (links, images,
+ * references, footnotes — their `](` may itself sit inside the would-be span), URLs
+ * (`://`, `www.`), inline HTML and autolinks (`<` + non-space), inline math (`$`), and
+ * MDC attribute braces (`{`), which Slidev enables with `mdc: true`.
+ * A construct can only take a backtick that comes after its start, and its start lies
+ * outside every span the scanner found, so looking for starts there is enough.
+ */
+const BACKTICK_EATER = /\[|<\S|:\/\/|www\.|\$|\{/
+/** Joins sorted tokens into one comparable string; a character no token contains. */
+const SEPARATOR = String.fromCharCode(0)
 
 /** A character reference with its terminating semicolon — the only form markdown-it decodes. */
 const CHAR_REF = /&(?:#[0-9]{1,7}|#[xX][0-9A-Fa-f]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/g
@@ -151,65 +192,7 @@ function isEscaped(text: string, index: number): boolean {
   return slashes % 2 === 1
 }
 
-/**
- * One unit's inline markup, split by the context that decides whether it is live:
- *
- * - **outside code spans**, a raw tag is live HTML and a `{{ }}` — however it is spelled,
- *   since markdown-it decodes references and escapes before Vue sees the text — is a
- *   live expression;
- * - **inside code spans**, Slidev escapes both, so they are inert text.
- *
- * A translation may only use what the English uses *in the same context*: moving an
- * interpolation out of a code span turns documentation into code.
- */
-interface InlineMarkup {
-  /** Raw tags outside code, not backslash-escaped, whitespace-collapsed and lowercased. */
-  readonly tags: readonly string[]
-  /**
-   * The same over the whole text, code spans included. A second view because the scan
-   * can pair backticks that the renderer gives to an HTML tag or autolink instead, and a
-   * tag it wrongly thought was inside code must still be one the English carries.
-   */
-  readonly allTags: readonly string[]
-  /** Character references outside code that need the English's permission, as written. */
-  readonly references: readonly string[]
-  /** Interpolations outside code, after decoding. */
-  readonly liveMustaches: readonly string[]
-  readonly liveOpeners: number
-  /** Interpolations inside code spans. */
-  readonly codeMustaches: readonly string[]
-  readonly codeOpeners: number
-}
-
 const collapse = (token: string): string => token.replace(/\s+/g, ' ')
-
-function inlineMarkup(text: string): InlineMarkup {
-  const spans = findCodeSpans(text)
-  let outside = ''
-  let cursor = 0
-  for (const span of spans) {
-    // A space keeps the prose on either side of a span from joining into one token.
-    outside += `${text.slice(cursor, span.start)} `
-    cursor = span.end
-  }
-  outside += text.slice(cursor)
-
-  const tagsOf = (value: string) =>
-    [...value.matchAll(TAG)]
-      .filter((match) => !isEscaped(value, match.index))
-      .map((match) => collapse(match[0]).toLowerCase())
-  const live = findMustaches(decodeInline(outside))
-  const code = spans.map((span) => findMustaches(span.content))
-  return {
-    tags: tagsOf(outside),
-    allTags: tagsOf(text),
-    references: [...outside.matchAll(CHAR_REF)].map((match) => match[0]).filter(isGuardedReference),
-    liveMustaches: live.complete.map(collapse),
-    liveOpeners: live.openers,
-    codeMustaches: code.flatMap((found) => found.complete.map(collapse)),
-    codeOpeners: code.reduce((sum, found) => sum + found.openers, 0),
-  }
-}
 
 /** True when every token of `theirs` occurs in `ours` at least as often. */
 function isSubMultiset(theirs: readonly string[], ours: readonly string[]): boolean {
@@ -223,39 +206,80 @@ function isSubMultiset(theirs: readonly string[], ours: readonly string[]): bool
   return true
 }
 
-function multiset(text: string, pattern: RegExp, group: number): string {
-  return [...text.matchAll(pattern)]
-    .map((match) => match[group] ?? '')
-    .sort()
-    .join('\u0000')
+/** The text outside the code spans the scanner finds, spans replaced by a space. */
+function outsideCode(text: string): string {
+  let outside = ''
+  let cursor = 0
+  for (const span of findCodeSpans(text)) {
+    outside += `${text.slice(cursor, span.start)} `
+    cursor = span.end
+  }
+  return outside + text.slice(cursor)
+}
+
+function markupTokens(text: string, skipEscaped: boolean): string[] {
+  return [...text.matchAll(MARKUP)]
+    .filter((match) => !skipEscaped || !isEscaped(text, match.index))
+    .map((match) => collapse(match[0]))
+}
+
+/** Lines that change a slide's block structure: slot markers, separators, fence openers. */
+function structuralLines(text: string): string[] {
+  return text.split('\n').flatMap((raw) => {
+    const line = raw.trim()
+    const structural =
+      SLOT_MARKER.test(line) ||
+      line.startsWith('---') ||
+      line.startsWith('```') ||
+      line.startsWith('~~~')
+    return structural ? [collapse(line)] : []
+  })
+}
+
+function activeSchemes(decoded: string): string[] {
+  return [...decoded.replace(/\s+/g, '').toLowerCase().matchAll(ACTIVE_SCHEME)].map(
+    (match) => match[0],
+  )
 }
 
 /**
- * True when `translation` introduces markup `source` does not carry in the same context.
- *
- * The invariant: a translation may not add a tag, attribute, directive, HTML comment
- * opener (`<!--` is the only comment marker checked — it is the one that can end a
- * speaker note), character reference, `{{ }}` interpolation or active link target that
- * the English unit does not already carry in that same context.
+ * True when `translation` carries markup its English unit does not — see the module doc
+ * for the full list. Coarse whole-unit rules decide; the code-span-aware rule after them
+ * can only refuse more.
  */
 export function hasMarkupDivergence(source: string, translation: string): boolean {
-  const ours = inlineMarkup(source)
-  const theirs = inlineMarkup(translation)
-  // Tags are compared whole: an attribute or a Vue directive added to a tag the English
-  // already has changes what the page does as much as a new tag would.
-  if (!isSubMultiset(theirs.tags, ours.tags)) return true
-  if (!isSubMultiset(theirs.allTags, ours.allTags)) return true
-  // A reference that could spell markup, or that this module cannot decode, is refused
-  // unless the English uses it too: `&lcub;` is only one of several spellings of `{`.
-  if (!isSubMultiset(theirs.references, ours.references)) return true
-  if (!isSubMultiset(theirs.liveMustaches, ours.liveMustaches)) return true
-  if (theirs.liveOpeners > ours.liveOpeners) return true
-  if (!isSubMultiset(theirs.codeMustaches, ours.codeMustaches)) return true
-  if (theirs.codeOpeners > ours.codeOpeners) return true
-  const ourTargets = new Set([...source.matchAll(LINK_TARGET)].map((match) => match[1]))
-  return [...translation.matchAll(LINK_TARGET)].some(
-    (match) => ACTIVE_SCHEME.test(match[1] ?? '') && !ourTargets.has(match[1]),
-  )
+  // Coarse, whole unit, both sides as plain text.
+  if (!isSubMultiset(markupTokens(translation, false), markupTokens(source, false))) return true
+  const references = (text: string) =>
+    [...text.matchAll(CHAR_REF)].map((match) => match[0]).filter(isGuardedReference)
+  if (!isSubMultiset(references(translation), references(source))) return true
+  const ourDecoded = decodeInline(source)
+  const theirDecoded = decodeInline(translation)
+  const ours = findMustaches(ourDecoded)
+  const theirs = findMustaches(theirDecoded)
+  if (!isSubMultiset(theirs.complete.map(collapse), ours.complete.map(collapse))) return true
+  if (theirs.openers > ours.openers) return true
+  if (!isSubMultiset(structuralLines(translation), structuralLines(source))) return true
+  // Decoded, so `&#8203;` counts as the zero-width space it renders as.
+  const format = (text: string) => [...text.matchAll(FORMAT_CHARACTER)].map((match) => match[0])
+  if (!isSubMultiset(format(theirDecoded), format(ourDecoded))) return true
+  if (!isSubMultiset(activeSchemes(theirDecoded), activeSchemes(ourDecoded))) return true
+
+  // Context, to refuse more. The English side counts only what is certainly live — outside
+  // its code spans and not backslash-escaped — which can only make the check stricter. The
+  // translation side trusts its own code spans only when nothing outside them could have
+  // taken an opening backtick; otherwise every tag and interpolation in it counts as live.
+  const ourProse = outsideCode(source)
+  const theirProse = outsideCode(translation)
+  const trusted = !BACKTICK_EATER.test(theirProse)
+  const theirLive = trusted ? theirProse : translation
+  if (!isSubMultiset(markupTokens(theirLive, trusted), markupTokens(ourProse, true))) return true
+  const ourLive = findMustaches(decodeInline(ourProse))
+  const theirLiveMustaches = findMustaches(decodeInline(theirLive))
+  if (!isSubMultiset(theirLiveMustaches.complete.map(collapse), ourLive.complete.map(collapse))) {
+    return true
+  }
+  return theirLiveMustaches.openers > ourLive.openers
 }
 
 /**
@@ -282,11 +306,16 @@ export function checkTranslation(
     findCodeSpans(text)
       .map((span) => span.content)
       .sort()
-      .join('\u0000')
+      .join(SEPARATOR)
   if (spans(source) !== spans(translation)) {
     warnings.push('code-span-divergence')
   }
-  if (multiset(source, LINK_TARGET, 1) !== multiset(translation, LINK_TARGET, 1)) {
+  const targets = (text: string) =>
+    [...text.matchAll(LINK_TARGET)]
+      .map((match) => match[1] ?? '')
+      .sort()
+      .join(SEPARATOR)
+  if (targets(source) !== targets(translation)) {
     warnings.push('link-divergence')
   }
   return { miss: undefined, warnings }
