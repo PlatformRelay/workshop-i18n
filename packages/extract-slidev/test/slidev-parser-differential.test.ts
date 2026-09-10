@@ -196,6 +196,7 @@ const HOSTILE_TRANSLATIONS: readonly (readonly [string, string])[] = [
   ['a bare fence with nothing else', '\u0060\u0060\u0060'],
   ['a trailing double hyphen', '--'],
   ['a bare pipe', 'eins | zwei'],
+  ['a slot marker line', 'eins\n::right::\nzwei'],
   ['plain words that carry nothing across', 'schlicht'],
 ]
 

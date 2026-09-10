@@ -235,6 +235,98 @@ describe('locateProse and CommonMark laziness', () => {
   })
 })
 
+describe('locateProse and Slidev slot markers', () => {
+  // Slidev's slot sugar (`@slidev/cli` 52.19.0, `node/syntax/slot-sugar.ts`): a line
+  // matching `/^::\s*([\w.\-:]+)\s*::\s*$/` at block indent 0 becomes
+  // `<template v-slot:name>`. It is layout machinery; translating it moves prose between
+  // columns or drops it from the slide.
+  it('never emits a slot marker line as translatable text', () => {
+    const fragment = ['Left column.', '', '::right::', '', 'Right column.', ''].join('\n')
+    expect(texts(fragment)).toEqual(['Left column.', 'Right column.'])
+  })
+
+  it('accepts every spelling the slot-marker grammar accepts', () => {
+    for (const marker of ['::notes::', ':: right ::', '::a.b-c:d_e::', '::right::  ']) {
+      const fragment = ['Before.', '', marker, '', 'After.', ''].join('\n')
+      expect(texts(fragment), marker).toEqual(['Before.', 'After.'])
+    }
+  })
+
+  it('scopes the keys after a marker under the slot name, so the columns key independently', () => {
+    const fragment = [
+      '# Title',
+      '',
+      'Left one.',
+      '',
+      '::right::',
+      '',
+      'Right one.',
+      '',
+      '- a bullet',
+      '',
+    ].join('\n')
+    expect(keys(fragment)).toEqual([
+      'body/h1-1/title',
+      'body/h1-1/p-1',
+      'body/slot-right/p-1',
+      'body/slot-right/l-1/li-1/p-1',
+    ])
+  })
+
+  it('keeps right-column keys stable when a paragraph is added to the left column', () => {
+    const before = ['Left.', '', '::right::', '', 'Right.', ''].join('\n')
+    const after = ['Left.', '', 'Another left.', '', '::right::', '', 'Right.', ''].join('\n')
+    expect(spanFor(before, 'body/slot-right/p-1')?.text).toBe('Right.')
+    expect(spanFor(after, 'body/slot-right/p-1')?.text).toBe('Right.')
+  })
+
+  it('splits a paragraph a marker interrupts, the way Slidev does', () => {
+    const fragment = 'Left line.\n::right::\nRight line.\n'
+    const located = locate(fragment)
+    expect(located.spans.map((span) => [span.unitKey, span.text])).toEqual([
+      ['body/p-1', 'Left line.'],
+      ['body/slot-right/p-1', 'Right line.'],
+    ])
+    for (const span of located.spans) {
+      expect(fragment.slice(span.start, span.end)).not.toContain('::')
+    }
+  })
+
+  it('leaves a marker-shaped line inside a fence alone and opens no slot', () => {
+    const fragment = ['```md', '::right::', '```', '', 'After.', ''].join('\n')
+    expect(keys(fragment)).toEqual(['body/p-1'])
+  })
+
+  it('does not treat an indented or embedded marker as a slot marker', () => {
+    // Slidev requires indent 0 and the whole line; anything else renders as text.
+    expect(texts('Use ::right:: to split.\n')).toEqual(['Use ::right:: to split.'])
+  })
+
+  it('never emits a paragraph carrying a marker inside a container, and says so', () => {
+    const located = locate('> quoted\n> ::right::\n')
+    expect(located.spans).toEqual([])
+    expect(located.diagnostics.map((d) => d.code)).toEqual(['slot-marker-in-container'])
+  })
+
+  it('falls back to an ordinal segment for a repeated or awkward slot name', () => {
+    const fragment = [
+      '::right::',
+      '',
+      'a',
+      '',
+      '::right::',
+      '',
+      'b',
+      '',
+      '::x..y::',
+      '',
+      'c',
+      '',
+    ].join('\n')
+    expect(keys(fragment)).toEqual(['body/slot-right/p-1', 'body/slot.2/p-1', 'body/slot.3/p-1'])
+  })
+})
+
 describe('locateProse is deterministic', () => {
   it('returns identical spans for identical input', () => {
     const fragment = ['# T', '', 'a', '', '- b', '', '> c', ''].join('\n')

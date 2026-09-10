@@ -350,6 +350,24 @@ describe('composeSkeleton refuses a replacement that would break out of its hole
     expect(composeSkeleton(inline, { 'slides:s1:body/h1-1/title': '--- x' })).toBe('# --- x\n')
   })
 
+  it('rejects a line Slidev would read as a slot marker', () => {
+    // A translated `::right::` moves everything after it into another slot.
+    for (const line of ['::right::', ':: notes ::', '::default::  ']) {
+      try {
+        composeSkeleton(skeleton, { 'slides:s1:body/p-1': `eins\n${line}\nzwei` })
+        expect.unreachable(`${line} should have been refused`)
+      } catch (error) {
+        expect((error as CompositionError).issues[0]?.reason).toBe('slot-marker')
+      }
+    }
+  })
+
+  it('allows marker-shaped text that is not a line of its own', () => {
+    expect(composeSkeleton(skeleton, { 'slides:s1:body/p-1': 'eins ::right:: zwei' })).toBe(
+      'eins ::right:: zwei\n',
+    )
+  })
+
   it('rejects a body translation that opens an HTML comment', () => {
     // Bytes would survive, but the renderer would swallow the skeleton after the hole.
     expect(() => composeSkeleton(skeleton, { 'slides:s1:body/p-1': 'eins <!-- zwei' })).toThrow(

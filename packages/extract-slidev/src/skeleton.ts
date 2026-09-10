@@ -50,7 +50,12 @@ import {
   type TranslationUnit,
   type UnitId,
 } from '@workshop-i18n/core'
-import { isFenceOpenerLine, isSlideSeparatorLine, isTildeFenceOpenerLine } from './deck.js'
+import {
+  isFenceOpenerLine,
+  isSlideSeparatorLine,
+  isSlotMarkerLine,
+  isTildeFenceOpenerLine,
+} from './deck.js'
 
 /** Where a markdown hole sits, which decides what a replacement may not contain. */
 export type HoleContext = 'body' | 'note'
@@ -109,6 +114,7 @@ export type ReplacementRejection =
   | 'control-byte'
   | 'indented-code'
   | 'table-column'
+  | 'slot-marker'
 
 /** One refused replacement. */
 export interface CompositionIssue {
@@ -271,6 +277,11 @@ function spliceContextOf(source: string, hole: Hole): SpliceContext {
   }
 }
 
+/** Lines Slidev's slot sugar would read as markers. */
+function countSlotMarkers(text: string): number {
+  return splitLines(text).filter(isSlotMarkerLine).length
+}
+
 function countOccurrences(text: string, token: string): number {
   let count = 0
   let index = text.indexOf(token)
@@ -386,6 +397,14 @@ function rejectReplacement(
         'translation opens a fenced code block, which makes the renderer skip to the next matching fence — use single backticks for inline code instead',
       )
     }
+  }
+  // A slot marker is only read at column 0, and the English hole never holds one (the
+  // locator keeps them out), so any the composed lines carry was introduced here.
+  if (countSlotMarkers(composed) > countSlotMarkers(current)) {
+    return reject(
+      'slot-marker',
+      'translation puts a Slidev slot marker ("::name::") on a line of its own, which moves the text after it into another slot — keep "::" inside a sentence',
+    )
   }
   return undefined
 }

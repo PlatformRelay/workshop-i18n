@@ -154,6 +154,7 @@ const HOSTILE_TRANSLATIONS: readonly string[] = [
   'eins <!-- zwei',
   'eins --> zwei',
   'eins | zwei',
+  'eins\n::right::\nzwei',
   'schlicht',
   'eins\n\u0060\u0060\u0060yaml\nlayout: cover\nzwei',
   '\u0060\u0060\u0060',
@@ -239,15 +240,18 @@ function slidevFrontmatterKeys(text: string): readonly (readonly string[] | null
  * predicates: the shared definition is the subject here, so using it as the oracle too
  * would move both together when it is weakened.
  */
-function structuralLines(text: string): { separators: number; fences: number } {
+function structuralLines(text: string): { separators: number; fences: number; slots: number } {
   let separators = 0
   let fences = 0
+  let slots = 0
   for (const line of text.split(/\r?\n/)) {
     const trimmedEnd = line.replace(/\s+$/u, '')
     if (trimmedEnd.startsWith('---')) separators += 1
     if (/^[ \t]*(?:`{3,}|~{3,})/.test(trimmedEnd)) fences += 1
+    // Slidev's slot sugar reads `::name::` at column 0 only.
+    if (/^::\s*[\w.:-]+\s*::$/.test(trimmedEnd)) slots += 1
   }
-  return { separators, fences }
+  return { separators, fences, slots }
 }
 
 /**
@@ -391,6 +395,14 @@ describe.each(CORPUS.map((fixture) => [fixture.name, fixture] as const))(
       }
     })
 
+    it('never emits a Slidev slot marker as translatable text', () => {
+      for (const unit of extraction.units) {
+        for (const line of unit.source.split('\n')) {
+          expect(line, formatUnitId(unit.id)).not.toMatch(/^\s*::\s*[\w.\-:]+\s*::\s*$/)
+        }
+      }
+    })
+
     // Group 3 — identity stability.
     it('changes one hash and no identity when one unit of English is edited (AS-2)', () => {
       const hole = extraction.skeleton.holes.find((item) => item.encoding.kind === 'markdown')
@@ -463,6 +475,8 @@ describe('the hostile corpus describes the corpus it claims to test', () => {
     ['a Vue island', /<v-clicks?[ >]/],
     ['a custom component', /<KwCard /],
     ['mustache interpolation', /\{\{ /],
+    ['a Slidev slot marker', /^::right::$/m],
+    ['a slot marker interrupting a paragraph', /^\w[^\n]*\n::right::\n\w/m],
     ['an astral emoji', /[\u{1f300}-\u{1faff}]/u],
     ['box drawing', /[─│└┬┼├]/],
     ['a YAML doubled-quote escape', /: '[^'\n]*''/],

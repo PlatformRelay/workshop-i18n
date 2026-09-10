@@ -41,6 +41,8 @@ export type DiagnosticCode =
   | 'phantom-frontmatter'
   /** Prose inside a raw HTML block or Vue island, which stays protected skeleton. */
   | 'prose-in-html-block'
+  /** A slot-marker-shaped line inside a container, so its paragraph stays skeleton. */
+  | 'slot-marker-in-container'
 
 /** One finding, located in the source. */
 export interface Diagnostic {
