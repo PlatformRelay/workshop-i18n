@@ -160,33 +160,29 @@ describe('locateProse leaves protected skeleton alone', () => {
     expect(texts(fragment)).toEqual(['Real prose.'])
   })
 
-  it('never emits a raw HTML block or a Vue island', () => {
+  it('never emits the tags or props of a raw HTML block or a Vue island', () => {
     const fragment = [
-      '<KwCard heading="Stable DNS">',
+      // `v-on:click`, not `@click`: CommonMark's attribute grammar has no `@`, so a tag
+      // carrying one opens no HTML block — to micromark or to markdown-it.
+      '<KwCard heading="Stable DNS" kind="svc" v-click="2" :note="x" v-on:click="go">',
       '  peers dial by name',
       '</KwCard>',
       '',
     ].join('\n')
-    expect(texts(fragment)).toEqual([])
+    expect(texts(fragment)).toEqual(['peers dial by name'])
   })
 
-  it('reports prose trapped inside an HTML block instead of extracting or hiding it', () => {
-    const fragment = ['<div class="grid">', 'Headless Service dials by name.', '</div>', ''].join(
-      '\n',
-    )
+  it('reports prose inside an HTML block that cannot be extracted, such as a comment aside', () => {
+    const fragment = [
+      '<div class="grid">',
+      '<!-- an aside nobody translates -->',
+      '</div>',
+      '',
+    ].join('\n')
     const located = locate(fragment)
     expect(located.spans).toEqual([])
     expect(located.diagnostics.map((d) => d.code)).toEqual(['prose-in-html-block'])
     expect(located.diagnostics[0]?.severity).toBe('warning')
-  })
-
-  it('reports prose a tag sits in front of on the same line', () => {
-    // A line starting with `<` is not automatically markup: `<p>text</p>` is prose with a
-    // tag in front of it, and a coverage metric that under-reports is worse than none.
-    const fragment = ['<div class="grid">', '<p>Trapped prose lives here</p>', '</div>', ''].join(
-      '\n',
-    )
-    expect(locate(fragment).diagnostics.map((d) => d.code)).toEqual(['prose-in-html-block'])
   })
 
   it('stays quiet about an HTML block that carries no prose', () => {
@@ -232,6 +228,221 @@ describe('locateProse and CommonMark laziness', () => {
     expect(span?.continuationPrefix).toBe('')
     expect(span?.text).toBe('first line wraps\n  onto an indented line\nthen a lazy one')
     expect(locate(fragment).diagnostics).toEqual([])
+  })
+})
+
+describe('locateProse inside HTML blocks and components (ADR 0015)', () => {
+  const pairs = (fragment: string) =>
+    locate(fragment).spans.map((span) => [span.unitKey, span.text] as const)
+
+  it('extracts the prose of every card in a grid, keyed by structure', () => {
+    const fragment = [
+      '<div class="kw-cols-2 mt-3 text-sm">',
+      '  <KwCard heading="ClusterIP — the default" kind="svc">',
+      '    A stable <strong>in-cluster</strong> virtual IP.',
+      '    Reachable only from inside.',
+      '  </KwCard>',
+      '  <KwCard heading="NodePort" kind="svc" variant="plain">',
+      '    ClusterIP <em>plus</em> a fixed port.',
+      '  </KwCard>',
+      '</div>',
+      '',
+    ].join('\n')
+    const located = locate(fragment)
+    expect(pairs(fragment)).toEqual([
+      [
+        'body/div.1/kw-card.1/t:1',
+        'A stable <strong>in-cluster</strong> virtual IP.\nReachable only from inside.',
+      ],
+      ['body/div.1/kw-card.2/t:1', 'ClusterIP <em>plus</em> a fixed port.'],
+    ])
+    expect(located.spans.map((span) => [span.kind, span.continuationPrefix])).toEqual([
+      ['html-text', '    '],
+      ['html-text', ''],
+    ])
+    expect(located.diagnostics).toEqual([])
+  })
+
+  it('points every span at the original bytes', () => {
+    const fragment =
+      '<CodeNote at="1" label="get-contexts">\nLists every <code>*</code> cluster.\n</CodeNote>\n'
+    const [span] = locate(fragment).spans
+    expect(span?.unitKey).toBe('body/code-note.1/t:1')
+    expect(fragment.slice(span?.start, span?.end)).toBe('Lists every <code>*</code> cluster.')
+  })
+
+  it('counts top-level elements in the heading scope, across blocks', () => {
+    const fragment = [
+      '# Title',
+      '',
+      '<KwCard>',
+      'First card.',
+      '</KwCard>',
+      '',
+      'A paragraph between.',
+      '',
+      '<KwCard>',
+      'Second card.',
+      '</KwCard>',
+      '',
+    ].join('\n')
+    expect(keys(fragment)).toEqual([
+      'body/h1-1/title',
+      'body/h1-1/kw-card.1/t:1',
+      'body/h1-1/p-1',
+      'body/h1-1/kw-card.2/t:1',
+    ])
+  })
+
+  it('reads a component whose markdown children are set off by blank lines as markdown', () => {
+    const fragment = [
+      '<KwCard heading="x">',
+      '',
+      '**Bold** markdown child.',
+      '',
+      '</KwCard>',
+      '',
+    ].join('\n')
+    expect(pairs(fragment)).toEqual([['body/p-1', '**Bold** markdown child.']])
+    expect(locate(fragment).diagnostics).toEqual([])
+  })
+
+  it('reads the same children without blank lines as raw HTML text, markup literal', () => {
+    const fragment = ['<KwCard heading="x">', '**Bold** raw child.', '</KwCard>', ''].join('\n')
+    expect(pairs(fragment)).toEqual([['body/kw-card.1/t:1', '**Bold** raw child.']])
+  })
+
+  it('keys nested components by their path', () => {
+    const fragment = [
+      '<div class="kw-cols-3">',
+      '  <v-click at="1">',
+      '    <KwCard heading="Engine">',
+      '      What the kubelet talks to.',
+      '    </KwCard>',
+      '  </v-click>',
+      '  <v-click at="2">',
+      '    <KwCard heading="Runtime">',
+      '      What starts the process.',
+      '    </KwCard>',
+      '  </v-click>',
+      '</div>',
+      '',
+    ].join('\n')
+    expect(keys(fragment)).toEqual([
+      'body/div.1/v-click.1/kw-card.1/t:1',
+      'body/div.1/v-click.2/kw-card.1/t:1',
+    ])
+  })
+
+  it('reads a self-closing component inside a block as a boundary', () => {
+    const fragment = [
+      '<KwCard heading="x" kind="pod">',
+      '  <K8sIcon kind="pod" /> <strong>Pod</strong> <span class="kw-muted">→</span>',
+      '</KwCard>',
+      '',
+    ].join('\n')
+    expect(pairs(fragment)).toEqual([
+      ['body/kw-card.1/t:1', '<strong>Pod</strong> <span class="kw-muted">→</span>'],
+    ])
+  })
+
+  it('reads a multi-line opening tag as a paragraph, as both CommonMark and Slidev do', () => {
+    // An HTML block opens only on a tag complete on its first line (CommonMark 4.6, rule
+    // 7; markdown-it tests the same regex per line). A tag spread over lines is inline
+    // HTML in a paragraph, so the paragraph is the unit and the markup guard keeps it.
+    const fragment = [
+      '<KwCard',
+      '  heading="x"',
+      '  kind="pod">',
+      '  Body text.',
+      '</KwCard>',
+      '',
+    ].join('\n')
+    expect(locate(fragment).spans.map((span) => [span.unitKey, span.kind])).toEqual([
+      ['body/p-1', 'markdown'],
+    ])
+  })
+
+  it('never emits a paragraph that is nothing but an opening tag', () => {
+    // `>` alone on a line opens a blockquote, which leaves the tag above it unterminated.
+    const fragment = ['<KwCard', '  heading="x"', '  kind="pod"', '>', ''].join('\n')
+    expect(texts(fragment)).toEqual([])
+  })
+
+  it('splits text around a component rather than carrying the component in a unit', () => {
+    const fragment = [
+      '<KwCard>',
+      '  Use <KwChip variant="ok">core</KwChip> tier.',
+      '</KwCard>',
+      '',
+    ].join('\n')
+    expect(pairs(fragment)).toEqual([
+      ['body/kw-card.1/t:1', 'Use'],
+      ['body/kw-card.1/kw-chip.1/t:1', 'core'],
+      ['body/kw-card.1/t:2', 'tier.'],
+    ])
+  })
+
+  it('treats a phrasing element carrying a directive as a boundary', () => {
+    const fragment = ['<div>', '  Some <span v-if="x">maybe</span> text', '</div>', ''].join('\n')
+    expect(texts(fragment)).toEqual(['Some', 'maybe', 'text'])
+  })
+
+  it('keeps an interpolation inside the run, where the markup guard protects it', () => {
+    const fragment = [
+      '<div>',
+      '  Page {{ $slidev.nav.currentPage }} of the deck',
+      '</div>',
+      '',
+    ].join('\n')
+    expect(texts(fragment)).toEqual(['Page {{ $slidev.nav.currentPage }} of the deck'])
+  })
+
+  it('never emits a run that is only code, symbols or an interpolation', () => {
+    const fragment = [
+      '<div>',
+      '  <code>kubectl get pods</code>',
+      '  <span>→ ①</span>',
+      '  {{ $slidev.nav.currentPage }}',
+      '</div>',
+      '',
+    ].join('\n')
+    expect(texts(fragment)).toEqual([])
+    expect(locate(fragment).diagnostics).toEqual([])
+  })
+
+  it('never scans code, styles or scripts for prose, and does not report them', () => {
+    const fragment = [
+      '<style>',
+      '.kw-card { color: red }',
+      '</style>',
+      '',
+      '<pre>',
+      'kubectl get pods',
+      '</pre>',
+      '',
+    ].join('\n')
+    expect(texts(fragment)).toEqual([])
+    expect(locate(fragment).diagnostics).toEqual([])
+  })
+
+  it('leaves entities literal in the unit', () => {
+    expect(texts('<div>\n  Use &lt;ns&gt; here.\n</div>\n')).toEqual(['Use &lt;ns&gt; here.'])
+  })
+
+  it('keeps a paragraph with an inline component whole, as a markdown unit', () => {
+    const fragment = 'Use the <KwChip variant="ok">core</KwChip> tier.\n'
+    expect(locate(fragment).spans.map((span) => [span.unitKey, span.kind, span.text])).toEqual([
+      ['body/p-1', 'markdown', 'Use the <KwChip variant="ok">core</KwChip> tier.'],
+    ])
+  })
+
+  it('keeps the blockquote prefix of an HTML block inside a quote out of the unit', () => {
+    const fragment = '> <div>\n> Quoted text\n> that wraps.\n> </div>\n'
+    const [span] = locate(fragment).spans
+    expect(span?.unitKey).toBe('body/bq-1/div.1/t:1')
+    expect(span?.text).toBe('Quoted text\nthat wraps.')
+    expect(fragment.slice(span?.start, span?.end)).toBe('Quoted text\n> that wraps.')
   })
 })
 

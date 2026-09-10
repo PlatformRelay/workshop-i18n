@@ -186,15 +186,20 @@ function markupOf(text: string): readonly string[] {
  * by one hand-written test each. This says which pairs have no second option.
  */
 function mustBeRefused(hole: Hole, payload: string): boolean {
-  if (hole.encoding.kind !== 'markdown') return false
+  if (hole.encoding.kind !== 'markdown' && hole.encoding.kind !== 'html-text') return false
   const count = (text: string, token: string): number => text.split(token).length - 1
   for (const token of ['<!--', '-->']) {
     if (count(payload, token) !== count(hole.source, token)) return true
   }
   if (markupOf(payload).join('\n') !== markupOf(hole.source).join('\n')) return true
+  if (hole.encoding.kind === 'html-text') return /\n[ \t]*(?:\n|$)/.test(payload)
   const barePipes = (text: string): number => count(text.replace(/\\\|/g, ''), '|')
   return hole.encoding.cell && barePipes(payload) > barePipes(hole.source)
 }
+
+/** Standard HTML phrasing elements — the only tags an HTML run may carry (ADR 0015). */
+const PHRASING_TAG =
+  /^<\/?(?:a|abbr|b|bdi|bdo|br|cite|code|data|del|dfn|em|i|ins|kbd|mark|q|s|samp|small|span|strong|sub|sup|time|u|var|wbr)(?=[\s/>])/
 
 /**
  * A hole's splice context, which is what decides how its first and last lines are judged.
@@ -413,6 +418,19 @@ describe.each(CORPUS.map((fixture) => [fixture.name, fixture] as const))(
       }
     })
 
+    it('hands a translator prose from an HTML block, never its machinery (ADR 0015)', () => {
+      for (const hole of extraction.skeleton.holes) {
+        if (hole.encoding.kind !== 'html-text') continue
+        const where = formatUnitId(hole.id)
+        for (const tag of markupOf(hole.source).filter((token) => token.startsWith('<'))) {
+          expect(tag, where).toMatch(PHRASING_TAG)
+          expect(tag, where).not.toMatch(/\s(?:v-[\w-]+|:[\w-]+|@[\w-]+|#[\w-]+)(?:=|[\s/>])/)
+        }
+        const words = hole.source.replace(/<[^>]*>/g, '').replace(/\{\{[\s\S]*?\}\}/g, '')
+        expect(words, where).toMatch(/\p{L}/u)
+      }
+    })
+
     it('never emits a Slidev slot marker as translatable text', () => {
       for (const unit of extraction.units) {
         for (const line of unit.source.split('\n')) {
@@ -501,6 +519,38 @@ describe('the hostile corpus describes the corpus it claims to test', () => {
     ['a YAML block scalar', /^\w+: \|$/m],
   ])('contains %s', (_label, pattern) => {
     expect(all).toMatch(pattern)
+  })
+
+  it.each([
+    ['a component grid inside a div', /<div[^>]*>\n\s+<KwCard /],
+    ['a CodeNote overlay with a click index', /<CodeNote at="\d+"/],
+    ['components nested in v-click', /<v-click[^>]*>\n\s+<KwCard/],
+    ['a self-closing component', /<K8sIcon [^>]*\/>/],
+    ['an inline component inside a paragraph', /^\w[^\n<]* <KwChip [^>]*>/m],
+    ['a multi-line opening tag', /^<KwCard\n\s+\w+=/m],
+    ['markdown children set off by blank lines', /^<KwCard[^>\n]*>\r?\n\r?\n/m],
+    ['a single-quoted prop holding a double quote', /heading='[^'\n]*"/],
+    ['an entity inside a prop', /heading=(?:"[^"\n]*|'[^'\n]*)&\w+;/],
+    ['an unquoted prop', /heading=[A-Za-z]/],
+  ])('contains %s', (_label, pattern) => {
+    expect(all).toMatch(pattern)
+  })
+
+  it('extracts the text of every card in the Kubernetes corpus', () => {
+    // The coverage claim of ADR 0015, stated as a count: every `<KwCard>` whose body holds
+    // words yields at least one unit keyed under it. 235 warnings said otherwise before.
+    for (const fixture of CORPUS.filter((item) => item.name.startsWith('corpus-k8s/'))) {
+      const adopted = adopt(fixture)
+      const cards = [...adopted.matchAll(/<KwCard\b[^>]*>([\s\S]*?)<\/KwCard>/g)].filter((match) =>
+        /\p{L}/u.test((match[1] ?? '').replace(/<[^>]*>/g, '')),
+      ).length
+      const keyed = new Set<string>()
+      for (const unit of extractSlidevFile(adopted).units) {
+        const card = /^(.*\/kw-card\.\d+)\//.exec(unit.id.unitKey)?.[1]
+        if (card !== undefined) keyed.add(`${unit.id.containerId}:${card}`)
+      }
+      expect({ fixture: fixture.name, cards: keyed.size }).toEqual({ fixture: fixture.name, cards })
+    }
   })
 
   it('contains a CRLF file and a byte-order mark', () => {

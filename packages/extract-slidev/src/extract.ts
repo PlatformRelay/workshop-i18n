@@ -113,6 +113,14 @@ function holeFor(
   return { id, start, end, source: text, encoding }
 }
 
+/** How a located span is spliced back, which depends on what it sits in. */
+function encodingOf(span: ProseSpan, context: HoleContext): Hole['encoding'] {
+  if (span.kind === 'html-text') {
+    return { kind: 'html-text', continuationPrefix: span.continuationPrefix, context }
+  }
+  return { kind: 'markdown', continuationPrefix: span.continuationPrefix, context, cell: span.cell }
+}
+
 function proseHoles(
   file: string,
   diagnostics: Diagnostic[],
@@ -129,7 +137,7 @@ function proseHoles(
       span.start,
       span.end,
       span.text,
-      { kind: 'markdown', continuationPrefix: span.continuationPrefix, context, cell: span.cell },
+      encodingOf(span, context),
     )
     if (hole !== undefined) holes.push(hole)
   }

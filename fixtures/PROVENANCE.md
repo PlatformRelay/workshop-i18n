@@ -45,6 +45,8 @@ byte-identically.
 | `trailing-separator.md` | A file whose last byte is a separator, which yields no extra slide (a trailing separator *plus* newline does) |
 | `degenerate.md` | A file that does not open with a delimiter, an empty slide, a frontmatter-only slide, a slide with no frontmatter, and no trailing newline |
 | `slot-markers.md` | Slidev slot markers (`::right::`, `:: notes ::`, `::a.b-c:d_e::`) as their own paragraph and interrupting one, plus marker-shaped lines Slidev does **not** read as markers: inside a fence, inside a sentence, inside a blockquote, inside an HTML block, and one that ends a lazily continued list item. The real deck uses `::notes::` 35 times and `::right::` 14 times; before this fixture every one of them was a translatable unit |
+| `components-and-html.md` | Prose inside Vue components and HTML blocks (ADR 0015), in the shapes the real deck uses and the ones next to them: a `<div>` grid of `<KwCard>`s, cards nested in `<v-click>`, self-closing `<K8sIcon />` beside text, `<CodeNote>` overlays after a `::notes::` slot, a `{{ }}` interpolation inside a run, a component whose markdown children are set off by blank lines next to one whose children are not, an inline `<KwChip>` inside a plain paragraph and inside a card, a multi-line opening tag (a paragraph to CommonMark *and* markdown-it), props that are single-quoted around a `"`, carry an entity, or are unquoted, a comment aside inside a block, a `<style>` and a `<pre>` block, HTML inside a blockquote, and a marker-shaped line inside a `<div>` |
+| `components-crlf.md` | The same component shapes with CRLF line endings, so a run that wraps is re-indented with the file's own line break |
 
 ## `adversarial-rejected/`
 

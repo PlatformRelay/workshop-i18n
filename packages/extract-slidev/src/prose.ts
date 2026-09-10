@@ -33,9 +33,11 @@
  *
  * Paragraphs, headings, list-item text and table cells become units. Fenced code (any
  * fence character or length, including magic-move), raw HTML, Vue islands, images,
- * thematic breaks and link definitions are skeleton and are never emitted. Prose sitting
- * *inside* a raw HTML block is skeleton too — CommonMark stops parsing markdown there —
- * so it is reported as a coverage gap rather than silently dropped.
+ * thematic breaks and link definitions are skeleton and are never emitted. CommonMark
+ * stops parsing markdown inside a raw HTML block, so prose there is handed to the tag
+ * scanner in `html.ts` (ADR 0015): its text runs become units and its tags stay
+ * skeleton, and whatever prose it cannot extract safely is reported as a coverage gap
+ * rather than silently dropped.
  *
  * ## Slidev slot markers are skeleton, and open a key scope
  *
@@ -52,12 +54,14 @@
  * to the left column does not re-key the right one.
  */
 
+import { isSafeUnitKey } from '@workshop-i18n/core'
 import type { Node, Nodes, Parent, RootContent } from 'mdast'
 import { fromMarkdown } from 'mdast-util-from-markdown'
 import { gfmTableFromMarkdown } from 'mdast-util-gfm-table'
 import { gfmTable } from 'micromark-extension-gfm-table'
 import { isSlotMarkerLine, SLOT_MARKER } from './deck.js'
 import { type Diagnostic, diagnostic } from './diagnostic.js'
+import { locateHtmlBlock, scanHtml, type TextPropTable } from './html.js'
 import { stripContinuationPrefix } from './skeleton.js'
 
 /** One located prose span: where it is, what it says, and how to put it back. */
@@ -74,6 +78,13 @@ export interface ProseSpan {
   readonly continuationPrefix: string
   /** True for a GFM table cell, where a bare `|` in a translation adds a column. */
   readonly cell: boolean
+  /**
+   * What the span sits in: markdown prose, a text run inside an HTML block, or the value
+   * of a declared component prop (ADR 0015). Decides how a translation is spliced back.
+   */
+  readonly kind: 'markdown' | 'html-text' | 'html-attribute'
+  /** For `html-attribute`: the quote delimiting the value, `''` when unquoted. */
+  readonly quote: '"' | "'" | ''
 }
 
 /** Located prose plus whatever the locator declined to handle. */
@@ -90,6 +101,8 @@ export interface ProseOptions {
   readonly end: number
   /** Root key segment: `body` for the slide, `note` for its speaker note. */
   readonly root: string
+  /** Declared component text props, already in Vue-resolved form. Defaults to none. */
+  readonly textProps?: TextPropTable
 }
 
 /**
@@ -120,6 +133,21 @@ class KeyCursor {
   next(role: string): string {
     const scope = this.scopePath()
     return `${scope}/${role}-${this.bump(scope, role)}`
+  }
+
+  /**
+   * Key for the next top-level element of an HTML block, `body/h1-1/kw-card.2`. Counted
+   * per name in the scope, so the blocks and paragraphs around it do not enter the key.
+   */
+  nextElement(name: string): string {
+    const scope = this.scopePath()
+    return `${scope}/${name}.${this.bump(scope, `<${name}`)}`
+  }
+
+  /** Key for the next text run at the top of an HTML block, `body/h1-1/t:1`. */
+  nextRun(): string {
+    const scope = this.scopePath()
+    return `${scope}/t:${this.bump(scope, '<#run')}`
   }
 
   /** Open a heading scope of `level` and return the key of the heading's own text. */
@@ -278,23 +306,47 @@ function hasTranslatableText(node: Node): boolean {
 }
 
 /**
- * True when a line of a raw HTML block looks like prose a translator should have seen.
+ * True when a markdown span holds text outside tags, interpolations and comments.
  *
- * Deliberately crude: it exists to make a coverage gap visible, not to decide anything.
- * What is left after tags and entities are stripped is text; three or more characters of
- * it means the block holds words.
- *
- * The line is *not* dismissed for starting with `<`. `<p>Trapped prose</p>` starts with a
- * tag and is entirely prose, and a coverage metric that under-reports is worse than no
- * metric at all — it reads as a clean bill of health on 9% of the blocks it missed.
+ * CommonMark reads a tag it cannot complete on one line — `<KwCard` with its attributes
+ * on the lines below — as paragraph text, so a paragraph can be nothing but a component's
+ * opening tag. Handing that to a translator is handing them machinery (ADR 0015).
  */
-function looksLikeProse(line: string): boolean {
-  return (
-    line
-      .replace(/<[^>]*>/g, '')
-      .replace(/&[#\w]+;/g, '')
-      .trim().length >= 3
+function hasTextOutsideMarkup(raw: string): boolean {
+  return scanHtml(raw).some(
+    (token) => token.kind === 'text' && raw.slice(token.start, token.end).trim() !== '',
   )
+}
+
+/** No declared text props: the default, because a prop is machinery until declared. */
+const NO_TEXT_PROPS: TextPropTable = new Map()
+
+/** A letter anywhere, which is what separates prose from symbols, numbers and markup. */
+const LETTER = /\p{L}/u
+
+/**
+ * `raw` with the blockquote markers of its continuation lines blanked to spaces, so the
+ * HTML scanner reads them as the indentation they are. Offsets are unchanged.
+ */
+function blankQuotePrefixes(raw: string, prefix: string): string {
+  return raw
+    .split('\n')
+    .map((line, index) =>
+      index > 0 && line.startsWith(prefix)
+        ? ' '.repeat(prefix.length) + line.slice(prefix.length)
+        : line,
+    )
+    .join('\n')
+}
+
+/**
+ * The prefix every continuation line of an HTML text run carries. Inside an HTML block
+ * indentation is insignificant to the renderer, so it is skeleton exactly like a list
+ * item's; inside a blockquote the `>` markers are too.
+ */
+function runPrefix(raw: string, depth: number): string {
+  const prefix = containerPrefix(raw)
+  return depth === 0 ? (/^[ \t]*/.exec(prefix)?.[0] ?? '') : prefix
 }
 
 class ProseLocator {
@@ -305,6 +357,7 @@ class ProseLocator {
     private readonly file: string,
     private readonly base: number,
     private readonly fragment: string,
+    private readonly textProps: TextPropTable,
   ) {}
 
   /** Record one leaf's inline content as a span, unless it holds nothing to translate. */
@@ -313,6 +366,7 @@ class ProseLocator {
     if (range === undefined) return
     const raw = this.fragment.slice(range.start, range.end)
     if (raw.trim() === '' || !node.children.some(hasTranslatableText)) return
+    if (!hasTextOutsideMarkup(raw)) return
     if (this.holdsNestedSlotMarker(raw, range.start, range.end)) return
     const prefix = depth === 0 ? '' : containerPrefix(raw)
     this.spans.push({
@@ -322,6 +376,8 @@ class ProseLocator {
       text: stripContinuationPrefix(raw, prefix),
       continuationPrefix: prefix,
       cell,
+      kind: 'markdown',
+      quote: '',
     })
   }
 
@@ -351,18 +407,47 @@ class ProseLocator {
     return true
   }
 
-  private reportHtml(node: Nodes): void {
+  /**
+   * Locate the prose runs and declared props of one raw HTML block (ADR 0015), and report
+   * whatever prose is left in it that could not be extracted safely.
+   */
+  private locateHtml(node: Nodes, cursor: KeyCursor, depth: number): void {
     const start = node.position?.start?.offset
     const end = node.position?.end?.offset
     if (start === undefined || end === undefined) return
     const raw = this.fragment.slice(start, end)
-    if (!raw.split('\n').some(looksLikeProse)) return
+    const quote = depth === 0 ? '' : containerPrefix(raw)
+    const scanned = quote.includes('>') ? blankQuotePrefixes(raw, quote) : raw
+    const located = locateHtmlBlock(
+      scanned,
+      { element: (name) => cursor.nextElement(name), run: () => cursor.nextRun() },
+      this.textProps,
+      isSafeUnitKey,
+    )
+    for (const span of located.spans) {
+      const text = raw.slice(span.start, span.end)
+      const prefix = span.kind === 'html-text' ? runPrefix(text, depth) : ''
+      this.spans.push({
+        unitKey: span.unitKey,
+        start: this.base + start + span.start,
+        end: this.base + start + span.end,
+        text: stripContinuationPrefix(text, prefix),
+        continuationPrefix: prefix,
+        cell: false,
+        kind: span.kind,
+        quote: span.quote,
+      })
+    }
+    const leftover = LETTER.test(located.residual)
+    if (!leftover && located.skippedUnsafeKeys === 0) return
     this.diagnostics.push(
       diagnostic(
         this.file,
         'prose-in-html-block',
         'warning',
-        'prose inside a raw HTML block or Vue island stays protected skeleton and is not translated; move it out of the block to have it extracted',
+        leftover
+          ? 'prose inside this HTML block could not be extracted safely — it sits in a comment, behind an unterminated tag, or inside an element that is not scanned — so it stays English; move it into the element text to have it extracted'
+          : 'this HTML block nests too deeply for a safe unit identity, so some of its prose stays English; flatten the nesting to have it extracted',
         this.base + start,
         this.base + end,
       ),
@@ -401,7 +486,7 @@ class ProseLocator {
           break
         }
         case 'html':
-          this.reportHtml(node)
+          this.locateHtml(node, cursor, depth)
           break
         default:
           // Fenced and indented code, thematic breaks, link and footnote definitions,
@@ -432,7 +517,12 @@ export function locateProse(file: string, options: ProseOptions): ProseLocation 
   // Parse the blanked copy only to read offsets from; spans still slice the original.
   if (markers.length > 0) tree = parse(blankMarkers(fragment, markers))
 
-  const locator = new ProseLocator(file, options.start, fragment)
+  const locator = new ProseLocator(
+    file,
+    options.start,
+    fragment,
+    options.textProps ?? NO_TEXT_PROPS,
+  )
   const used = new Set<string>()
   let cursor = new KeyCursor(options.root)
   let next = 0
