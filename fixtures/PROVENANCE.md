@@ -44,6 +44,7 @@ byte-identically.
 | `scanner-shapes.md` | Shapes Slidev's scanner distinguishes and fixtures previously did not: a `---` inside a speaker note (which must not split), comments opened and closed mid-line, and a fence indented past four spaces |
 | `trailing-separator.md` | A file whose last byte is a separator, which yields no extra slide (a trailing separator *plus* newline does) |
 | `degenerate.md` | A file that does not open with a delimiter, an empty slide, a frontmatter-only slide, a slide with no frontmatter, and no trailing newline |
+| `slot-markers.md` | Slidev slot markers (`::right::`, `:: notes ::`, `::a.b-c:d_e::`) as their own paragraph and interrupting one, plus marker-shaped lines Slidev does **not** read as markers: inside a fence, inside a sentence, inside a blockquote, inside an HTML block, and one that ends a lazily continued list item. The real deck uses `::notes::` 35 times and `::right::` 14 times; before this fixture every one of them was a translatable unit |
 
 ## `adversarial-rejected/`
 

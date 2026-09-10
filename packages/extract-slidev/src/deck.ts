@@ -207,6 +207,25 @@ export function opensFrontmatterBlock(
     nextLine.trim() !== ''
   )
 }
+/**
+ * Slidev's `RE_SLOT_MARKER`, transcribed from `@slidev/cli` 52.19.0
+ * (`node/syntax/slot-sugar.ts`): `::right::` on a line of its own becomes
+ * `<template v-slot:right>`. Slidev applies it only at block indent 0, so callers test
+ * the raw line, never a trimmed one.
+ */
+export const SLOT_MARKER = /^::\s*([\w.\-:]+)\s*::\s*$/
+
+/**
+ * True when `line` (without its line break) is a Slidev slot marker at column 0.
+ *
+ * Shared by the locator, which keeps markers out of every unit, and by composition,
+ * which refuses a translation that introduces one — one definition, for the reason
+ * {@link isSlideSeparatorLine} has one.
+ */
+export function isSlotMarkerLine(line: string): boolean {
+  return SLOT_MARKER.test(line.replace(/\r$/, ''))
+}
+
 /** What an author almost certainly meant when they wrote a separator. */
 const EXACT_SEPARATOR = /^---[ \t]*$/
 /** A column-0 dash run, which is what Slidev's `startsWith("---")` accepts. */

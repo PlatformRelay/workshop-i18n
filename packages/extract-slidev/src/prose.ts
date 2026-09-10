@@ -36,12 +36,27 @@
  * thematic breaks and link definitions are skeleton and are never emitted. Prose sitting
  * *inside* a raw HTML block is skeleton too — CommonMark stops parsing markdown there —
  * so it is reported as a coverage gap rather than silently dropped.
+ *
+ * ## Slidev slot markers are skeleton, and open a key scope
+ *
+ * `::right::` on a line of its own is not prose: Slidev's slot sugar turns it into
+ * `<template v-slot:right>`, and a translated marker moves a column's prose into the
+ * wrong slot or off the slide. CommonMark knows nothing about it and reads the line as a
+ * paragraph, so the markers are found first, blanked out of the copy the parser sees —
+ * which splits a paragraph a marker interrupts exactly where Slidev splits it — and never
+ * emitted. Offsets are unchanged by the blanking, so every span still points at the
+ * original bytes.
+ *
+ * Each marker also opens a key scope named after its slot (`body/slot-right/p-1`). The
+ * slot name is layout machinery, not prose, and scoping by it means adding a paragraph
+ * to the left column does not re-key the right one.
  */
 
 import type { Node, Nodes, Parent, RootContent } from 'mdast'
 import { fromMarkdown } from 'mdast-util-from-markdown'
 import { gfmTableFromMarkdown } from 'mdast-util-gfm-table'
 import { gfmTable } from 'micromark-extension-gfm-table'
+import { isSlotMarkerLine, SLOT_MARKER } from './deck.js'
 import { type Diagnostic, diagnostic } from './diagnostic.js'
 import { stripContinuationPrefix } from './skeleton.js'
 
@@ -118,6 +133,84 @@ class KeyCursor {
 
 /** The prefix a continuation line inside a container carries before its content. */
 const CONTAINER_PREFIX = /^[ \t>]*/
+
+/** A slot name that can be used in a key segment as written. */
+const PLAIN_SLOT_NAME = /^[A-Za-z][A-Za-z0-9_-]*$/
+
+/** One slot marker Slidev reads, as fragment-relative offsets of its line content. */
+interface SlotMarker {
+  readonly start: number
+  readonly end: number
+  readonly name: string
+}
+
+/** Every line of `fragment` touching `[start, end)`, as `[lineStart, lineEnd)` pairs. */
+function linesOf(fragment: string, start: number, end: number): readonly [number, number][] {
+  const lines: [number, number][] = []
+  let lineStart = fragment.lastIndexOf('\n', start - 1) + 1
+  while (lineStart < end) {
+    const breakIndex = fragment.indexOf('\n', lineStart)
+    const lineEnd = breakIndex === -1 ? fragment.length : breakIndex
+    lines.push([lineStart, lineEnd])
+    lineStart = lineEnd + 1
+  }
+  return lines
+}
+
+/**
+ * The slot markers Slidev would read in `tree`.
+ *
+ * CommonMark has no such construct, so a marker surfaces as a line of a paragraph (or of
+ * a setext heading's text). Slidev reads it only at column 0 — where it also interrupts a
+ * paragraph and ends a lazily continued list or blockquote — so a line qualifies only when
+ * the raw line, not merely its content after a container prefix, matches.
+ */
+function findSlotMarkers(fragment: string, tree: Parent): readonly SlotMarker[] {
+  const markers: SlotMarker[] = []
+  const visit = (node: Node): void => {
+    if (node.type === 'paragraph' || node.type === 'heading') {
+      const start = node.position?.start?.offset
+      const end = node.position?.end?.offset
+      if (start === undefined || end === undefined) return
+      for (const [lineStart, lineEnd] of linesOf(fragment, start, end)) {
+        const line = fragment.slice(lineStart, lineEnd).replace(/\r$/, '')
+        const match = SLOT_MARKER.exec(line)
+        if (match !== null) {
+          markers.push({ start: lineStart, end: lineStart + line.length, name: match[1] ?? '' })
+        }
+      }
+      return
+    }
+    if (isParent(node)) for (const child of node.children) visit(child)
+  }
+  visit(tree)
+  return markers.sort((a, b) => a.start - b.start)
+}
+
+/** `fragment` with every marker line blanked to spaces, so offsets stay put. */
+function blankMarkers(fragment: string, markers: readonly SlotMarker[]): string {
+  let masked = fragment
+  for (const marker of markers) {
+    masked =
+      masked.slice(0, marker.start) +
+      ' '.repeat(marker.end - marker.start) +
+      masked.slice(marker.end)
+  }
+  return masked
+}
+
+/**
+ * The key segment a slot opens: `slot-<name>` for a plain, first-seen name, otherwise
+ * `slot.<ordinal>`. The two spellings cannot collide — a plain name has no `.` — so a
+ * repeated or awkward name (`::x..y::` would put `..` in a key) still gets a unique,
+ * safe segment.
+ */
+function slotSegment(name: string, ordinal: number, used: Set<string>): string {
+  const named = `slot-${name}`
+  const segment = PLAIN_SLOT_NAME.test(name) && !used.has(named) ? named : `slot.${ordinal}`
+  used.add(segment)
+  return segment
+}
 
 /** The longest string both `a` and `b` start with. */
 function commonPrefix(a: string, b: string): string {
@@ -220,6 +313,7 @@ class ProseLocator {
     if (range === undefined) return
     const raw = this.fragment.slice(range.start, range.end)
     if (raw.trim() === '' || !node.children.some(hasTranslatableText)) return
+    if (this.holdsNestedSlotMarker(raw, range.start, range.end)) return
     const prefix = depth === 0 ? '' : containerPrefix(raw)
     this.spans.push({
       unitKey,
@@ -229,6 +323,32 @@ class ProseLocator {
       continuationPrefix: prefix,
       cell,
     })
+  }
+
+  /**
+   * True — and reported — when a span carries a marker-shaped line Slidev did not read as
+   * a marker at column 0: `> ::right::`, or a marker indented inside a list item. Slidev
+   * may still apply its slot sugar there, inside the container, so the line is machinery
+   * either way; the paragraph around it stays English rather than risk a translator
+   * editing it.
+   */
+  private holdsNestedSlotMarker(raw: string, start: number, end: number): boolean {
+    const lines = raw.split('\n')
+    const nested = lines.some((line, index) =>
+      isSlotMarkerLine(index === 0 ? line : line.replace(CONTAINER_PREFIX, '')),
+    )
+    if (!nested) return false
+    this.diagnostics.push(
+      diagnostic(
+        this.file,
+        'slot-marker-in-container',
+        'warning',
+        'a line shaped like a Slidev slot marker ("::name::") sits inside a blockquote, list or indented paragraph; the text around it stays English so the marker cannot be translated — move the marker to column 0 on a line of its own',
+        this.base + start,
+        this.base + end,
+      ),
+    )
+    return true
   }
 
   private reportHtml(node: Nodes): void {
@@ -302,11 +422,27 @@ class ProseLocator {
  */
 export function locateProse(file: string, options: ProseOptions): ProseLocation {
   const fragment = file.slice(options.start, options.end)
-  const tree = fromMarkdown(fragment, {
-    extensions: [gfmTable()],
-    mdastExtensions: [gfmTableFromMarkdown()],
-  })
+  const parse = (text: string) =>
+    fromMarkdown(text, {
+      extensions: [gfmTable()],
+      mdastExtensions: [gfmTableFromMarkdown()],
+    })
+  let tree = parse(fragment)
+  const markers = findSlotMarkers(fragment, tree)
+  // Parse the blanked copy only to read offsets from; spans still slice the original.
+  if (markers.length > 0) tree = parse(blankMarkers(fragment, markers))
+
   const locator = new ProseLocator(file, options.start, fragment)
-  locator.walk(tree.children, new KeyCursor(options.root), 0)
+  const used = new Set<string>()
+  let cursor = new KeyCursor(options.root)
+  let next = 0
+  for (const node of tree.children) {
+    const start = node.position?.start?.offset ?? 0
+    for (; next < markers.length && (markers[next] as SlotMarker).start < start; next += 1) {
+      const segment = slotSegment((markers[next] as SlotMarker).name, next + 1, used)
+      cursor = new KeyCursor(`${options.root}/${segment}`)
+    }
+    locator.walk([node], cursor, 0)
+  }
   return { spans: locator.spans, diagnostics: locator.diagnostics }
 }
