@@ -167,9 +167,54 @@ the tags and interpolations (`&#123;&#123; x &#125;&#125;` there compiles to the
 not an interpolation). Prop values are static strings to Vue — the same decode yields a string
 prop — and are judged on their bytes.
 
-**Slidev block syntax is judged by line.** A line starting with `<<<` (a snippet import, which
-published a `.env` file in a real build) or `$$` (a KaTeX block whose `{…}` becomes a live
-`v-bind`) is refused unless the lines the replacement lands in already hold it.
+**Block syntax is judged by line.** A line starting, at any indentation, with `<<<` (a snippet
+import, which published a `.env` file in a real build), `$$` (a KaTeX block whose `{…}` becomes a
+live `v-bind`), `:` (the MDC block grammar accepts two or more colons and trims before the name;
+its `:1` shorthand crashes the build) or `[name]:` (a link reference definition an image can
+point at) is refused unless the lines the replacement lands in already hold it.
+
+**The backbone is a character budget, not a list of syntax.** Three review rounds each found one
+more construct made of characters the coarse rules did not enumerate — `![x](./.env?raw)`, a
+fence after a list bullet, `:Name`, `<<<`. So the guard now enumerates what a translation may
+*add* instead. After decoding character references and backslash escapes, every character of a
+markdown or HTML-text translation outside the free set may appear at most as often as in the
+English unit. The free set is Unicode letters, marks and decimal digits; the two ordinary spaces
+(U+0020, U+00A0); the prose punctuation `. , ; : ! ? ' " ( ) - – — … « » “ ” ‘ ’ ¿ ¡ %`; and —
+from evidence below — non-ASCII punctuation and symbols. Everything else (`` ` ~ < > { } [ ] $ * _
+# | @ / \ & ^ = + ``, other spaces, format characters such as U+200B or U+202E, controls) is
+budgeted. On top, the budget keeps its specific rules, each of which a budget alone cannot see:
+
+- inline code spans must be carried exactly (whitespace runs folded, since the renderer turns a
+  line break inside one into a space), so markup the English keeps inside code cannot move out of
+  it — `` `<img src=x onerror=y>` `` stays inert only inside the backticks;
+- no added `![` (an image is a build-time asset import, and a relative one in a heading fails the
+  whole build), no added run of three or more backticks or tildes anywhere (a fence after a
+  container prefix: PlantUML, Mermaid, twoslash), no added inline `:name` in MDC's own name class
+  `[\w$-]`, no added `v-drag`, and no added link target (a URL, a `www.` host, or a dotted name
+  ending in a letter-only label, which linkify would turn into a link made only of free
+  characters).
+
+A line break is free where the next line cannot start or interrupt a block — it begins, after
+ordinary spaces, with a letter, a non-ASCII character, `(`, `"`, `'`, a backtick, `/`,
+`**word`-style emphasis, `=` or `#` that are not a setext underline or heading, or a number
+that is not an ordered-list marker at 1 — and budgeted elsewhere. Inside a raw HTML block no block
+rule runs until a blank line, which is refused on its own, so there every break is free.
+
+Why non-ASCII punctuation and symbols are free: every grammar in the render path is spelled in
+ASCII — CommonMark and markdown-it syntax and escapes, HTML and Vue templates, Slidev's slot,
+snippet, KaTeX and v-drag rules, MDC. A character such as `→`, `·`, `≤`, `✓` or an emoji cannot
+start, end or change markup in any of them. Format characters, other spaces, controls, private-use
+and unassigned code points stay budgeted.
+
+Measured on the real pt-BR drafts (the seed lane's 1,195 aligned markdown pairs, plus 425
+HTML-text and 233 prop pairs paired by slide position): the guard before this round refused 0 of
+1,853. A strict budget (ASCII-only free punctuation, a break free only before a letter) refused
+118 — 94 markdown and 24 HTML-text, 91 of them line breaks before `(`, a backtick, `**` or a
+number, five of them code spans re-wrapped across a line break. With the rules above it refuses
+6, all markdown: four S21 units where the pt-BR draft translates the Argo CD variant against the
+Flux English, one note that adds a sentence with a `/`, and one note whose re-wrap starts a line
+with `:8080` — an MDC block shape that would really crash a build with MDC on. HTML-text and prop
+units: 0 refused.
 
 A test composes every corpus file with hostile payloads, renders each slide body and note with
 markdown-exit (the consumer's version, with Slidev's options) and compiles the HTML with
