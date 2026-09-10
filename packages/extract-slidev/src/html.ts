@@ -23,7 +23,8 @@
  * An element is `<name>.<n>` (`kw-card.2`), counted per parent and per name; a run is
  * `t:<n>` among its parent's runs; a declared prop is `prop:<name>`. Element names are
  * reduced to `[a-z0-9-]`, so `.` and `:` appear only where this scheme puts them and the
- * three shapes can never collide with each other or with a markdown role such as `p-1`.
+ * three shapes cannot collide with each other, with a markdown role such as `p-1`, or with a
+ * slot scope (`slot-right`, or `slot:<n>` — never `slot.<n>`, which is a `<slot>` element).
  */
 
 import { componentNameKey } from '@workshop-i18n/core'
