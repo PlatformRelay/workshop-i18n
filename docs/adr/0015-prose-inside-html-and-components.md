@@ -99,7 +99,8 @@ surfaces:
   `kwCard` and `kw-card` are one component, `leftHeading` and `left-heading` one prop.
 - Only **static** attributes are read. A `:heading` binding is code, and the manifest parser
   refuses a prop name that is a binding, directive, event or slot — judged on the name as Vue
-  resolves it, so `vHtml` is refused as `v-html` and `onClick` as a listener. Address, style and
+  resolves it, so `vHtml` is refused as `v-html` and `onClick` as a listener (`on` + upper case,
+  `on-…`, or an all-lower-case `on…` HTML handler shape; `onboardingTitle` is allowed). Address, style and
   component-switch attributes (`href`, `src`, `srcset`, `srcdoc`, `action`, `formaction`,
   `style`, `is`, …) are refused too, and a declaration is capped at 64 components and 16 props
   each. `extractSlidevFile` applies the same rule to a declaration handed to it directly.
@@ -152,9 +153,29 @@ it swallows. So the decision is now renderer-independent: every `<` not followed
 multiset, and their count may not change across the lines the replacement lands in. Comment
 words are exempt; comment delimiters are counted. The precise scanner — now reading tag names
 the way Vue's tokenizer does — may only add refusals. A false positive costs one unit an English
-fallback; a false negative costs code execution in the deck. A test composes every corpus file
-with hostile payloads and parses the result with `@vue/compiler-dom`, pinned to the consumer's
-Vue: nothing but text may differ from the English.
+fallback; a false negative costs code execution in the deck.
+
+**…and as the markdown renderer decodes it.** Slidev renders slide prose through markdown-exit
+before Vue compiles the HTML, and markdown-it decodes character references and backslash escapes
+on the way: `&#123;&#123;`, `&lbrace;&lbrace;`, `&#x7b;&#x7b;` and `\{\{` in a paragraph all
+become a live `{{`. So for markdown and HTML-text units the counts are also taken over the text
+with every reference or escape that decodes to `{`, `}` or `$` decoded (with an optional `;` and
+names matched without case — more generous than the renderer, never less), and no brace or `$`
+may be added at all. `<` and `>` stay encoded, from evidence: markdown-it re-escapes them in its
+output, and inside a raw HTML block Vue's compiler decodes references only after it has found
+the tags and interpolations (`&#123;&#123; x &#125;&#125;` there compiles to the text `{{ x }}`,
+not an interpolation). Prop values are static strings to Vue — the same decode yields a string
+prop — and are judged on their bytes.
+
+**Slidev block syntax is judged by line.** A line starting with `<<<` (a snippet import, which
+published a `.env` file in a real build) or `$$` (a KaTeX block whose `{…}` becomes a live
+`v-bind`) is refused unless the lines the replacement lands in already hold it.
+
+A test composes every corpus file with hostile payloads, renders each slide body and note with
+markdown-exit (the consumer's version, with Slidev's options) and compiles the HTML with
+`@vue/compiler-dom` (the consumer's Vue): the translated deck may hold nothing markdown cannot
+produce from prose that the English lacks. Slidev's own markdown extensions are outside what
+that oracle models, which is why the block-line rule and the decoder carry direct tests too.
 
 ## Consequences
 
