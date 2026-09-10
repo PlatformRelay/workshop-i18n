@@ -245,6 +245,8 @@ describe('FR-004: content gates on untrusted translations', () => {
   it.each([
     ['a bare domain', 'Zweite Folie auf attacker.io'],
     ['a bare email address', 'Zweite Folie: admin@evil.com'],
+    ['a URL inside emphasis (the re-review bypass)', 'Zweite _https://evil.com/login_ Folie'],
+    ['a bare email inside strikethrough', 'Zweite ~~admin@evil.com~~ Folie'],
   ])('never emits %s, which linkify would make a live link', (_label, translation) => {
     const entries = withEntry(TITLE, { translation })
     const preview = composeLocale(slidesOnly(entries))

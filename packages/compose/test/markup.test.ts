@@ -47,6 +47,11 @@ describe('markupTokens', () => {
       'https://k8s.io/docs',
       'https://a.example/x',
       'https://b.example/y',
+      // …and then every href/src the renderer itself creates, in document order.
+      'https://k8s.io/docs',
+      './img/logo.png',
+      'https://a.example/x',
+      'https://b.example/y',
     ])
   })
 
@@ -197,6 +202,37 @@ describe('checkMarkupParity', () => {
     const result = checkMarkupParity('See the docs', translation)
     expect(result.ok).toBe(false)
     expect(result.added.map((token) => token.kind)).toContain('url')
+  })
+
+  // The re-review's bypass list, verbatim: markdown-it linkifies each text token *after*
+  // emphasis and strikethrough delimiters are split off, while linkify-it run over the
+  // whole string will not start a match right after `_ * ~`. Each rendered as a live link.
+  it.each([
+    '_attacker.io_',
+    '__evil.com__',
+    '___attacker.io___',
+    '*_attacker.io_*',
+    '_admin@evil.com_',
+    '~~admin@evil.com~~',
+    '~~www.evil.com~~',
+    '_www.evil.com_',
+    '_https://evil.com/login_',
+    '_mailto:x@evil.com_',
+  ])('rejects %s, which the renderer links inside emphasis', (payload) => {
+    const result = checkMarkupParity('See the docs', `Siehe ${payload} hier`)
+    expect(result.ok).toBe(false)
+    expect(result.added.map((token) => token.kind)).toContain('url')
+  })
+
+  it('also links schemeless domains on the extra TLDs a consumer may enable', () => {
+    // Not linked by the default renderer: this pins the deliberate over-report.
+    expect(markupTokens('Siehe evil.dev')).toContainEqual({ kind: 'url', text: 'evil.dev' })
+  })
+
+  it('reads a domain whose dot is backslash-escaped as a domain', () => {
+    // markdown-it 14 keeps `\.` as a separate token and does not link it; a renderer that
+    // joins text before linkifying would. Scanning the unescaped text covers both.
+    expect(markupTokens('Siehe evil\\.com')).toContainEqual({ kind: 'url', text: 'evil.com' })
   })
 
   it('accepts a schemeless domain the English already links, unchanged', () => {

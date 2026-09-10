@@ -43,6 +43,8 @@
  */
 
 import LinkifyIt from 'linkify-it'
+import MarkdownIt from 'markdown-it'
+import type Token from 'markdown-it/lib/token.mjs'
 
 /** What a token is. Kinds are compared separately so a report can say what changed. */
 export type MarkupTokenKind = 'code' | 'tag' | 'mustache' | 'brace' | 'url' | 'entity'
@@ -300,24 +302,58 @@ const EXTRA_FUZZY_TLDS: readonly string[] = Object.freeze([
 ])
 
 /**
- * The linkifier Slidev's markdown-it runs (`linkify: true`), configured with its
- * defaults plus schemeless IPs and the extra TLDs above — again only ever *more*.
+ * A lexical linkify pass over the *unescaped* text, with schemeless IPs and the extra
+ * TLDs above — an over-report layered on top of {@link rendererLinks}. It covers a
+ * renderer configured more generously than Slidev's default, and one that joins escaped
+ * characters back into text before linkifying (markdown-it 14 does not; `evil\.com` stays
+ * unlinked there, and is still counted here).
  *
- * Why the library and not a regex: linkify-it links `attacker.io`, `evil.com/login` and
- * `admin@evil.com` with no scheme at all, under TLD, IDN, punycode, bracket and trailing-
- * punctuation rules that a hand-written pattern would approximate and drift from. The
- * parity invariant is "no new live link can appear", and the only way to state what the
- * renderer links without guessing is to ask the code the renderer uses. It is pure
- * (no I/O), dependency-light (uc.micro) and pinned to the major markdown-it 14 uses.
+ * On its own this pass is **not** enough, and once was the whole gate: linkify-it run over
+ * a whole string will not start a match right after `_`, `*` or `~`, while the renderer
+ * linkifies each text token *after* emphasis delimiters are split off — so
+ * `_attacker.io_` rendered as a live link and passed. That is why the renderer's own
+ * token stream is the primary source.
  */
 const LINKIFY = new LinkifyIt({ fuzzyLink: true, fuzzyEmail: true, fuzzyIP: true }).tlds(
   [...EXTRA_FUZZY_TLDS],
   true,
 )
 
-/** Everything a linkifier would turn into a live link, as spelled in the text. */
+/** Everything the lexical linkify pass would link, as spelled in the text. */
 function linkifiedUrls(text: string): readonly string[] {
   return (LINKIFY.match(text) ?? []).map((match) => match.raw)
+}
+
+/**
+ * The renderer, configured the way `@slidev/cli` 52.19 configures its markdown engine:
+ * `html: true, xhtmlOut: true, linkify: true` and Slidev's quotes. No plugin in Slidev's
+ * default set creates links (its `MarkdownItLink` only rewrites existing ones); MDC/Comark
+ * is opt-in and not modelled (see the README's known gaps).
+ *
+ * Slidev 52 renders through markdown-exit, a port of markdown-it 14 that uses the same
+ * linkify-it; this package runs markdown-it 14.3.0 — the upstream it ports, by the same
+ * maintainers as linkify-it, so no new trust party — and a differential test holds both
+ * engines to "every link they create is counted here". It is a runtime dependency, not a
+ * dev one, because the gate itself calls it on every translation.
+ */
+const RENDERER = new MarkdownIt({ html: true, xhtmlOut: true, linkify: true, quotes: `""''` })
+
+/** The `href` of every link and the `src` of every image the renderer creates from `text`. */
+function rendererLinks(text: string): readonly string[] {
+  const found: string[] = []
+  const walk = (tokens: readonly Token[]): void => {
+    for (const token of tokens) {
+      const attribute =
+        token.type === 'link_open' ? 'href' : token.type === 'image' ? 'src' : undefined
+      const value = attribute === undefined ? null : token.attrGet(attribute)
+      if (value !== null) found.push(value)
+      if (token.children !== null) walk(token.children)
+    }
+  }
+  // Inline parsing is the unit's real context: the skeleton gate guarantees a unit stays
+  // the inline content of the same block it came from.
+  walk(RENDERER.parseInline(text, {}))
+  return found
 }
 
 function entityTokens(text: string): readonly string[] {
@@ -337,7 +373,12 @@ export function markupTokens(text: string): readonly MarkupToken[] {
     tag: tags,
     mustache: mustache.tokens,
     brace: braceTokens(mustache.rest),
-    url: [...linkDestinations(normalized), ...autolinks, ...linkifiedUrls(normalized)],
+    url: [
+      ...linkDestinations(normalized),
+      ...autolinks,
+      ...linkifiedUrls(normalized),
+      ...rendererLinks(text),
+    ],
     entity: entityTokens(text),
   }
   return KIND_ORDER.flatMap((kind) => byKind[kind].map((token) => ({ kind, text: token })))
