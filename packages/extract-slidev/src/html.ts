@@ -285,6 +285,25 @@ export function markupTokens(text: string): readonly string[] {
     .map((token) => text.slice(token.start, token.end))
 }
 
+/**
+ * True when every opening tag in `text` is closed, in order, by a matching closing tag —
+ * void and self-closing elements aside. A translation may move markup, but a closing tag
+ * ahead of its opener is a template Vue refuses to compile, which fails the whole deck.
+ */
+export function isWellNested(text: string): boolean {
+  const open: string[] = []
+  for (const token of scanHtml(text)) {
+    if (token.kind === 'open') {
+      if (!token.selfClosing && !VOID.has(token.name.toLowerCase())) {
+        open.push(componentNameKey(token.name))
+      }
+    } else if (token.kind === 'close') {
+      if (open.pop() !== componentNameKey(token.name)) return false
+    }
+  }
+  return open.length === 0
+}
+
 // ---------------------------------------------------------------------------------------
 // The element tree and the run locator.
 

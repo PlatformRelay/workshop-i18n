@@ -417,6 +417,14 @@ describe('composeSkeleton keeps the markup a unit carries (ADR 0015)', () => {
     ).toBe('markup-changed')
   })
 
+  it('rejects a translation that keeps every tag but no longer nests them', () => {
+    // Same multiset, broken structure: Vue refuses to compile a closing tag before its
+    // opener, which fails the whole deck's build rather than one slide.
+    expect(reasonOf('Nutze </span>das<span class="kw-muted"> {{ $slidev.nav.currentPage }}.')).toBe(
+      'markup-changed',
+    )
+  })
+
   it('rejects a translation that edits or adds an interpolation, which Vue would execute', () => {
     expect(reasonOf('Nutze <span class="kw-muted">das</span> {{ alert(1) }}.')).toBe(
       'markup-changed',
