@@ -143,7 +143,10 @@ function canonical(value: unknown, ancestors: readonly object[] = []): string | 
 
 /**
  * A slide's frontmatter with the prose and the identity removed — the machinery that
- * decides how the slide renders. `undefined` when the block is not readable YAML.
+ * decides how the slide renders. `undefined` when the value is cyclic or too deep, or
+ * when the block does not parse. The last cannot happen through `alignSlides` today —
+ * the extractor refuses a deck with malformed frontmatter first, as
+ * `unreadable-translation` — and the `try` stays so that this function is total on its own.
  */
 function machinery(
   source: string,

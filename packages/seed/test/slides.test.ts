@@ -148,6 +148,19 @@ describe('alignSlides', () => {
     expect(accounted(section)).toEqual(englishIds(EN))
   })
 
+  it.each([
+    ['a duplicated key', 'layout: two-cols\nlayout: center'],
+    ['an unclosed flow sequence', 'layout: [unclosed'],
+    ['an unclosed quote', 'layout: "a'],
+  ])(
+    'misses the whole file when translated frontmatter does not parse, with %s',
+    (_label, yaml) => {
+      const broken = PT.replace('layout: two-cols', yaml)
+      const section = only(alignSlides([file('S05.md', EN)], [file('S05.md', broken)]).sections)
+      expect(section.misses.map((miss) => miss.reason)).toEqual(['unreadable-translation'])
+    },
+  )
+
   it('misses a slide whose fenced-block count diverged', () => {
     const diverged = PT.replace('Aplique-o.', 'Aplique-o.\n\n```sh\nkubectl apply\n```')
     const section = only(alignSlides([file('S05.md', EN)], [file('S05.md', diverged)]).sections)
