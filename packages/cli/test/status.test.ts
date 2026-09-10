@@ -303,7 +303,9 @@ describe('status — coverage gaps (ADR 0009)', () => {
     const fs = extracted()
     fs.put(
       '/repo/pages/S05-pod/index.md',
-      `${POD_SLIDES}\n<div class="note">\nProse in a block stays English.\n</div>\n`,
+      // An aside in a comment inside a block: prose the extractor reports and cannot extract.
+      // (Plain text inside a `<div>` is extracted since ADR 0015, so it is no longer a gap.)
+      `${POD_SLIDES}\n<div class="note">\n<!-- Prose in a block stays English. -->\n</div>\n`,
     )
     invoke(fs, ['extract'])
     fs.put(SLIDES_PO, translateAll(fs.text(SLIDES_PO)))

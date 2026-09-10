@@ -110,20 +110,46 @@ describe('extractSlidevFile', () => {
     }
   })
 
-  it('reports prose trapped in a Vue island rather than dropping it silently', () => {
+  it('extracts the prose inside a Vue island and leaves its tag skeleton (ADR 0015)', () => {
     const source = [
       '---',
       'slideId: s12-sts-dns',
       '---',
       '',
       '<KwCard kind="svc">',
-      'Headless Service means peers dial by name.',
+      '  Headless Service means peers dial <strong>by name</strong>.',
       '</KwCard>',
       '',
     ].join('\n')
     const located = locateSlidevFile(source)
-    expect(located.units).toEqual([])
-    expect(located.diagnostics.map((d) => d.code)).toEqual(['prose-in-html-block'])
+    expect(located.units.map((unit) => [formatUnitId(unit.id), unit.source])).toEqual([
+      [
+        'slides:s12-sts-dns:body/kw-card.1/t:1',
+        'Headless Service means peers dial <strong>by name</strong>.',
+      ],
+    ])
+    expect(located.skeleton.holes[0]?.encoding).toEqual({
+      kind: 'html-text',
+      continuationPrefix: '',
+      context: 'body',
+    })
+    expect(located.diagnostics).toEqual([])
+    const composed = composeSkeleton(located.skeleton, {
+      'slides:s12-sts-dns:body/kw-card.1/t:1': 'Peers wählen <strong>per Name</strong>.',
+    })
+    expect(composed).toContain(
+      '<KwCard kind="svc">\n  Peers wählen <strong>per Name</strong>.\n</KwCard>',
+    )
+  })
+
+  it('refuses a translation that would end the HTML block it sits in', () => {
+    const source = ['---', 'slideId: s1', '---', '', '<div>', '  One line.', '</div>', ''].join(
+      '\n',
+    )
+    const { skeleton } = extractSlidevFile(source)
+    expect(() =>
+      composeSkeleton(skeleton, { 'slides:s1:body/div.1/t:1': 'Eins.\n\nZwei.' }),
+    ).toThrow(/blank line/)
   })
 })
 

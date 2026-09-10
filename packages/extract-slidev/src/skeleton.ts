@@ -66,6 +66,8 @@ export type HoleContext = 'body' | 'note'
  *
  * `markdown` splices the text literally, re-applying the container prefix (`> `, list
  * indentation) that the locator stripped from the unit's continuation lines.
+ * `html-text` is a prose run inside a raw HTML block or Vue island (ADR 0015): spliced
+ * the same way, but judged as HTML — a blank line would end the block.
  * `yaml-scalar` re-emits the value as a double-quoted YAML scalar.
  */
 export type HoleEncoding =
@@ -76,6 +78,12 @@ export type HoleEncoding =
       readonly context: HoleContext
       /** True for a GFM table cell, where a bare `|` would add a column. */
       readonly cell: boolean
+    }
+  | {
+      readonly kind: 'html-text'
+      /** Indentation (and any blockquote marker) every continuation line carries. */
+      readonly continuationPrefix: string
+      readonly context: HoleContext
     }
   | { readonly kind: 'yaml-scalar' }
 
@@ -117,6 +125,7 @@ export type ReplacementRejection =
   | 'table-column'
   | 'slot-marker'
   | 'markup-changed'
+  | 'blank-line'
 
 /** One refused replacement. */
 export interface CompositionIssue {
@@ -375,9 +384,21 @@ function rejectReplacement(
       'translation changes the HTML tags or {{ }} interpolations the English carries — keep every tag and interpolation exactly as written; only their position may change',
     )
   }
+  // An HTML block ends at the first blank line, and everything after it — the rest of
+  // the card, its closing tag — is then read as markdown.
+  if (
+    hole.encoding.kind === 'html-text' &&
+    splitLines(replacement).some((line) => line.trim() === '')
+  ) {
+    return reject(
+      'blank-line',
+      'translation contains a blank line, which ends the HTML block it sits in and turns the rest of it into markdown — keep the text in one paragraph',
+    )
+  }
   // Unescaped pipes only: `\|` is how a cell carries a literal one, and translators need it.
   const barePipes = (text: string): number => countOccurrences(text.replace(/\\\|/g, ''), '|')
-  if (hole.encoding.cell && barePipes(replacement) > barePipes(hole.source)) {
+  const isCell = hole.encoding.kind === 'markdown' && hole.encoding.cell
+  if (isCell && barePipes(replacement) > barePipes(hole.source)) {
     return reject(
       'table-column',
       'translation adds a "|" inside a table cell, which adds a column to that row — escape it as "\\|"',

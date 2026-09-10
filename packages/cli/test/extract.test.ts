@@ -510,7 +510,8 @@ describe('extract — warnings', () => {
     const fs = corpus()
     fs.put(
       '/repo/pages/S05-pod/index.md',
-      `${POD_SLIDES}\n<div class="note">\nProse in a block.\n</div>\n`,
+      // A comment aside inside a block: plain `<div>` text is extracted since ADR 0015.
+      `${POD_SLIDES}\n<div class="note">\n<!-- Prose in a block. -->\n</div>\n`,
     )
     const result = invoke(fs, ['extract'])
     expect(result.code).toBe(EXIT.OK)

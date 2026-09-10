@@ -509,16 +509,22 @@ export function locateHtmlBlock(
       const path = counter.element(segmentName(node.name))
       emitProps(node, path)
       const tag = node.open.name.toLowerCase()
-      if (CODE_LIKE.has(tag)) {
-        blankRange(node.open.end, nodeEnd(node))
-        continue
-      }
-      if (NOT_SCANNED.has(tag)) continue
+      if (CODE_LIKE.has(tag) || NOT_SCANNED.has(tag)) continue
       walk(node.children, new LocalKeys(path))
     }
     flush()
   }
   walk(tree, keys)
+
+  // Code is not prose wherever it sits, inside a run or not.
+  const blankCode = (nodes: readonly HtmlNode[]): void => {
+    for (const node of nodes) {
+      if (node.kind !== 'element') continue
+      if (CODE_LIKE.has(node.open.name.toLowerCase())) blankRange(node.open.end, nodeEnd(node))
+      else blankCode(node.children)
+    }
+  }
+  blankCode(tree)
 
   // What is left once located runs, markup and code are blanked is prose nobody extracted.
   for (const token of scanHtml(text)) {
