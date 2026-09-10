@@ -34,6 +34,23 @@ describe('insideRoot', () => {
     const error = refusal(() => insideRoot('/repo', path))
     expect(error.exitCode).toBe(EXIT.DATA)
   })
+
+  it('refuses a ".." segment even when the path it spells stays inside the root', () => {
+    // Lexically `labs/../i18n/de/a.po` is `/repo/i18n/de/a.po`, so the containment check
+    // alone would pass it; the segment check is what refuses it. Such a path would slip
+    // past every rule keyed to a path's leading segments (reserved trees, symlink walk).
+    const error = refusal(() => insideRoot('/repo', 'labs/../i18n/de/a.po'))
+    expect(error.exitCode).toBe(EXIT.DATA)
+    expect(error.message).toContain('refusing unsafe repository path')
+  })
+
+  it('refuses the root itself spelled as "." segments, which only the containment check sees', () => {
+    for (const path of ['.', './.']) {
+      const error = refusal(() => insideRoot('/repo', path))
+      expect(error.exitCode).toBe(EXIT.DATA)
+      expect(error.message).toContain('is the repository root itself')
+    }
+  })
 })
 
 describe('assertNoSymlink', () => {

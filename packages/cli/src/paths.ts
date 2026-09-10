@@ -31,9 +31,20 @@ export function insideRoot(root: string, repoPath: string): string {
   ) {
     throw new CliError(EXIT.DATA, `refusing unsafe repository path ${JSON.stringify(repoPath)}`)
   }
+  // The segment check above is the rule; it also refuses a `..` that stays inside the
+  // root, which containment alone would pass. What it lets through that is still not a
+  // path *under* the root is `.` segments, which join to the root itself.
   const absolute = join(root, ...repoPath.split('/'))
   const back = relative(root, absolute)
-  if (back === '' || back.startsWith(`..${sep}`) || back === '..' || isAbsolute(back)) {
+  if (back === '') {
+    throw new CliError(
+      EXIT.DATA,
+      `path ${JSON.stringify(repoPath)} is the repository root itself, not a path under it`,
+    )
+  }
+  // Unreachable while the segment check stands; kept so that loosening it can never
+  // turn into an escape.
+  if (back.startsWith(`..${sep}`) || back === '..' || isAbsolute(back)) {
     throw new CliError(EXIT.DATA, `path ${JSON.stringify(repoPath)} escapes the repository root`)
   }
   return absolute
