@@ -18,6 +18,9 @@ function matches(pattern: string, path: string): boolean {
 /**
  * The matcher's own source as plain JavaScript, so a worker can run it without vitest.
  * This relies on glob.ts importing nothing; give it an import and these tests say so.
+ * `stripTypeScriptTypes` needs Node 22.13 or later — newer than the package's `>=22`
+ * engines floor, which applies to the shipped CLI, not to this test; CI runs the latest
+ * 22.x. On an older Node this file fails to load rather than skipping.
  */
 const GLOB_MODULE = stripTypeScriptTypes(
   readFileSync(new URL('../src/glob.ts', import.meta.url), 'utf8'),
@@ -221,6 +224,21 @@ describe('compileGlob bounds (work is bounded, not merely non-exponential)', () 
     expect(elapsed).toBeLessThan(5_000)
   }, 30_000)
 
+  it('never retries a (segment, name) pair: ** between wildcards on a deep path', async () => {
+    // `**` runs collapse, so the pattern alternates `**` with `*`, which every name
+    // satisfies; only the memo keeps the ways of splitting 30 names across 15 `**` from
+    // being tried one by one (without it this is seconds at depth 26, x12 per 4 levels).
+    const elapsed = await timeInWorker(
+      `
+      const glob = compileGlob(Array(15).fill('**/*').join('/') + '/x')
+      if (glob.test(Array(30).fill('a').join('/'))) throw new Error('matched')
+      if (!glob.test(Array(29).fill('a').join('/') + '/x')) throw new Error('did not match')
+      `,
+      5_000,
+    )
+    expect(elapsed).toBeLessThan(200)
+  }, 10_000)
+
   it('stops testing a path at the first segment that cannot match', async () => {
     // The shape of a hostile manifest entry against an unchanged tree: a wildcard base
     // (so the whole repository is walked), the most alternatives and segments the bounds
@@ -278,34 +296,94 @@ function referenceSegment(pattern: string, name: string): boolean {
   return from(0, 0)
 }
 
+/** Every plain pattern a `{a,b}` glob stands for, by the most literal reading of braces. */
+function referenceExpand(pattern: string): string[] {
+  const open = pattern.indexOf('{')
+  if (open < 0) return [pattern]
+  let depth = 0
+  const commas: number[] = []
+  let close = -1
+  for (let index = open; index < pattern.length && close < 0; index += 1) {
+    const character = pattern.charAt(index)
+    if (character === '{') depth += 1
+    else if (character === '}') {
+      depth -= 1
+      if (depth === 0) close = index
+    } else if (character === ',' && depth === 1) commas.push(index)
+  }
+  const bounds = [open, ...commas, close]
+  const rest = referenceExpand(pattern.slice(close + 1))
+  return bounds.slice(1).flatMap((end, index) => {
+    const alternative = pattern.slice((bounds[index] as number) + 1, end)
+    return referenceExpand(alternative).flatMap((head) =>
+      rest.map((tail) => pattern.slice(0, open) + head + tail),
+    )
+  })
+}
+
+/** mulberry32: a 32-bit PRNG on integer arithmetic, so it cannot lose precision. */
+function prng(seed: number): (below: number) => number {
+  let state = seed >>> 0
+  return (below) => {
+    state = (state + 0x6d2b79f5) >>> 0
+    let mixed = Math.imul(state ^ (state >>> 15), state | 1)
+    mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61)
+    return ((mixed ^ (mixed >>> 14)) >>> 0) % below
+  }
+}
+
 describe('compileGlob agrees with the reference semantics', () => {
-  it('on thousands of small generated globs and paths', () => {
-    let seed = 20260910
-    const random = (below: number) => {
-      seed = (seed * 1103515245 + 12345) % 2 ** 31
-      return seed % below
-    }
+  it('on thousands of distinct generated globs, braces included, and paths', () => {
+    const random = prng(20260910)
     const word = (alphabet: string, max: number) => {
       let out = ''
       const length = 1 + random(max)
-      for (let index = 0; index < length; index += 1)
+      for (let index = 0; index < length; index += 1) {
         out += alphabet.charAt(random(alphabet.length))
+      }
       return out
     }
-    const safe = (segment: string) => segment !== '.' && segment !== '..'
+    const segment = (): string => {
+      const kind = random(10)
+      if (kind === 0) return '**'
+      if (kind === 1) return `${word('ab*?', 2)}{${word('ab*?', 2)},${word('ab*?.', 2)}}`
+      if (kind === 2) return `{${word('ab*?', 3)},${word('ab', 1)}/${word('ab*?', 2)}}`
+      return word('ab*?.', 3)
+    }
+    const valid = (plain: string) =>
+      plain.split('/').every((part) => part !== '' && part !== '.' && part !== '..')
+    const cases = new Set<string>()
     const mismatches: string[] = []
-    for (let round = 0; round < 5000; round += 1) {
-      const pattern = Array.from({ length: 1 + random(4) }, () =>
-        random(4) === 0 ? '**' : word('ab*?.', 5),
-      ).filter(safe)
-      const path = Array.from({ length: 1 + random(4) }, () => word('ab.', 4)).filter(safe)
-      if (pattern.length === 0 || path.length === 0) continue
-      const expected = referenceMatch(pattern, path)
-      if (compileGlob(pattern.join('/')).test(path.join('/')) !== expected) {
-        mismatches.push(`${pattern.join('/')} vs ${path.join('/')}: expected ${expected}`)
+    let matched = 0
+    let braced = 0
+    let starred = 0
+    for (let round = 0; round < 10000; round += 1) {
+      const pattern = Array.from({ length: 1 + random(3) }, segment).join('/')
+      const path = Array.from({ length: 1 + random(3) }, () => word('aab.', 3)).join('/')
+      const alternatives = referenceExpand(pattern)
+      if (!alternatives.every(valid) || !valid(path)) continue
+      cases.add(`${pattern} vs ${path}`)
+      if (pattern.includes('{')) braced += 1
+      if (/(^|\/)[^/]*[*?][^/]*(\/|$)/.test(pattern.replaceAll('**', ''))) starred += 1
+      const expected = alternatives.some((plain) =>
+        referenceMatch(plain.split('/'), path.split('/')),
+      )
+      if (expected) matched += 1
+      if (compileGlob(pattern).test(path) !== expected) {
+        mismatches.push(`${pattern} vs ${path}: expected ${expected}`)
       }
     }
     expect(mismatches).toEqual([])
+    // A generator that collapses to a handful of cases proves nothing: pin its spread.
+    expect(cases.size).toBeGreaterThan(6000)
+    expect(braced).toBeGreaterThan(2000)
+    expect(starred).toBeGreaterThan(4000)
+    expect(matched).toBeGreaterThan(400)
+  })
+
+  it('expands braces in the reference the way the README describes them', () => {
+    expect(referenceExpand('{a,{b,c}}.md')).toEqual(['a.md', 'b.md', 'c.md'])
+    expect(referenceExpand('x{1,2}y{a,b}')).toEqual(['x1ya', 'x1yb', 'x2ya', 'x2yb'])
   })
 })
 
