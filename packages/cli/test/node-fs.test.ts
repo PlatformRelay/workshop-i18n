@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -60,6 +68,18 @@ describe('the CLI on the real file system', () => {
     expect(catalog).toContain('msgid "Hello, workshop."')
     expect(cli(['extract', '--check']).code).toBe(EXIT.OK)
     expect(readFileSync(join(root, 'i18n/de/pages/S01-intro/index.po'), 'utf8')).toBe(catalog)
+  })
+
+  it('removes the directory a moved section’s catalog leaves empty', () => {
+    expect(cli(['init-ids']).code).toBe(EXIT.OK)
+    expect(cli(['extract']).code).toBe(EXIT.OK)
+    const source = readFileSync(join(root, 'pages/S01-intro/index.md'), 'utf8')
+    rmSync(join(root, 'pages/S01-intro'), { recursive: true })
+    write('pages/S01-welcome/index.md', source)
+    expect(cli(['extract']).code).toBe(EXIT.OK)
+    expect(existsSync(join(root, 'i18n/de/pages/S01-welcome/index.po'))).toBe(true)
+    expect(existsSync(join(root, 'i18n/de/pages/S01-intro'))).toBe(false)
+    expect(existsSync(join(root, 'i18n/de/pages'))).toBe(true)
   })
 
   it('refuses to write through a symlinked i18n directory', () => {

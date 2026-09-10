@@ -85,6 +85,13 @@ the whole corpus has extracted cleanly and every existing catalog has parsed; ev
 is listed in one run. Extractor coverage warnings (prose left English inside an HTML block, …) are
 printed to stderr with their location.
 
+The writes themselves are not atomic across files: a run killed or starved of disk space part-way
+can leave some catalogs updated and others not — after a move, the same unit in both its old and
+its new catalog, which the next run refuses as a duplicate. Nothing is lost, because every catalog
+is a function of the English source and the committed catalogs: restore them with
+`git checkout -- i18n/`, delete any new catalog the run had created (`git status i18n/` lists
+them), and run `extract` again.
+
 Update rules (spec 002): an entry whose English did not change is untouched, translator comments
 and unknown flags included; an English edit makes exactly that entry `fuzzy` with `#| msgid`; a unit
 that left the English source becomes an obsolete `#~` entry; a new unit enters as untranslated.
@@ -180,7 +187,8 @@ a slide moves to another file, which ADR 0005 promises is free. So a locale's ca
 as one logical catalog partitioned by current source file: existing entries are pooled by unit id
 and each source file's catalog takes the entries its units name, wherever they lived before. Only a
 unit that left the English source becomes obsolete, in the catalog it was last in. A catalog left
-with no entries — every unit moved away, as on a file rename — is removed. The same unit id in two
+with no entries — every unit moved away, as on a file rename — is removed, and so is every directory
+under `i18n/<locale>/` that removal leaves empty. The same unit id in two
 catalogs is a hard error naming both files and lines. A new catalog built from moved entries keeps
 the header of the catalog they came from. The `#.` source reference is the file path (not a line
 number), so an edit elsewhere in a file does not rewrite provenance comments. What does *not* follow

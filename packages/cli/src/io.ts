@@ -12,7 +12,15 @@
  * sync interface keeps every command a straight line.
  */
 
-import { lstatSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import {
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmdirSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 
 /** What a path is, read without following a symlink. */
 export type EntryKind = 'file' | 'directory' | 'symlink' | 'other'
@@ -31,6 +39,8 @@ export interface FileSystem {
   /** Create a directory and any missing parents. */
   makeDirectory(path: string): void
   removeFile(path: string): void
+  /** Remove an empty directory; fails on one that is not empty. */
+  removeDirectory(path: string): void
 }
 
 /** The injected world a command runs in. */
@@ -67,5 +77,6 @@ export function nodeFileSystem(): FileSystem {
       mkdirSync(path, { recursive: true })
     },
     removeFile: (path) => unlinkSync(path),
+    removeDirectory: (path) => rmdirSync(path),
   }
 }

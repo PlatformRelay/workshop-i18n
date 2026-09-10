@@ -97,6 +97,18 @@ export class MemoryFileSystem implements FileSystem {
     this.files.delete(path)
   }
 
+  removeDirectory(path: string): void {
+    this.assertNoLinkOnTheWay(path)
+    if (!this.directories.has(path)) {
+      throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' })
+    }
+    if (this.readDirectory(path).length > 0) {
+      throw Object.assign(new Error(`ENOTEMPTY: ${path}`), { code: 'ENOTEMPTY' })
+    }
+    this.removals.push(path)
+    this.directories.delete(path)
+  }
+
   /** The CLI must never traverse a link; make any attempt loud. */
   private assertNoLinkOnTheWay(path: string): void {
     let current = path

@@ -268,13 +268,18 @@ export function planLocale(
 }
 
 /**
- * Write a plan: every changed catalog, and removal of every catalog that must not exist.
- * Every target is checked for symlinks before the first write.
+ * Write a plan: every changed catalog, and removal of every catalog that must not exist,
+ * along with any directory that removal leaves empty (below `i18n/<locale>/`, which
+ * stays). Every target is checked for symlinks before the first write.
  */
 export function writePlans(workspace: Workspace, plans: readonly LocalePlan[]): void {
-  const changed = plans.flatMap((locale) => locale.catalogs.filter(isChanged))
-  for (const planned of changed) assertNoSymlink(workspace.fs, workspace.root, planned.path)
-  for (const planned of changed) {
+  const changed = plans.flatMap((locale) =>
+    locale.catalogs.filter(isChanged).map((planned) => ({ locale: locale.locale, planned })),
+  )
+  for (const { planned } of changed) {
+    assertNoSymlink(workspace.fs, workspace.root, planned.path)
+  }
+  for (const { planned } of changed) {
     const absolute = insideRoot(workspace.root, planned.path)
     if (planned.text === undefined) {
       workspace.fs.removeFile(absolute)
@@ -282,6 +287,23 @@ export function writePlans(workspace: Workspace, plans: readonly LocalePlan[]): 
     }
     workspace.fs.makeDirectory(dirname(absolute))
     workspace.fs.writeFile(absolute, planned.text)
+  }
+  // After every write, so a directory a new catalog is about to fill is never removed.
+  for (const { locale, planned } of changed) {
+    if (planned.text === undefined) removeEmptyParents(workspace, locale, planned.path)
+  }
+}
+
+/** Remove the directories above `catalogPath` that are now empty, stopping at the locale. */
+function removeEmptyParents(workspace: Workspace, locale: string, catalogPath: string): void {
+  const localeRoot = repoJoin(CATALOG_ROOT, locale)
+  let directory = posix.dirname(catalogPath)
+  while (directory.startsWith(`${localeRoot}/`)) {
+    const absolute = insideRoot(workspace.root, directory)
+    if (workspace.fs.kind(absolute) !== 'directory') return
+    if (workspace.fs.readDirectory(absolute).length > 0) return
+    workspace.fs.removeDirectory(absolute)
+    directory = posix.dirname(directory)
   }
 }
 

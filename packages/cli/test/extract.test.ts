@@ -306,6 +306,31 @@ describe('extract — updating catalogs (spec 002 US-1)', () => {
     expect(fs.files.has('/repo/i18n/pt-BR/pages/S05-pods/index.po')).toBe(true)
   })
 
+  it('removes the directories a removed catalog leaves empty, up to the locale directory', () => {
+    const fs = corpus()
+    invoke(fs, ['extract'])
+    fs.put('/repo/labs/day-2/05-pod.md', POD_LAB)
+    fs.files.delete('/repo/labs/day-1/05-pod.md')
+    const result = invoke(fs, ['extract'])
+    expect(result.code).toBe(EXIT.OK)
+    for (const locale of ['pt-BR', 'de']) {
+      expect(fs.kind(`/repo/i18n/${locale}/labs/day-1/05-pod.po`)).toBeUndefined()
+      expect(fs.kind(`/repo/i18n/${locale}/labs/day-1`)).toBeUndefined()
+      expect(fs.kind(`/repo/i18n/${locale}/labs/day-2/05-pod.po`)).toBe('file')
+    }
+  })
+
+  it('keeps a directory a removed catalog leaves holding anything else', () => {
+    const fs = corpus()
+    invoke(fs, ['extract'])
+    fs.put('/repo/i18n/pt-BR/labs/day-1/NOTES.txt', 'kept\n')
+    fs.put('/repo/labs/day-2/05-pod.md', POD_LAB)
+    fs.files.delete('/repo/labs/day-1/05-pod.md')
+    expect(invoke(fs, ['extract']).code).toBe(EXIT.OK)
+    expect(fs.kind('/repo/i18n/pt-BR/labs/day-1/NOTES.txt')).toBe('file')
+    expect(fs.kind('/repo/i18n/de/labs/day-1')).toBeUndefined()
+  })
+
   it('keeps an orphaned catalog as obsolete entries when its source is deleted', () => {
     const fs = corpus()
     invoke(fs, ['extract'])
