@@ -175,12 +175,14 @@ must refuse. See `packages/extract-quiz/test/corpus.test.ts` for what each one p
 A slice of the **Brazilian Portuguese translation of Kubernetes-Workshop** contributed by
 **João Brito ([@juniorjbn](https://github.com/juniorjbn))** as
 [PlatformRelay/kubernetes-workshop PR #55](https://github.com/PlatformRelay/kubernetes-workshop/pull/55),
-pinned at the PR's head commit `7d5ed3d` (translated against English commit `bc45b04`,
+pinned at the PR's head commit `7d5ed3d`. **The PR is unmerged** at the time of vendoring, so
+these files exist on no branch of that repository; the PR's head ref is the only upstream
+(translated against English commit `bc45b04`,
 whose slides and labs are byte-identical to the `b4fb2e2` snapshot the English fixtures
 above were taken from). The translation is a *parallel tree*: the same relative paths as
 the English, translated in place and carrying no identities. It is the golden input for
 `packages/seed` (spec 004 User Story 1). Copyright in the translation remains with its
-author; it was contributed to that project under the project's licence (0BSD), and is
+author; it was offered to that project as a pull request under the project's licence (0BSD), and is
 vendored here only as a test input — the seeded catalogs credit the author in every
 entry's provenance.
 

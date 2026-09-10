@@ -15,6 +15,7 @@ fixtures/
   adversarial-labs-rejected/ # lab files extraction must refuse, each with its diagnostic
 
   corpus-quiz/               # both consumer question banks (pinned snapshots)
+  corpus-k8s-pt-BR/          # a pt-BR parallel-tree slice (Kubernetes-Workshop PR #55) for seed
   adversarial-quiz/          # hand-built hostile JSON: escapes, surrogates, formatting
   adversarial-quiz-rejected/ # quiz files extraction must refuse, each with its diagnostic
 
@@ -38,6 +39,11 @@ Rules:
 - **Both** consumer corpora must be represented, not one (ADR 0001/0010). The lab suite
   asserts the tree *names* it loads, so dropping a workshop fails loudly rather than
   quietly shrinking a count nobody reads.
+- `corpus-k8s-pt-BR/` is the golden input for `packages/seed`, not a round-trip corpus: its
+  files are *translations* of fixtures in `corpus-k8s/`, `corpus-k8s-labs/` and
+  `corpus-quiz/`, kept under the same names, and `packages/seed/test/corpus-pt-BR.test.ts`
+  pins the per-section match/miss counts seeding produces from them. A file added here
+  must mirror an English fixture that already exists, and the goldens move with it.
 - `adversarial-rejected/` exists so that "unsupported" stays a tested behaviour: each
   file must produce a named error diagnostic, and composition must still reproduce it
   byte-for-byte, because refusing is not the same as mangling. `adversarial-labs-rejected/`
