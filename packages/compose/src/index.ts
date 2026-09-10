@@ -7,7 +7,17 @@
  * (constitution IV).
  */
 
+export {
+  ComposeInputError,
+  type ComposeMode,
+  type Finding,
+  type FindingCode,
+  type FindingSeverity,
+  hasErrorFindings,
+} from './findings.js'
+export { type ContentGateFailure, contentGateFailures } from './gates.js'
 export { type LengthMeasurement, measureLength } from './length.js'
+export { FALLBACK_MARKER, isMarkedFallback, markFallback } from './marker.js'
 export {
   checkMarkupParity,
   type MarkupParity,
@@ -24,3 +34,11 @@ export {
   type SkeletonMismatch,
 } from './surface.js'
 export { containsTerm, missingProtectedTerms } from './terms.js'
+export {
+  type FileVerification,
+  locateContextFor,
+  type VerifiedRendering,
+  type VerifiedUnit,
+  type VerifyFileInput,
+  verifyComposedFile,
+} from './verify.js'
