@@ -116,6 +116,53 @@ describe('discoverSurfaceFiles', () => {
   })
 })
 
+describe('discoverSurfaceFiles — hostile globs', () => {
+  it('survives a pathological star run in the manifest (no ReDoS)', () => {
+    const fs = new MemoryFileSystem({
+      '/repo/.localization/workshop.yaml': MANIFEST.replace(
+        "'labs/**/*.md'",
+        "'labs/*a*a*a*a*a*a*a*a*b.md'",
+      ),
+      [`/repo/labs/${'a'.repeat(60)}.md`]: '',
+      '/repo/pages/S05-pod/index.md': '',
+      '/repo/quiz/questions.json': '{}',
+    })
+    const started = performance.now()
+    const found = discoverSurfaceFiles(workspaceOf(fs))
+    expect(performance.now() - started).toBeLessThan(500)
+    expect(found.files.some((file) => file.surface === 'labs')).toBe(false)
+  })
+
+  it('names the manifest entry of a glob it refuses', () => {
+    const fs = new MemoryFileSystem({
+      '/repo/.localization/workshop.yaml': MANIFEST.replace("'labs/README.md'", "'labs/{a'"),
+    })
+    const result = invoke(fs, ['extract'])
+    expect(result.code).toBe(EXIT.DATA)
+    expect(result.stderr).toContain('surfaces.labs.exclude[0]: "labs/{a" has an unbalanced')
+  })
+
+  it('walks every base of a brace glob and records the base that holds each file', () => {
+    const fs = new MemoryFileSystem({
+      '/repo/.localization/workshop.yaml': MANIFEST.replace(
+        "'labs/**/*.md'",
+        "'{labs,extra/labs}/**/*.md'",
+      ),
+      '/repo/labs/a.md': '',
+      '/repo/extra/labs/b.md': '',
+      '/repo/pages/S05-pod/index.md': '',
+      '/repo/quiz/questions.json': '{}',
+    })
+    const labs = discoverSurfaceFiles(workspaceOf(fs)).files.filter(
+      (file) => file.surface === 'labs',
+    )
+    expect(labs.map((file) => [file.path, file.base])).toEqual([
+      ['extra/labs/b.md', 'extra/labs'],
+      ['labs/a.md', 'labs'],
+    ])
+  })
+})
+
 describe('loadWorkspace', () => {
   it('reports every manifest issue with 65', () => {
     const fs = new MemoryFileSystem({

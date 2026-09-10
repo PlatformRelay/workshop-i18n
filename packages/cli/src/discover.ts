@@ -17,7 +17,7 @@
 
 import type { Surface } from '@workshop-i18n/core'
 import { CliError, EXIT } from './exit-codes.js'
-import { compileGlob, globBase } from './glob.js'
+import { compileGlob, type Glob, GlobError } from './glob.js'
 import { assertNoSymlink, insideRoot, repoJoin } from './paths.js'
 import { compareStrings } from './report.js'
 import type { Workspace } from './workspace.js'
@@ -78,6 +78,25 @@ export function walkFiles(
   return { files, links }
 }
 
+/** Compile a manifest glob, turning a refusal into an error naming the manifest entry. */
+function compileManifestGlob(pattern: string, entry: string): Glob {
+  try {
+    return compileGlob(pattern)
+  } catch (error) {
+    if (error instanceof GlobError) throw new CliError(EXIT.DATA, `${entry}: ${error.message}`)
+    throw error
+  }
+}
+
+/** The longest of the glob's bases that contains `path` — what init-ids stems ids from. */
+function baseOf(glob: Glob, path: string): string {
+  let best = ''
+  for (const base of glob.bases) {
+    if (base.length > best.length && path.startsWith(`${base}/`)) best = base
+  }
+  return best
+}
+
 /**
  * Resolve the manifest's globs to files.
  *
@@ -89,32 +108,36 @@ export function discoverSurfaceFiles(workspace: Workspace): Discovery {
   const owner = new Map<string, SurfaceFile>()
 
   for (const spec of workspace.manifest.surfaces) {
-    const excludes = spec.exclude.map(compileGlob)
+    const excludes = spec.exclude.map((pattern, index) =>
+      compileManifestGlob(pattern, `surfaces.${spec.surface}.exclude[${index}]`),
+    )
     spec.include.forEach((pattern, index) => {
-      const matcher = compileGlob(pattern)
-      const base = globBase(pattern)
-      const { files, links } = walkFiles(workspace, base)
+      const entry = `surfaces.${spec.surface}.include[${index}]`
+      const matcher = compileManifestGlob(pattern, entry)
       let matched = 0
-      for (const path of files) {
-        if (!matcher.test(path) || excludes.some((exclude) => exclude.test(path))) continue
-        matched += 1
-        const previous = owner.get(path)
-        if (previous !== undefined && previous.surface !== spec.surface) {
-          throw new CliError(
-            EXIT.DATA,
-            `${path} is claimed by both surfaces.${previous.surface} and surfaces.${spec.surface}; exclude it from one of them`,
-          )
+      for (const base of matcher.bases) {
+        const { files, links } = walkFiles(workspace, base)
+        for (const path of files) {
+          if (!matcher.test(path) || excludes.some((exclude) => exclude.test(path))) continue
+          const previous = owner.get(path)
+          if (previous !== undefined && previous.surface !== spec.surface) {
+            throw new CliError(
+              EXIT.DATA,
+              `${path} is claimed by both surfaces.${previous.surface} and surfaces.${spec.surface}; exclude it from one of them`,
+            )
+          }
+          matched += 1
+          if (previous === undefined) {
+            owner.set(path, { surface: spec.surface, path, base: baseOf(matcher, path) })
+          }
         }
-        if (previous === undefined) owner.set(path, { surface: spec.surface, path, base })
-      }
-      for (const link of links) {
-        if (excludes.some((exclude) => exclude.test(link))) continue
-        warnings.add(`${link} is a symlink and was not followed`)
+        for (const link of links) {
+          if (excludes.some((exclude) => exclude.test(link))) continue
+          warnings.add(`${link} is a symlink and was not followed`)
+        }
       }
       if (matched === 0) {
-        warnings.add(
-          `surfaces.${spec.surface}.include[${index}] ${JSON.stringify(pattern)} matches no files`,
-        )
+        warnings.add(`${entry} ${JSON.stringify(pattern)} matches no files`)
       }
     })
   }
