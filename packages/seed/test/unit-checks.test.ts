@@ -89,4 +89,12 @@ describe('checkTranslation', () => {
   it('treats code spans as a multiset, not a sequence', () => {
     expect(check('`a` then `b`', 'primeiro `b` depois `a`').warnings).toEqual([])
   })
+
+  it('stays fast on hostile backtick and brace runs', () => {
+    const limits = { ...DEFAULT_SEED_LIMITS, lengthRatio: 100 }
+    const started = performance.now()
+    checkTranslation('`'.repeat(8000), `x${'`'.repeat(8000)}`, limits)
+    checkTranslation('{{'.repeat(8000), `x${'{{'.repeat(8000)}`, limits)
+    expect(performance.now() - started).toBeLessThan(500)
+  })
 })

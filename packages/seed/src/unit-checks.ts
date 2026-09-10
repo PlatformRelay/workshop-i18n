@@ -20,6 +20,7 @@
  *   discard good work; the draft carries the warning into the report instead.
  */
 
+import { findCodeSpans, findMustaches } from './inline-scan.js'
 import type { SeedLimits, SeedMissReason, SeedWarningCode } from './types.js'
 
 /** Outcome of {@link checkTranslation}. */
@@ -34,11 +35,6 @@ export interface TranslationCheck {
  * comparison like `a < b` is not a tag), an autolink, or an HTML comment opener.
  */
 const TAG = /<!--|<\/?[A-Za-z][^<>]*>?/g
-/** A complete `{{ … }}` interpolation, and a bare opener. */
-const MUSTACHE = /\{\{[\s\S]*?\}\}/g
-const MUSTACHE_OPEN = /\{\{/g
-/** An inline code span: a backtick run, content, and a run of the same length. */
-const CODE_SPAN = /(`+)([\s\S]*?[^`])\1(?!`)/g
 /** An inline link or image target. */
 const LINK_TARGET = /\]\(\s*([^)\s]+)/g
 /** URL schemes that execute or embed rather than navigate. */
@@ -61,10 +57,6 @@ function isSubMultiset(theirs: readonly string[], ours: readonly string[]): bool
   return true
 }
 
-function count(text: string, pattern: RegExp): number {
-  return [...text.matchAll(pattern)].length
-}
-
 function multiset(text: string, pattern: RegExp, group: number): string {
   return [...text.matchAll(pattern)]
     .map((match) => match[group] ?? '')
@@ -77,8 +69,11 @@ export function hasMarkupDivergence(source: string, translation: string): boolea
   // Tags are compared whole: an attribute or a Vue directive added to a tag the English
   // already has changes what the page does as much as a new tag would.
   if (!isSubMultiset(tokens(translation, TAG), tokens(source, TAG))) return true
-  if (!isSubMultiset(tokens(translation, MUSTACHE), tokens(source, MUSTACHE))) return true
-  if (count(translation, MUSTACHE_OPEN) > count(source, MUSTACHE_OPEN)) return true
+  const ours = findMustaches(source)
+  const theirs = findMustaches(translation)
+  const normal = (list: readonly string[]) => list.map((token) => token.replace(/\s+/g, ' '))
+  if (!isSubMultiset(normal(theirs.complete), normal(ours.complete))) return true
+  if (theirs.openers > ours.openers) return true
   const ourTargets = new Set([...source.matchAll(LINK_TARGET)].map((match) => match[1]))
   return [...translation.matchAll(LINK_TARGET)].some(
     (match) => ACTIVE_SCHEME.test(match[1] ?? '') && !ourTargets.has(match[1]),
@@ -105,7 +100,12 @@ export function checkTranslation(
   if (hasMarkupDivergence(source, translation)) return refuse('markup-divergence')
 
   const warnings: SeedWarningCode[] = []
-  if (multiset(source, CODE_SPAN, 2) !== multiset(translation, CODE_SPAN, 2)) {
+  const spans = (text: string) =>
+    findCodeSpans(text)
+      .map((span) => span.content)
+      .sort()
+      .join('\u0000')
+  if (spans(source) !== spans(translation)) {
     warnings.push('code-span-divergence')
   }
   if (multiset(source, LINK_TARGET, 1) !== multiset(translation, LINK_TARGET, 1)) {
