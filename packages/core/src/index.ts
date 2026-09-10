@@ -18,6 +18,8 @@ export {
   MAX_LOCALE_TAG_LENGTH,
 } from './locale.js'
 export {
+  type ComponentTextProps,
+  componentNameKey,
   DEFAULT_LENGTH_BUDGET,
   type LengthBudgets,
   type LocaleSet,
