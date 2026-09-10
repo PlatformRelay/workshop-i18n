@@ -128,3 +128,11 @@ plus `extract`. A `.pot` tree would be one more generated tree to keep in sync a
 
 Per-locale overrides (`i18n/<locale>/overrides/`, ADR 0008) live beside the catalogs and are out
 of scope; the extractor never walks `i18n/` as English source.
+
+Pruning is not decided either. Obsolete `#~` entries are kept indefinitely, so a unit that returns
+to the English source gets its translation back; and a catalog whose source file was deleted keeps
+its obsolete entries, so it is never removed — and neither is its Weblate component, since
+*remove components for inexistent files* only acts once the file is gone. When and how to prune
+old obsolete entries and orphan catalogs (an age or count limit, a `prune` command, a documented
+manual step) is a later decision. Until then an orphan catalog can be deleted by hand; the only
+cost is that its translations can no longer be resurrected.
