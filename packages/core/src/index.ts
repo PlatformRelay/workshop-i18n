@@ -20,11 +20,14 @@ export {
 export {
   type ComponentTextProps,
   componentNameKey,
+  componentNameRejection,
   DEFAULT_LENGTH_BUDGET,
   type LengthBudgets,
   type LocaleSet,
   lengthBudgetFor,
   MANIFEST_API_GROUP,
+  MAX_TEXT_PROP_COMPONENTS,
+  MAX_TEXT_PROPS_PER_COMPONENT,
   type Manifest,
   ManifestError,
   type ManifestIssue,
@@ -38,6 +41,7 @@ export {
   SUPPORTED_MANIFEST_MAJOR,
   type SurfaceSpec,
   surfaceSpec,
+  textPropRejection,
 } from './manifest.js'
 export {
   DuplicateUnitError,

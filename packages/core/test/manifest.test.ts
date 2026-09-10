@@ -11,6 +11,7 @@ import {
   QUIZ_SCHEMA_VARIANTS,
   SUPPORTED_MANIFEST_MAJOR,
   surfaceSpec,
+  textPropRejection,
 } from '../src/index.js'
 
 const complete = `
@@ -371,6 +372,56 @@ describe('parseManifest — component text props (ADR 0015)', () => {
         path: 'surfaces.slides.componentTextProps.KwCard[0]',
         code: 'invalid',
       })
+    }
+  })
+
+  it('rejects a directive spelled in camelCase, which Vue resolves to the same v- name', () => {
+    for (const prop of ['vHtml', 'vOn', 'vBind', 'VHtml', 'vModel']) {
+      const error = issuesOf(withProps(`      KwCard: [${prop}]\n`))
+      expect(error.issues[0], prop).toMatchObject({
+        path: 'surfaces.slides.componentTextProps.KwCard[0]',
+        code: 'invalid',
+      })
+    }
+  })
+
+  it('rejects event, URL and style attributes, which are code or addresses, never prose', () => {
+    for (const prop of [
+      'onclick',
+      'onMouseover',
+      'href',
+      'src',
+      'srcset',
+      'action',
+      'formaction',
+      'srcdoc',
+      'style',
+      'is',
+      'xlinkHref',
+    ]) {
+      expect(issuesOf(withProps(`      KwCard: [${prop}]\n`)).issues[0], prop).toMatchObject({
+        code: 'invalid',
+      })
+    }
+  })
+
+  it('caps the size of the declaration', () => {
+    const manyProps = Array.from({ length: 17 }, (_, index) => `p${index}`).join(', ')
+    expect(issuesOf(withProps(`      KwCard: [${manyProps}]\n`)).issues[0]).toMatchObject({
+      path: 'surfaces.slides.componentTextProps.KwCard',
+      code: 'invalid',
+    })
+    const manyComponents = Array.from({ length: 65 }, (_, index) => `      C${index}: [heading]\n`)
+    expect(issuesOf(withProps(manyComponents.join(''))).issues[0]).toMatchObject({
+      path: 'surfaces.slides.componentTextProps',
+      code: 'invalid',
+    })
+  })
+
+  it('exposes the same prop rule for callers that bypass the manifest', () => {
+    expect(textPropRejection('heading')).toBeUndefined()
+    for (const prop of ['vHtml', 'v-html', ':heading', '@click', '#default', 'onClick', 'href']) {
+      expect(textPropRejection(prop), prop).toBeDefined()
     }
   })
 
