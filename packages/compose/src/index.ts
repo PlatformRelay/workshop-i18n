@@ -15,4 +15,12 @@ export {
   type MarkupTokenKind,
   markupTokens,
 } from './markup.js'
+export {
+  compareSkeletons,
+  type LocateContext,
+  type LocatedFile,
+  type LocatedHole,
+  locateFile,
+  type SkeletonMismatch,
+} from './surface.js'
 export { containsTerm, missingProtectedTerms } from './terms.js'
