@@ -23,6 +23,7 @@ records that decision and its reversal trigger.
 | [0011](0011-typescript-implementation.md) | Implement in TypeScript on the Slidev/unified ecosystem | proposed |
 | [0012](0012-offset-splice-skeleton.md) | The skeleton is the source file with holes, not a re-serialized AST | proposed |
 | [0013](0013-own-the-po-codec.md) | Own the PO codec rather than depend on `gettext-parser` | proposed |
+| [0014](0014-catalog-layout-and-status-semantics.md) | One PO catalog per English source file; entries follow their unit; status gates on committed catalogs | proposed |
 
 **Parked** (from the origin pack, resurrected only if ADR 0003's service trigger fires):
 inbox/outbox idempotent event processing; sandboxed multi-tenant rendering. Until then, "no code

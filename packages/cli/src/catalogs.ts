@@ -11,12 +11,12 @@
  * quiz/questions.json       -> i18n/pt-BR/quiz/questions.po
  * ```
  *
- * Spec 002 left per-surface vs per-section splitting to the plan phase. Per file wins:
- * it is bounded (one section or one lab, never the whole deck — a 5 000-entry
- * `slides.po` is a merge-conflict magnet and a slow TMS component), it needs no naming
- * scheme beyond the path the author already chose, it cannot collide except by two
- * sources differing only in extension (refused), and a Weblate component maps onto it
- * with one file mask per surface (`i18n/*\/pages/**\/index.po`).
+ * Spec 002 left per-surface vs per-section splitting to the plan phase; ADR 0014 decides
+ * it. Per file is bounded (one section or one lab, never the whole deck — a 5 000-entry
+ * `slides.po` is a merge-conflict magnet and a slow TMS component), needs no naming scheme
+ * beyond the path the author already chose, and cannot collide except by two sources
+ * differing only in extension (refused). In Weblate it is one component per catalog file,
+ * via component discovery (`i18n/(?P<language>[^/]+)/(?P<component>.+)\.po`).
  *
  * ## Paths are where entries live, not who they are
  *

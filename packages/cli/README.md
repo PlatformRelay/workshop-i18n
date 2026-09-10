@@ -145,13 +145,17 @@ labs/day-1/05-pod.md     ->  i18n/pt-BR/labs/day-1/05-pod.po
 quiz/questions.json      ->  i18n/pt-BR/quiz/questions.po
 ```
 
-Spec 002 left per-surface vs per-section splitting open. Per file was chosen because it is bounded
-(one section or one lab — never a multi-thousand-entry `slides.po` that every PR conflicts on), it
-invents no naming scheme beyond the path the author already chose, and a TMS component maps onto it
-with one file mask per surface (for example `i18n/*/pages/**/index.po` in Weblate). Two sources that
-would share one catalog (`a.md` and `a.json`) are refused. No `.pot` template tree is written: every
-target locale's catalog is created by `extract` itself, and a template would be one more generated
-tree to keep in sync; adding a locale is a manifest edit followed by `extract`.
+The layout, the pooling below and the `status` gate are recorded in
+[ADR 0014](../../docs/adr/0014-catalog-layout-and-status-semantics.md) (proposed), which weighs per
+file against per surface, per section and per container. In short: per file is bounded (one section
+or one lab — never a multi-thousand-entry `slides.po` every PR conflicts on) and invents no naming
+scheme beyond the path the author already chose. In Weblate it means **one component per catalog
+file**, created by component discovery with a match such as
+`i18n/(?P<language>[^/]+)/(?P<component>.+)\.po` — 85 components for Kubernetes-Workshop — with
+gettext output set to *no line wrapping* and the `msgmerge` add-on left off (ADR 0014 lists the
+settings). Two sources that would share one catalog (`a.md` and `a.json`) are refused. No `.pot`
+template tree is written: `extract` creates every declared locale's catalog itself; adding a locale
+is a manifest edit followed by `extract`.
 
 **Entries follow their unit, not the file.** A path-keyed layout would orphan translations whenever
 a slide moves to another file, which ADR 0005 promises is free. So a locale's catalogs are treated
@@ -159,8 +163,11 @@ as one logical catalog partitioned by current source file: existing entries are 
 and each source file's catalog takes the entries its units name, wherever they lived before. Only a
 unit that left the English source becomes obsolete, in the catalog it was last in. A catalog left
 with no entries — every unit moved away, as on a file rename — is removed. The same unit id in two
-catalogs is a hard error naming both files and lines. The `#.` source reference is the file path
-(not a line number), so an edit elsewhere in a file does not rewrite provenance comments.
+catalogs is a hard error naming both files and lines. A new catalog built from moved entries keeps
+the header of the catalog they came from. The `#.` source reference is the file path (not a line
+number), so an edit elsewhere in a file does not rewrite provenance comments. What does *not* follow
+a moved unit is Weblate's own state for it — suggestions, comments, history — which Weblate keeps
+per component; the translation and its review state do follow, because they live in the file.
 
 ### Merge conflicts in catalogs
 
