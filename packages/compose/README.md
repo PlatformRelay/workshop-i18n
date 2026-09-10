@@ -77,12 +77,20 @@ and again on the emitted output.
   byte-identical bytes between them: fences, frontmatter machinery, Vue islands, includes.
 - **Markup and placeholder parity** — `checkMarkupParity(english, translation)`: inline
   code spans, HTML tags and Vue components (attributes included), `{{ }}` expressions,
-  attribute braces, link/image/autolink URLs, every link markdown-it's linkifier would
-  create (schemeless domains and email addresses included — found by `linkify-it`
-  itself, the library the renderer uses) and character references must match the
-  English unit as multisets. Translations are untrusted; a new `<script>`, `onclick=`,
-  `{{ }}` or changed URL is never emitted (preview: English fallback + warning; strict:
-  error). The scanner over-approximates markup on purpose — see `markup.ts`.
+  attribute braces, URLs and character references must match the English unit as
+  multisets. Translations are untrusted; a new `<script>`, `onclick=`, `{{ }}` or changed
+  URL is never emitted (preview: English fallback + warning; strict: error). The scanner
+  over-approximates markup on purpose — see `markup.ts`.
+
+  **URL tokens, precisely.** The set is the union of (a) every link `href` and image
+  `src` that **markdown-it 14.3.0** creates when it parses the unit inline, configured as
+  **`@slidev/cli` 52.19** configures its engine (`html`, `xhtmlOut`, `linkify`, Slidev's
+  quotes) — schemeless domains, emails and links inside emphasis or strikethrough
+  included; and (b) lexical over-reports: inline and autolink destinations, and a
+  `linkify-it` pass over the unescaped text with schemeless IPs and extra TLDs. A
+  differential test holds this to "every link the renderer creates is counted" over a
+  form × context matrix against markdown-it 14.3.0 **and** markdown-exit 1.0.0-beta.9,
+  the engine Slidev 52 actually renders with (via `unplugin-vue-markdown` 32).
 - **Protected terms** — `missingProtectedTerms(english, translation, manifest.protectedTerms)`:
   every term the English uses must appear unaltered (case-sensitive, whole-word).
 - **Length budget** — slides only, `lengthBudgetFor(manifest, layout)` against the code
@@ -107,9 +115,19 @@ Stated so nobody mistakes the gates for more than they are.
   not a gap) but means a preview deck can *look* finished while carrying drafts no human
   accepted. Reviewers must read `units[].state`, not the rendered deck; only strict output
   is releasable.
-- **Linkifier drift.** `linkify-it` is pinned to the major markdown-it 14 uses. A consumer
-  whose renderer links more (a newer linkify-it, custom TLDs beyond the extra ones added
-  here) is covered only as far as that overlap reaches.
+- **The renderer is modelled, not embedded.** The URL guarantee holds for Slidev's
+  default markdown setup as of `@slidev/cli` 52.19. Not modelled: MDC/Comark syntax
+  (`mdc: true` / `comark`; its `{…}` attribute blocks are caught lexically as `brace`
+  tokens, its link forms are not proven), KaTeX `\href`, a consumer `markdownSetup`
+  that adds link-creating plugins or TLDs beyond the extra ones here, and reference links
+  that resolve only against definitions elsewhere in the file (see above).
+- **Versions move in lockstep with the consumer's renderer.** `markdown-it` 14.3.0,
+  `linkify-it` 5.0.2 (with `uc.micro` 2.1.0) and the test-only `markdown-exit`
+  1.0.0-beta.9 are pinned exactly to what the consumer's lockfile resolves. A Renovate
+  bump of any of them — or of the consumer's `@slidev/cli`, `unplugin-vue-markdown` or
+  `markdown-exit` — must move both sides together, with the differential test rerun
+  against the new engine; bumping one side alone is exactly how a new link form slips
+  through.
 - **Length budgets** cover slides only, and a layout with no configured budget gets the
   manifest default rather than an "uncovered" report.
 

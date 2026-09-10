@@ -5,14 +5,17 @@
  * ## Why this is a security gate, not a style check
  *
  * A translation is hostile input (constitution, SECURITY.md). It reaches a composed deck
- * that Slidev renders through markdown-it with raw HTML enabled and then compiles as a
- * Vue template, so:
+ * that Slidev renders through a markdown-it engine (markdown-exit, its port, in Slidev
+ * 52) with raw HTML and linkify enabled and then compiles as a Vue template, so:
  *
  * - a `<script>`, an `<img onerror=…>` or an `onclick=` added to an existing tag is live
  *   HTML in every facilitator's browser;
  * - a `{{ … }}` is a Vue expression, evaluated at render time;
  * - a changed link or image destination silently re-points the audience (or a tracking
- *   pixel) somewhere else;
+ *   pixel) somewhere else — and with linkify on, so does a bare `attacker.io`,
+ *   `admin@evil.com` or `_evil.com_`. URL tokens therefore include every link the
+ *   renderer itself creates (see {@link rendererLinks}, and the README for the exact
+ *   renderer and configuration this is proven against);
  * - a changed inline code span is a changed command, which ADR 0007 requires to be
  *   byte-identical across locales.
  *

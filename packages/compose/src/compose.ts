@@ -24,7 +24,12 @@
  *
  * Which units block a release is decided by core's `evaluatePolicy` with the `release`
  * policy, over `statusesForLocale` — the same functions `status --policy release` uses —
- * so the two commands cannot disagree about the unit set or the gate (spec 003 SC-003).
+ * so the two commands share the unit set and the gate. They are not identical on a raw
+ * catalog: compose counts a stale `reviewed` entry as fuzzy where a state-only
+ * `catalogStatuses` read says reviewed, and compose also fails on content gates `status`
+ * does not run. Spec 003 SC-003 is guaranteed by the pipeline — `extract` marks
+ * changed-source entries fuzzy before `status` reads them — as the README's "Stale entries
+ * and SC-003" section states.
  *
  * A translation that fails a content gate (markup parity, protected terms), that the
  * extractor refuses to splice, or that changes the file's structure is never emitted:
