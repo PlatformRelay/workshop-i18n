@@ -16,7 +16,8 @@
  * `node_modules`; it never writes to the directory it is pointed at.
  *
  * What counts as "live structure", read from the built slide chunks: the elements the
- * compiled slides create, tags in hoisted static markup, Slidev's code-block, KaTeX and
+ * compiled slides create and their attributes, resolved components (imported as their own
+ * chunks), tags in hoisted static markup, Slidev's code-block, KaTeX and
  * Monaco wrappers, every payload's `seedSmokeProbe()` call compiled as code, and a canary
  * string planted in a local `.env` (a snippet import that reads it would publish it).
  * Inert text can produce none of these, so a translation that renders as prose leaves the
@@ -70,6 +71,24 @@ const CASES: readonly (readonly [string, string])[] = [
   ['Press <kbd>Enter</kbd> now.', 'Pressione <KBD>Enter</KBD> agora.'],
   ['Kubernetes schedules Pods.', 'O Kubernetes agenda [Pods]{onclick="alert(1)"}.'],
   ['Kubernetes schedules Pods.', 'O Kubernetes agenda Pods.\n::right::\ntexto'],
+  // Code-span braces must not fund a prose MDC attribute block.
+  [
+    'Print names with `kubectl get pods -o jsonpath={.items[*].metadata.name}` today.',
+    'Imprima nomes com **kubectl**{onclick="seedSmokeProbe()"} hoje.',
+  ],
+  // Every dollar and brace funded in prose: only the `$$` line rule stands in the way.
+  [
+    'Costs $1, $2, $3 and $4 using {a} and {b}.',
+    'Custa:\n$$ {1}{onVnodeMounted: () => seedSmokeProbe()}\nx\n$$',
+  ],
+  ['See the docs now.', 'Veja ![x](./.env?raw) agora.'],
+  ['See the docs now.', 'Veja ![x](./probe.json) agora.'],
+  ['See the docs now.', 'Veja ![x][r] agora.\n\n[r]: ./.env?raw'],
+  ['See [docs](./probe.json) now.', 'Veja ![docs](./probe.json) agora.'],
+  ['Kubernetes schedules Pods.', 'O Kubernetes agenda :Toc Pods.'],
+  ['Kubernetes schedules Pods.', 'O Kubernetes agenda Pods.\n\n::Toc\n::'],
+  ['- See\n- the docs', '- Veja\n- ```plantuml\n@startuml\nA -> B\n@enduml'],
+  ['See the docs.', 'Veja\n> ```mermaid\ngraph TD\nA --> B'],
   // Benign controls: accepted, and must build exactly like their English.
   ['Press <kbd>Enter</kbd> now.', 'Pressione <kbd>Enter</kbd> agora.'],
   ['Render `{{ x }}` in a chart.', 'Renderize `{{ x }}` no chart.'],
@@ -80,10 +99,13 @@ const KNOWN_LIVE: readonly string[] = [
   'O Kubernetes agenda Pods.\n<<< @/.env txt',
   'O Kubernetes agenda Pods.\n$$ {1}{onVnodeMounted: () => seedSmokeProbe()}\nx\n$$',
   'O Kubernetes agenda {{ seedSmokeProbe() }} Pods.',
+  'O Kubernetes agenda :Toc Pods.',
+  'Imprima nomes com **kubectl**{onclick="seedSmokeProbe()"} hoje.',
 ]
 
 function deck(bodies: readonly string[]): string {
-  return `---\ntheme: default\n---\n\n${bodies.map((body, index) => `# Slide ${index}\n\n${body}\n`).join('\n---\n\n')}`
+  // `mdc: true`, so MDC syntax is live in all three decks alike.
+  return `---\ntheme: default\nmdc: true\n---\n\n${bodies.map((body, index) => `# Slide ${index}\n\n${body}\n`).join('\n---\n\n')}`
 }
 
 function files(root: string): string[] {
@@ -127,6 +149,20 @@ function build(slides: string): Map<string, number> {
       // Element creation in the minified render functions: `c(\`kbd\`,null,…)`.
       for (const match of code.matchAll(/\(`([A-Za-z][\w-]*)`,(?:null|\{)/g)) {
         bump(`element:${match[1]}`)
+      }
+      // Attributes on created elements: `c(\`strong\`,{onclick:…},…)`.
+      for (const match of code.matchAll(/\(`([A-Za-z][\w-]*)`,\{([^{}]*)\}/g)) {
+        for (const key of (match[2] ?? '').matchAll(/([A-Za-z_$][\w$-]*):/g)) {
+          bump(`attr:${match[1]}.${key[1]}`)
+        }
+      }
+      // Resolved components arrive as imports of their own chunks (`./slidev/Toc-….js`), or,
+      // when a slide is their only user, inlined with their `__name` into its chunk.
+      for (const match of code.matchAll(/["'`]\.\/(?:slidev\/)?([A-Z][A-Za-z0-9]*)-[\w-]+\.js/g)) {
+        bump(`component:${match[1]}`)
+      }
+      for (const match of code.matchAll(/__name:[`"']([A-Z][A-Za-z0-9]*)[`"']/g)) {
+        bump(`component:${match[1]}`)
       }
       // Vue hoists static markup into HTML strings, so tags are read there too.
       for (const match of code.matchAll(/<([A-Za-z][\w-]*)/g)) bump(`markup:${match[1]}`)
@@ -173,6 +209,12 @@ describe.skipIf(INSTALL === undefined)('seed against a real slidev build', () =>
       englishDeck.get('live:KaTexBlockWrapper') ?? 0,
     )
     expect(teethDeck.get('live:probe') ?? 0).toBeGreaterThan(englishDeck.get('live:probe') ?? 0)
+    expect(teethDeck.get('component:Toc') ?? 0).toBeGreaterThan(
+      englishDeck.get('component:Toc') ?? 0,
+    )
+    expect(teethDeck.get('attr:strong.onclick') ?? 0).toBeGreaterThan(
+      englishDeck.get('attr:strong.onclick') ?? 0,
+    )
     // Plain slides are read too, or the comparison below would compare nothing.
     expect(englishDeck.get('element:kbd')).toBeGreaterThan(0)
     // The claim: whatever seed accepted builds to the same live structure as the English.
