@@ -10,6 +10,10 @@
  *    with an English unit id by container structure and unit position within matched
  *    containers. Ambiguity or divergence is a *miss*, never a guess, and every English
  *    unit is accounted for as either a draft or a miss with a reason.
+ * 2. **Record** (`applySeedDrafts`) — write each draft into whichever catalog holds its
+ *    unit, as `needs-review` with a `#. workshop-i18n-seed:` provenance comment, and only
+ *    into entries that hold no translation yet. Human work is never overwritten, and
+ *    nothing here can produce `reviewed` (constitution V).
  *
  * Pure and offline like every other library here: no `node:fs`, no network, and the
  * translated tree is hostile input — it is bounded, parsed only by the extractors, and
@@ -17,6 +21,17 @@
  */
 
 export { type ContainerAlignment, scopeOf, type TranslatedUnit } from './align-container.js'
+export {
+  type ApplySeedOptions,
+  type ApplySeedResult,
+  applySeedDrafts,
+  assertSafeProvenance,
+  MAX_PROVENANCE_LENGTH,
+  SEED_COMMENT_KEY,
+  SEED_OUTCOMES,
+  type SeedOutcome,
+  type SeedOutcomeKind,
+} from './apply.js'
 export { alignLabs } from './labs.js'
 export type { AlignOptions } from './pair.js'
 export { alignQuiz, type QuizAlignOptions } from './quiz.js'
