@@ -50,11 +50,28 @@ export interface LocaleSet {
   readonly targets: readonly string[]
 }
 
+/**
+ * Which static props of which components (or attributes of which HTML elements) carry
+ * translatable text, keyed by the tag name as the author wrote it (ADR 0015).
+ *
+ * A declaration, never a guess: a prop is machinery until the manifest says otherwise,
+ * because over-extracting turns `kind="svc"` into something a translator can change and
+ * breaks the deck in one locale, while under-extracting leaves visible English a human
+ * notices. Only static attributes are ever read — a `:heading` binding, a `v-` directive
+ * or an `@event` is code, and the parser refuses those names.
+ */
+export type ComponentTextProps = Readonly<Record<string, readonly string[]>>
+
 /** Path globs for a prose surface. */
 export interface MarkdownSurfaceSpec {
   readonly surface: 'slides' | 'labs'
   readonly include: readonly string[]
   readonly exclude: readonly string[]
+  /**
+   * Slides only, and only when the manifest declares it: the component text props
+   * extraction reads (ADR 0015). Absent means none — the extractor's default.
+   */
+  readonly componentTextProps?: ComponentTextProps
 }
 
 /** Path globs plus the schema variant for the structured quiz surface. */
@@ -283,7 +300,12 @@ function readSurfaces(issues: IssueList, value: unknown): readonly SurfaceSpec[]
       issues.add(path, 'invalid', 'must be a mapping with include (and optional exclude)')
       continue
     }
-    const allowed = surface === 'quiz' ? ['include', 'exclude', 'schema'] : ['include', 'exclude']
+    const allowed =
+      surface === 'quiz'
+        ? ['include', 'exclude', 'schema']
+        : surface === 'slides'
+          ? ['include', 'exclude', 'componentTextProps']
+          : ['include', 'exclude']
     for (const key of Object.keys(raw)) {
       if (!allowed.includes(key)) {
         issues.add(
@@ -301,9 +323,93 @@ function readSurfaces(issues: IssueList, value: unknown): readonly SurfaceSpec[]
       if (schema !== undefined) specs.push(Object.freeze({ surface, include, exclude, schema }))
       continue
     }
+    if (surface === 'slides' && raw.componentTextProps !== undefined) {
+      const componentTextProps = readComponentTextProps(
+        issues,
+        `${path}.componentTextProps`,
+        raw.componentTextProps,
+      )
+      specs.push(Object.freeze({ surface, include, exclude, componentTextProps }))
+      continue
+    }
     specs.push(Object.freeze({ surface, include, exclude }))
   }
   return specs
+}
+
+/**
+ * A tag or prop name as Vue resolves it: `KwCard`, `kwCard` and `kw-card` are one
+ * component to Vue, and `leftHeading` and `left-heading` one prop. This is Vue's own
+ * `hyphenate` (`/\B([A-Z])/g` → `-$1`, lower-cased), so a declaration matches every
+ * spelling the renderer would accept and no other.
+ */
+export function componentNameKey(name: string): string {
+  return name.replace(/\B([A-Z])/g, '-$1').toLowerCase()
+}
+
+/** A component, element or prop name: letters and digits in hyphen-separated words. */
+const TAG_OR_PROP_NAME = /^[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*$/
+
+function readComponentTextProps(
+  issues: IssueList,
+  path: string,
+  value: unknown,
+): ComponentTextProps {
+  // Null-prototype, like `byLayout`: tag names come from the deck, so a component named
+  // `constructor` must be absent rather than inherited.
+  const declared: Record<string, readonly string[]> = Object.create(null)
+  if (!isRecord(value)) {
+    issues.add(path, 'invalid', 'must be a mapping of component name to a list of prop names')
+    return Object.freeze(declared)
+  }
+  const seenComponents = new Set<string>()
+  for (const [component, rawProps] of Object.entries(value)) {
+    const componentPath = childPath(path, component)
+    if (!TAG_OR_PROP_NAME.test(component)) {
+      issues.add(
+        componentPath,
+        'invalid',
+        'is not a component or element name; use letters and digits, with "-" between words',
+      )
+      continue
+    }
+    const componentKey = componentNameKey(component)
+    if (seenComponents.has(componentKey)) {
+      issues.add(
+        componentPath,
+        'duplicate',
+        `names the same component as an earlier entry — Vue resolves both spellings to ${JSON.stringify(componentKey)}`,
+      )
+      continue
+    }
+    seenComponents.add(componentKey)
+    if (!Array.isArray(rawProps) || rawProps.length === 0) {
+      issues.add(componentPath, 'invalid', 'must be a non-empty list of prop names')
+      continue
+    }
+    const props: string[] = []
+    const seenProps = new Set<string>()
+    rawProps.forEach((prop, index) => {
+      const propPath = `${componentPath}[${index}]`
+      if (typeof prop !== 'string' || !TAG_OR_PROP_NAME.test(prop) || prop.startsWith('v-')) {
+        issues.add(
+          propPath,
+          'invalid',
+          `must be a static prop name, got ${JSON.stringify(prop)} — a ":" binding, a "v-" directive, an "@" event or a "#" slot is code, never text`,
+        )
+        return
+      }
+      const propKey = componentNameKey(prop)
+      if (seenProps.has(propKey)) {
+        issues.add(propPath, 'duplicate', `prop ${JSON.stringify(prop)} is listed more than once`)
+        return
+      }
+      seenProps.add(propKey)
+      props.push(prop)
+    })
+    declared[component] = Object.freeze(props)
+  }
+  return Object.freeze(declared)
 }
 
 function readQuizSchema(

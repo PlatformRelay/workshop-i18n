@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  componentNameKey,
   DEFAULT_LENGTH_BUDGET,
   lengthBudgetFor,
   MANIFEST_API_GROUP,
@@ -316,6 +317,109 @@ describe('parseManifest — quiz schema variant', () => {
   it('rejects a schema key on a non-quiz surface', () => {
     const error = issuesOf(`${minimal}    schema: kubernetes-workshop\n`)
     expect(error.issues[0]).toMatchObject({ path: 'surfaces.slides.schema', code: 'unknown-key' })
+  })
+})
+
+describe('parseManifest — component text props (ADR 0015)', () => {
+  const withProps = (block: string) => `${minimal}    componentTextProps:\n${block}`
+  const slidesOf = (text: string) =>
+    surfaceSpec(parseManifest(text), 'slides') as MarkdownSurfaceSpec
+
+  it('reads the declared text props per component, in the order the author wrote them', () => {
+    const slides = slidesOf(withProps('      KwCard: [heading, kicker]\n      CodeNote: [label]\n'))
+    expect(slides.componentTextProps).toEqual({
+      KwCard: ['heading', 'kicker'],
+      CodeNote: ['label'],
+    })
+  })
+
+  it('leaves the field absent when nothing is declared — a manifest without it is unchanged', () => {
+    expect(slidesOf(minimal)).toEqual({
+      surface: 'slides',
+      include: ['slides/**/*.md'],
+      exclude: [],
+    })
+    expect(slidesOf(minimal).componentTextProps).toBeUndefined()
+  })
+
+  it('freezes the declaration, so a prop cannot be made translatable after validation', () => {
+    const props = slidesOf(withProps('      KwCard: [heading]\n')).componentTextProps
+    expect(Object.isFrozen(props)).toBe(true)
+    expect(Object.isFrozen(props?.KwCard)).toBe(true)
+    expect(Object.getPrototypeOf(props)).toBeNull()
+  })
+
+  it('accepts kebab-case and PascalCase component names and HTML element names', () => {
+    const slides = slidesOf(withProps('      lab-callout: [duration]\n      img: [alt]\n'))
+    expect(slides.componentTextProps).toEqual({ 'lab-callout': ['duration'], img: ['alt'] })
+  })
+
+  it('rejects the key on the labs surface, where nothing reads it', () => {
+    const error = issuesOf(
+      `${minimal}  labs:\n    include: ['labs/*.md']\n    componentTextProps:\n      KwCard: [heading]\n`,
+    )
+    expect(error.issues[0]).toMatchObject({
+      path: 'surfaces.labs.componentTextProps',
+      code: 'unknown-key',
+    })
+  })
+
+  it('rejects a binding, a directive or an event as a text prop — those are code', () => {
+    for (const prop of ["':heading'", 'v-if', "'@click'", "'v-bind:heading'", "'#default'"]) {
+      const error = issuesOf(withProps(`      KwCard: [${prop}]\n`))
+      expect(error.issues[0], prop).toMatchObject({
+        path: 'surfaces.slides.componentTextProps.KwCard[0]',
+        code: 'invalid',
+      })
+    }
+  })
+
+  it('rejects a component name that is not a plain tag name', () => {
+    const error = issuesOf(withProps("      'Kw Card': [heading]\n"))
+    expect(error.issues[0]).toMatchObject({ code: 'invalid' })
+    expect(error.issues[0]?.path).toContain('componentTextProps')
+  })
+
+  it('rejects a mapping that is not a mapping of names to non-empty lists', () => {
+    expect(issuesOf(withProps('      KwCard: heading\n')).issues[0]).toMatchObject({
+      path: 'surfaces.slides.componentTextProps.KwCard',
+      code: 'invalid',
+    })
+    expect(issuesOf(withProps('      KwCard: []\n')).issues[0]).toMatchObject({
+      path: 'surfaces.slides.componentTextProps.KwCard',
+      code: 'invalid',
+    })
+    expect(issuesOf(`${minimal}    componentTextProps: [KwCard]\n`).issues[0]).toMatchObject({
+      path: 'surfaces.slides.componentTextProps',
+      code: 'invalid',
+    })
+  })
+
+  it('rejects the same component declared twice under two spellings Vue resolves as one', () => {
+    const error = issuesOf(withProps('      KwCard: [heading]\n      kw-card: [kicker]\n'))
+    expect(error.issues[0]).toMatchObject({
+      path: 'surfaces.slides.componentTextProps.kw-card',
+      code: 'duplicate',
+    })
+  })
+
+  it('rejects a prop listed twice under two spellings Vue resolves as one', () => {
+    const error = issuesOf(withProps('      KwCard: [leftHeading, left-heading]\n'))
+    expect(error.issues[0]).toMatchObject({
+      path: 'surfaces.slides.componentTextProps.KwCard[1]',
+      code: 'duplicate',
+    })
+  })
+})
+
+describe('componentNameKey', () => {
+  it('folds the spellings Vue resolves to one component onto one key', () => {
+    expect(componentNameKey('KwCard')).toBe('kw-card')
+    expect(componentNameKey('kw-card')).toBe('kw-card')
+    expect(componentNameKey('kwCard')).toBe('kw-card')
+    expect(componentNameKey('K8sIcon')).toBe('k8s-icon')
+    expect(componentNameKey('leftHeading')).toBe('left-heading')
+    expect(componentNameKey('v-click')).toBe('v-click')
   })
 })
 
