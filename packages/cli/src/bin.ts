@@ -1,5 +1,15 @@
 #!/usr/bin/env node
-console.error(
-  'workshop-i18n is pre-alpha: no commands are implemented yet. See the specs/ directory.',
-)
-process.exit(64)
+/**
+ * The only module that touches the real process: it binds `run` to `process.argv`, the
+ * working directory, the real file system and the standard streams, and hands the exit
+ * code back. Everything else is testable without it.
+ */
+import { run } from './cli.js'
+import { nodeFileSystem } from './io.js'
+
+process.exitCode = run(process.argv.slice(2), {
+  cwd: process.cwd(),
+  fs: nodeFileSystem(),
+  stdout: (text) => process.stdout.write(text),
+  stderr: (text) => process.stderr.write(text),
+})

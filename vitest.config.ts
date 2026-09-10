@@ -28,6 +28,18 @@ export default defineConfig({
         find: /^@workshop-i18n\/extract-slidev$/,
         replacement: source('./packages/extract-slidev/src/index.ts'),
       },
+      {
+        find: /^@workshop-i18n\/extract-markdown$/,
+        replacement: source('./packages/extract-markdown/src/index.ts'),
+      },
+      {
+        find: /^@workshop-i18n\/extract-quiz$/,
+        replacement: source('./packages/extract-quiz/src/index.ts'),
+      },
+      {
+        find: /^@workshop-i18n\/catalog-po$/,
+        replacement: source('./packages/catalog-po/src/index.ts'),
+      },
     ],
   },
 })
