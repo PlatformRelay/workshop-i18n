@@ -77,7 +77,9 @@ and again on the emitted output.
   byte-identical bytes between them: fences, frontmatter machinery, Vue islands, includes.
 - **Markup and placeholder parity** — `checkMarkupParity(english, translation)`: inline
   code spans, HTML tags and Vue components (attributes included), `{{ }}` expressions,
-  attribute braces, link/image/autolink/bare URLs and character references must match the
+  attribute braces, link/image/autolink URLs, every link markdown-it's linkifier would
+  create (schemeless domains and email addresses included — found by `linkify-it`
+  itself, the library the renderer uses) and character references must match the
   English unit as multisets. Translations are untrusted; a new `<script>`, `onclick=`,
   `{{ }}` or changed URL is never emitted (preview: English fallback + warning; strict:
   error). The scanner over-approximates markup on purpose — see `markup.ts`.
@@ -88,6 +90,28 @@ and again on the emitted output.
 
 `verifyComposedFile({ manifest, path, surface, english, composed, mode })` runs all of
 them on a composed file it did not produce — what `workshop-i18n verify` needs.
+
+## Known gaps
+
+Stated so nobody mistakes the gates for more than they are.
+
+- **Inline-tag attributes are frozen.** A tag's full text, attributes included, is a
+  parity token, so a translation cannot change `<abbr title="…">` or an inline `<img
+  alt="…">`: the unit falls back to English with a `markup-parity` warning. That is the
+  price of catching `onclick=` added to an existing tag; move translatable attribute text
+  into prose, or accept English there.
+- **Reference-link labels are not compared.** A translation can re-point `[text][a]` to
+  `[text][b]` when the file already defines `[b]:`. It cannot introduce a new target (the
+  definitions are English skeleton), so this is out of scope rather than an injection.
+- **needs-review renders unmarked in preview.** That follows core's contract (a draft is
+  not a gap) but means a preview deck can *look* finished while carrying drafts no human
+  accepted. Reviewers must read `units[].state`, not the rendered deck; only strict output
+  is releasable.
+- **Linkifier drift.** `linkify-it` is pinned to the major markdown-it 14 uses. A consumer
+  whose renderer links more (a newer linkify-it, custom TLDs beyond the extra ones added
+  here) is covered only as far as that overlap reaches.
+- **Length budgets** cover slides only, and a layout with no configured budget gets the
+  manifest default rather than an "uncovered" report.
 
 ## Deferred: governed slide overrides
 
