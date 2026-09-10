@@ -98,7 +98,11 @@ surfaces:
 - Keyed by component (or HTML element) name, matched the way Vue resolves names — `KwCard`,
   `kwCard` and `kw-card` are one component, `leftHeading` and `left-heading` one prop.
 - Only **static** attributes are read. A `:heading` binding is code, and the manifest parser
-  refuses a prop name that is a binding, directive, event or slot.
+  refuses a prop name that is a binding, directive, event or slot — judged on the name as Vue
+  resolves it, so `vHtml` is refused as `v-html` and `onClick` as a listener. Address, style and
+  component-switch attributes (`href`, `src`, `srcset`, `srcdoc`, `action`, `formaction`,
+  `style`, `is`, …) are refused too, and a declaration is capped at 64 components and 16 props
+  each. `extractSlidevFile` applies the same rule to a declaration handed to it directly.
 - **The default is empty.** A prop is machinery until declared. Over-extracting makes `kind="svc"`
   editable and breaks one locale's deck; under-extracting leaves visible English that a human
   notices. This is the same trade `DEFAULT_FRONTMATTER_TEXT_KEYS` makes, taken one step further:
@@ -139,6 +143,19 @@ this ADR — markdown units already carried inline HTML (`<span class="kw-kicker
 times in the deck) with nothing stopping a TMS from rewriting it — and it is what lets inline
 markup ride along inside HTML runs at all.
 
+**What counts as markup is read coarsely, on purpose.** The first version of this guard compared
+tags as this package's scanner read them, and that scanner's tag-name rule was narrower than
+Vue's: `<x_y v-html=…>`, `<svg:a onmouseover=…>` and `<a"b>` counted as text and compiled as live
+elements, and `Welt <img` passed because it was judged alone rather than in front of the `</div`
+it swallows. So the decision is now renderer-independent: every `<` not followed by whitespace
+(with the text up to the next `>`), every `{{` and every `}}` must match the English as a
+multiset, and their count may not change across the lines the replacement lands in. Comment
+words are exempt; comment delimiters are counted. The precise scanner — now reading tag names
+the way Vue's tokenizer does — may only add refusals. A false positive costs one unit an English
+fallback; a false negative costs code execution in the deck. A test composes every corpus file
+with hostile payloads and parses the result with `@vue/compiler-dom`, pinned to the consumer's
+Vue: nothing but text may differ from the English.
+
 ## Consequences
 
 - **Measured on the real deck** (all 29 sections, identities planned in memory): slot markers
@@ -164,4 +181,10 @@ markup ride along inside HTML runs at all.
   components could lift it later without changing any key shape.
 - **The HTML scanner is a locator a Vue template compiler would disagree with on malformed
   input** — an unterminated tag, a stray closer. Those cases degrade to skeleton plus a warning;
-  none of them can move a byte, because only located runs are holes.
+  none of them can move a byte, because only located runs are holes. A block nested deeper than
+  48 elements is left as skeleton and reported rather than walked.
+- **Two known key residues.** An element's key segment is its tag name, so `Press <Enter> to go`
+  inside an HTML block — an unknown element to Vue — keys the text after it under `enter.1`: a
+  segment taken from what the author meant as prose. And `v-pre` is treated like any other
+  directive (a boundary whose contents are still scanned); inside it `{{ }}` is literal text to
+  Vue but is still guarded as markup, which only costs a translator flexibility.
