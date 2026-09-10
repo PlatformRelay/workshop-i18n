@@ -350,6 +350,65 @@ export function componentNameKey(name: string): string {
 /** A component, element or prop name: letters and digits in hyphen-separated words. */
 const TAG_OR_PROP_NAME = /^[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*$/
 
+/** Most components a declaration may name, and most props per component. */
+export const MAX_TEXT_PROP_COMPONENTS = 64
+export const MAX_TEXT_PROPS_PER_COMPONENT = 16
+
+/**
+ * Attributes that are addresses, styles or component switches — never prose, whatever a
+ * manifest says. A translated `href` or `src` points the deck somewhere else; `style`
+ * and `is` change what renders. Compared in Vue-resolved form.
+ */
+const NEVER_TEXT_PROPS = new Set([
+  'href',
+  'src',
+  'srcset',
+  'srcdoc',
+  'action',
+  'formaction',
+  'style',
+  'is',
+  'key',
+  'ref',
+  'slot',
+  'xmlns',
+  'xlink-href',
+  'poster',
+  'data',
+])
+
+/**
+ * Why `prop` cannot be declared as a text prop, or `undefined` when it can.
+ *
+ * Judged on the name as Vue resolves it, because that is what reaches the renderer:
+ * `vHtml` is `v-html`, and `onClick` is a listener. Directives, bindings, events, slots,
+ * URLs and styles are code or addresses and are refused whatever their spelling.
+ * Exported so an extractor handed a declaration directly applies the same rule.
+ */
+export function textPropRejection(prop: unknown): string | undefined {
+  if (typeof prop !== 'string' || !TAG_OR_PROP_NAME.test(prop)) {
+    return `must be a static prop name, got ${JSON.stringify(prop)} — a ":" binding, an "@" event or a "#" slot is code, never text`
+  }
+  const resolved = componentNameKey(prop)
+  if (resolved.startsWith('v-')) {
+    return `${JSON.stringify(prop)} is the directive ${JSON.stringify(resolved)} to Vue — directives are code, never text`
+  }
+  if (resolved.startsWith('on')) {
+    return `${JSON.stringify(prop)} is read as an event listener — events are code, never text`
+  }
+  if (NEVER_TEXT_PROPS.has(resolved)) {
+    return `${JSON.stringify(prop)} is an address, a style or a component switch, never prose`
+  }
+  return undefined
+}
+
+/** Why `name` cannot be a declared component, or `undefined` when it can. */
+export function componentNameRejection(name: string): string | undefined {
+  return TAG_OR_PROP_NAME.test(name)
+    ? undefined
+    : 'is not a component or element name; use letters and digits, with "-" between words'
+}
+
 function readComponentTextProps(
   issues: IssueList,
   path: string,
@@ -362,15 +421,16 @@ function readComponentTextProps(
     issues.add(path, 'invalid', 'must be a mapping of component name to a list of prop names')
     return Object.freeze(declared)
   }
+  if (Object.keys(value).length > MAX_TEXT_PROP_COMPONENTS) {
+    issues.add(path, 'invalid', `must name at most ${MAX_TEXT_PROP_COMPONENTS} components`)
+    return Object.freeze(declared)
+  }
   const seenComponents = new Set<string>()
   for (const [component, rawProps] of Object.entries(value)) {
     const componentPath = childPath(path, component)
-    if (!TAG_OR_PROP_NAME.test(component)) {
-      issues.add(
-        componentPath,
-        'invalid',
-        'is not a component or element name; use letters and digits, with "-" between words',
-      )
+    const nameRejection = componentNameRejection(component)
+    if (nameRejection !== undefined) {
+      issues.add(componentPath, 'invalid', nameRejection)
       continue
     }
     const componentKey = componentNameKey(component)
@@ -387,16 +447,21 @@ function readComponentTextProps(
       issues.add(componentPath, 'invalid', 'must be a non-empty list of prop names')
       continue
     }
+    if (rawProps.length > MAX_TEXT_PROPS_PER_COMPONENT) {
+      issues.add(
+        componentPath,
+        'invalid',
+        `must list at most ${MAX_TEXT_PROPS_PER_COMPONENT} props`,
+      )
+      continue
+    }
     const props: string[] = []
     const seenProps = new Set<string>()
     rawProps.forEach((prop, index) => {
       const propPath = `${componentPath}[${index}]`
-      if (typeof prop !== 'string' || !TAG_OR_PROP_NAME.test(prop) || prop.startsWith('v-')) {
-        issues.add(
-          propPath,
-          'invalid',
-          `must be a static prop name, got ${JSON.stringify(prop)} — a ":" binding, a "v-" directive, an "@" event or a "#" slot is code, never text`,
-        )
+      const rejection = textPropRejection(prop)
+      if (rejection !== undefined || typeof prop !== 'string') {
+        issues.add(propPath, 'invalid', rejection ?? 'must be a string')
         return
       }
       const propKey = componentNameKey(prop)

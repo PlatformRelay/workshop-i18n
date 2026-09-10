@@ -1,6 +1,7 @@
 import { formatUnitId } from '@workshop-i18n/core'
 import { describe, expect, it } from 'vitest'
 import { extractSlidevFile, locateSlidevFile, SlidevExtractionError } from '../src/extract.js'
+import { locateProse } from '../src/prose.js'
 import { type CompositionError, composeSkeleton } from '../src/skeleton.js'
 
 /** Spec 001 AS-1: two frontmatter blocks, a Vue island, a note, and a fenced block. */
@@ -222,6 +223,39 @@ describe('extractSlidevFile component text props (ADR 0015)', () => {
     expect(reasonOf('Zwei\nZeilen')).toBe('attribute-line-break')
     expect(reasonOf('offen <!-- hier')).toBe('comment-terminator')
     expect(reasonOf('Eine Zeile')).toBeUndefined()
+  })
+
+  it('refuses a declaration the manifest parser would refuse, when handed one directly', () => {
+    for (const props of [['vHtml'], ['v-on'], ['onClick'], ['href'], [':heading']]) {
+      expect(
+        () =>
+          extractSlidevFile(slide('<KwCard heading="x" />'), {
+            componentTextProps: { KwCard: props },
+          }),
+        props[0],
+      ).toThrow(TypeError)
+    }
+    expect(() =>
+      extractSlidevFile(slide('<KwCard heading="x" />'), {
+        componentTextProps: { 'Kw Card': ['heading'] },
+      }),
+    ).toThrow(TypeError)
+  })
+
+  it('never reads a directive attribute as a prop, even from a table that lists one', () => {
+    // The locator's own last line of defence, below the declaration check above.
+    // No `@click` in the source: CommonMark has no `@` in attribute names, so a tag
+    // carrying one opens no HTML block at all.
+    const source = '<KwCard v-html="evil" :heading="x" heading="ok" />\n'
+    const spans = locateProse(source, {
+      start: 0,
+      end: source.length,
+      root: 'body',
+      textProps: new Map([['kw-card', new Set(['v-html', ':heading', '@click', 'heading'])]]),
+    }).spans
+    expect(spans.map((span) => [span.unitKey, span.text])).toEqual([
+      ['body/kw-card.1/prop:heading', 'ok'],
+    ])
   })
 
   it('skips an empty or symbol-only prop value', () => {

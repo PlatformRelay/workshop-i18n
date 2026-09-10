@@ -23,8 +23,10 @@
 import {
   type ComponentTextProps,
   componentNameKey,
+  componentNameRejection,
   formatUnitId,
   type TranslationUnit,
+  textPropRejection,
   type UnitId,
   validateUnitId,
 } from '@workshop-i18n/core'
@@ -58,7 +60,8 @@ export interface SlidevExtractOptions {
    * Which static props of which components carry translatable text — the manifest's
    * `surfaces.slides.componentTextProps` (ADR 0015). Defaults to
    * {@link DEFAULT_COMPONENT_TEXT_PROPS}, which declares none: a prop is machinery until
-   * the consumer says otherwise.
+   * the consumer says otherwise. A prop the manifest parser would refuse — a directive in
+   * any spelling, an event, a URL or style attribute — throws a `TypeError`.
    */
   readonly componentTextProps?: ComponentTextProps
 }
@@ -66,10 +69,28 @@ export interface SlidevExtractOptions {
 /** No component prop is text unless declared (ADR 0015). */
 export const DEFAULT_COMPONENT_TEXT_PROPS: ComponentTextProps = Object.freeze({})
 
-/** Fold a declaration onto the names Vue resolves, so every spelling of a tag matches. */
+/**
+ * Fold a declaration onto the names Vue resolves, so every spelling of a tag matches.
+ *
+ * Validated here as well as in the manifest parser: a caller can hand the extractor a
+ * declaration directly, and `vHtml` must not become a translatable `v-html` just because
+ * it skipped `parseManifest`.
+ *
+ * @throws {TypeError} naming the first component or prop the manifest would refuse.
+ */
 function textPropTable(declared: ComponentTextProps): TextPropTable {
   const table = new Map<string, Set<string>>()
   for (const [component, props] of Object.entries(declared)) {
+    const componentIssue = componentNameRejection(component)
+    if (componentIssue !== undefined) {
+      throw new TypeError(`componentTextProps[${JSON.stringify(component)}] ${componentIssue}`)
+    }
+    for (const prop of props) {
+      const propIssue = textPropRejection(prop)
+      if (propIssue !== undefined) {
+        throw new TypeError(`componentTextProps[${JSON.stringify(component)}]: ${propIssue}`)
+      }
+    }
     const key = componentNameKey(component)
     const set = table.get(key) ?? new Set<string>()
     for (const prop of props) set.add(componentNameKey(prop))
