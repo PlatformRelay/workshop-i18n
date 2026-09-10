@@ -371,6 +371,44 @@ describe('composeSkeleton refuses a replacement that would break out of its hole
     }
   })
 
+  it('judges block syntax inside a list item or a quote, past every container prefix', () => {
+    // The English already breaks before a bullet, so the character budget lets the break
+    // and the `-` through: only the line rules, reading past the container prefixes, see
+    // what the item holds. Each of these built a live component, published `.env` or
+    // crashed a real build.
+    const english = 'one\n- two, three\n- four'
+    const list = createSkeleton(`${english}\n`, [
+      hole('slides:s1:body/p-1', 0, english.length, english),
+    ])
+    for (const [line, reason] of [
+      ['- :: Toc', 'block-syntax'],
+      ['- - :: Toc', 'block-syntax'],
+      ['- [r]: ./.env?raw', 'block-syntax'],
+      ['- <<< @/.env', 'block-syntax'],
+      ['- $$', 'block-syntax'],
+      ['- ::right::', 'block-syntax'],
+      ['- ---', 'slide-separator'],
+    ] as const) {
+      try {
+        composeSkeleton(list, { 'slides:s1:body/p-1': `um\n${line}\n- quatro` })
+        expect.unreachable(`${line} should have been refused`)
+      } catch (error) {
+        expect((error as CompositionError).issues[0]?.reason, line).toBe(reason)
+      }
+    }
+    const ordered = 'one\n1) two, three'
+    const numbered = createSkeleton(`${ordered}\n`, [
+      hole('slides:s1:body/p-1', 0, ordered.length, ordered),
+    ])
+    expect(() => composeSkeleton(numbered, { 'slides:s1:body/p-1': 'um\n1) :::Toc' })).toThrow(
+      /block syntax/,
+    )
+    // The same item without block syntax in it is a translation.
+    expect(composeSkeleton(list, { 'slides:s1:body/p-1': 'um\n- dois, três\n- quatro' })).toBe(
+      'um\n- dois, três\n- quatro\n',
+    )
+  })
+
   it('rejects a Slidev snippet import or a KaTeX block line the English does not have', () => {
     // Both are Slidev block syntax that a real `slidev build` turned into live code: a
     // snippet line imports a file (`<<< @/.env`) and binds its `{…}` options, and a `$$`

@@ -612,9 +612,32 @@ function sameMultiset(a: readonly string[], b: readonly string[]): boolean {
   return sortedA.every((value, index) => value === sortedB[index])
 }
 
+/**
+ * `line` with every container prefix in front of its content removed, repeatedly: spaces
+ * and tabs, a bullet (`-`, `+`, `*`) or ordered-list marker (`1.`, `1)`) followed by
+ * whitespace, and a blockquote `>`. Block rules run again inside a list item or a quote,
+ * so `- :: Toc`, `1) :::Toc`, `- - :: Toc` and `- <<< @/.env` are the block syntax their
+ * content is — a test of the line's first character alone missed every one of them.
+ */
+function withoutContainerPrefixes(line: string): string {
+  let rest = line
+  for (;;) {
+    const next = rest.replace(/^(?:[ \t]+|[-+*][ \t]+|\d{1,9}[.)][ \t]+|>[ \t]?)/, '')
+    if (next === rest) return rest
+    rest = next
+  }
+}
+
+/** True when `line`, or its content inside any containers, satisfies `test`. */
+function atAnyDepth(line: string, test: (content: string) => boolean): boolean {
+  return test(line) || test(withoutContainerPrefixes(line))
+}
+
 /** Lines Slidev's slot sugar would read as markers. */
 function countSlotMarkers(text: string): number {
-  return splitLines(text).filter(isSlotMarkerLine).length
+  return splitLines(text).filter(
+    (line) => isSlotMarkerLine(line) || isSlotMarkerLine(withoutContainerPrefixes(line)),
+  ).length
 }
 
 function countOccurrences(text: string, token: string): number {
@@ -709,9 +732,11 @@ function rejectReplacement(
   // or a KaTeX block (`$$ {1}{…}`, a live `v-bind`) — is judged by line: a translation
   // may not produce one the landing lines do not already hold.
   if (hole.encoding.kind !== 'html-attribute') {
-    const existing = new Set(splitLines(current).map((line) => line.trim()))
+    const content = (line: string): string => withoutContainerPrefixes(line).trim()
+    const existing = new Set(splitLines(current).map(content))
     const added = splitLines(composed).find(
-      (line) => BLOCK_SYNTAX_LINE.test(line) && !existing.has(line.trim()),
+      (line) =>
+        atAnyDepth(line, (text) => BLOCK_SYNTAX_LINE.test(text)) && !existing.has(content(line)),
     )
     if (added !== undefined) {
       return reject(
@@ -799,14 +824,22 @@ function rejectReplacement(
       )
     }
   }
+  // Judged at any container depth too, and against the landing lines: a `---` or a fence
+  // inside a list item is a rule or a code block, and only one the English lacks is new.
+  const lineCount = (text: string, test: (line: string) => boolean): number =>
+    splitLines(text).filter((line) => atAnyDepth(line, test)).length
+  const separatorAdded =
+    lineCount(composed, isSlideSeparatorLine) > lineCount(current, isSlideSeparatorLine)
+  const isFence = (line: string): boolean => isFenceOpenerLine(line) || isTildeFenceOpenerLine(line)
+  const fenceAdded = lineCount(composed, isFence) > lineCount(current, isFence)
   for (const line of splitLines(composed)) {
-    if (isSlideSeparatorLine(line)) {
+    if (isSlideSeparatorLine(line) || separatorAdded) {
       return reject(
         'slide-separator',
         'translation starts a line with "---", which Slidev reads as a slide break — use an em dash "—" or an en dash pair instead',
       )
     }
-    if (isFenceOpenerLine(line) || isTildeFenceOpenerLine(line)) {
+    if (isFence(line) || fenceAdded) {
       return reject(
         'fence-opener',
         'translation opens a fenced code block, which makes the renderer skip to the next matching fence — use single backticks for inline code instead',

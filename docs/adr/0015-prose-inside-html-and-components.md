@@ -171,7 +171,11 @@ prop — and are judged on their bytes.
 import, which published a `.env` file in a real build), `$$` (a KaTeX block whose `{…}` becomes a
 live `v-bind`), `:` (the MDC block grammar accepts two or more colons and trims before the name;
 its `:1` shorthand crashes the build) or `[name]:` (a link reference definition an image can
-point at) is refused unless the lines the replacement lands in already hold it.
+point at) is refused unless the lines the replacement lands in already hold it. Every line rule —
+these, slide separators, fence openers and slot markers — reads the line both as written and with
+its container prefixes stripped repeatedly (spaces and tabs, `-`/`+`/`*` or `1.`/`1)` followed by
+whitespace, `>`), because block rules run again inside a list item or a quote: `- :: Toc`,
+`1) :::Toc`, `- [r]: ./.env?raw` and `- <<< @/.env` are the block syntax their content is.
 
 **The backbone is a character budget, not a list of syntax.** Three review rounds each found one
 more construct made of characters the coarse rules did not enumerate — `![x](./.env?raw)`, a
