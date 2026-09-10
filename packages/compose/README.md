@@ -33,7 +33,20 @@ const result = composeLocale({
 A *stale* entry is one whose `msgid` is not the English the source holds now; it is
 treated as `fuzzy`. Strict mode decides blocking units with core's `evaluatePolicy`
 (`release`) over `statusesForLocale`, the same functions `status --policy release` uses.
-**Strict composition with any error returns no files.**
+**Strict composition with any error returns no files.** A needs-review draft passes
+through the same content gates as a reviewed translation: in preview, a draft with
+hostile markup falls back to marked English like any other.
+
+### Stale entries and SC-003
+
+Compose is **deliberately stricter than a state-only catalog read**. A `reviewed` entry
+whose `msgid` has drifted from the current English is `reviewed` to `catalogStatuses`, and
+`fuzzy` to compose, which refuses to ship a translation of words the source no longer
+contains. Spec 003 SC-003 ("strict compose never fails on a locale that passes
+`status --policy release`") is guaranteed by the **pipeline**, not by the two libraries
+agreeing on a raw catalog: `extract` marks changed-source entries fuzzy, and `status`
+reports against that. A caller that feeds compose a catalog `extract` has not updated gets
+the stricter answer, on purpose.
 
 ### The fallback marker
 

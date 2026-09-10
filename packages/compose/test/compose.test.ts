@@ -136,6 +136,53 @@ describe('FR-005: states and modes', () => {
     expect(strict.findings).toContainEqual(
       expect.objectContaining({ code: 'policy', unitId: TITLE, detail: 'needs-review' }),
     )
+    // Pinned in compose itself, not only through the policy: strict never even plans to
+    // render a draft, so the empty file list is not the only thing standing in the way.
+    expect(strict.units.find((unit) => unit.id === TITLE)).toMatchObject({
+      state: 'needs-review',
+      rendering: 'fallback',
+    })
+    expect(strict.releasable).toBe(false)
+  })
+
+  it('gates a needs-review draft like any translation: hostile markup falls back in preview', () => {
+    const entries = withEntry(TITLE, {
+      flags: ['needs-review'],
+      translation: 'Zweite <img src=x onerror=alert(1)> Folie',
+    })
+    const preview = composeLocale(slidesOnly(entries))
+    expect(deckOf(preview)).not.toContain('onerror')
+    expect(deckOf(preview)).toContain(`# ${FALLBACK_MARKER}Second slide`)
+    expect(preview.units.find((unit) => unit.id === TITLE)).toMatchObject({
+      state: 'needs-review',
+      rendering: 'fallback',
+      marked: true,
+      reasons: ['markup-parity'],
+    })
+    expect(preview.findings).toContainEqual(
+      expect.objectContaining({ severity: 'warning', code: 'markup-parity', unitId: TITLE }),
+    )
+  })
+
+  it('is deliberately stricter than a state-only catalog read on a stale reviewed entry', () => {
+    // The entry is `reviewed` in the catalog, but its msgid is English that no longer
+    // exists. A raw `catalogStatuses` read calls it reviewed; compose calls it fuzzy and
+    // refuses to ship it. SC-003 holds at the pipeline level because `extract` marks such
+    // an entry fuzzy before `status` reads it (see README, "Stale entries and SC-003").
+    const slides = catalog('de', 'slides', withEntry(POD, { source: 'A Pod is a small unit.' }))
+    expect(catalogStatuses(slides).find((status) => status.id.unitKey === 'body/p-1')?.state).toBe(
+      'reviewed',
+    )
+    const strict = composeLocale({ ...slidesOnly([], 'strict'), catalogs: [slides] })
+    expect(strict.units.find((unit) => unit.id === POD)).toMatchObject({
+      state: 'fuzzy',
+      stale: true,
+      rendering: 'fallback',
+    })
+    expect(strict.findings).toContainEqual(
+      expect.objectContaining({ severity: 'error', code: 'policy', unitId: POD, detail: 'fuzzy' }),
+    )
+    expect(strict.files).toEqual([])
   })
 
   it('treats a translation of different English as fuzzy, not as shippable', () => {
