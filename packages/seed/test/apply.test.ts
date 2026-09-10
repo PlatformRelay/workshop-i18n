@@ -196,4 +196,14 @@ describe('applySeedDrafts', () => {
     } as SeedDraft
     expect(() => applySeedDrafts([fresh()], [unsafe], OPTIONS)).toThrow()
   })
+
+  it('refuses two drafts for one unit — the English corpus declared an id twice', () => {
+    expect(() =>
+      applySeedDrafts(
+        [fresh()],
+        [draft('slides:s1:body/p-1', 'um'), draft('slides:s1:body/p-1', 'dois')],
+        OPTIONS,
+      ),
+    ).toThrow(SeedInputError)
+  })
 })

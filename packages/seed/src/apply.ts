@@ -183,9 +183,18 @@ export function applySeedDrafts(
     const right = formatUnitId(b.id)
     return left < right ? -1 : left > right ? 1 : 0
   })
+  const seen = new Set<string>()
   for (const draft of sorted) {
     assertSafeUnitId(draft.id)
     const id = formatUnitId(draft.id)
+    if (seen.has(id)) {
+      // Only reachable when the English corpus declares one container id in two files,
+      // which `init-ids --check` rejects. Letting the first draft win would be a guess.
+      throw new SeedInputError(
+        `two drafts target unit ${JSON.stringify(id)}; container ids must be unique across the English corpus`,
+      )
+    }
+    seen.add(id)
     const index = owner.get(id)
     const catalog = index === undefined ? undefined : result[index]
     const entry = catalog?.entries.find((item) => formatUnitId(item.id) === id)
