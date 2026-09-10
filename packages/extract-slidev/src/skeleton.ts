@@ -56,6 +56,7 @@ import {
   isSlotMarkerLine,
   isTildeFenceOpenerLine,
 } from './deck.js'
+import { markupTokens } from './html.js'
 
 /** Where a markdown hole sits, which decides what a replacement may not contain. */
 export type HoleContext = 'body' | 'note'
@@ -115,6 +116,7 @@ export type ReplacementRejection =
   | 'indented-code'
   | 'table-column'
   | 'slot-marker'
+  | 'markup-changed'
 
 /** One refused replacement. */
 export interface CompositionIssue {
@@ -277,6 +279,14 @@ function spliceContextOf(source: string, hole: Hole): SpliceContext {
   }
 }
 
+/** True when `a` and `b` hold the same strings the same number of times. */
+function sameMultiset(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false
+  const sortedA = [...a].sort()
+  const sortedB = [...b].sort()
+  return sortedA.every((value, index) => value === sortedB[index])
+}
+
 /** Lines Slidev's slot sugar would read as markers. */
 function countSlotMarkers(text: string): number {
   return splitLines(text).filter(isSlotMarkerLine).length
@@ -355,6 +365,15 @@ function rejectReplacement(
           : `translation ${verb} "${token}", which would leave an HTML comment open or closed over the wrong text — keep exactly the delimiters the English has`,
       )
     }
+  }
+  // Markup rides along literally (ADR 0004, ADR 0015), so it is compared as a multiset: a
+  // translator may move `<strong>` to another word, but an edited attribute, an added
+  // `<img onerror>` or a new `{{ }}` — which Vue would execute — is not a translation.
+  if (!sameMultiset(markupTokens(replacement), markupTokens(hole.source))) {
+    return reject(
+      'markup-changed',
+      'translation changes the HTML tags or {{ }} interpolations the English carries — keep every tag and interpolation exactly as written; only their position may change',
+    )
   }
   // Unescaped pipes only: `\|` is how a cell carries a literal one, and translators need it.
   const barePipes = (text: string): number => countOccurrences(text.replace(/\\\|/g, ''), '|')
