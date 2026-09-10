@@ -4,9 +4,11 @@
  *
  * The translated tree is untrusted input. Alignment can only establish *where* a string
  * belongs; these checks decide whether the string itself is something a reviewer should
- * be handed. They are a pre-filter, not the gate: `compose`/`verify` own the hard markup
- * and fence-identity gates on everything that ships. What this refuses is never written
- * to a catalog by `seed`; what it accepts is not thereby proven safe.
+ * be handed. They are meant as a pre-filter in front of the hard markup and fence-identity
+ * gates of `compose`/`verify` — but those gates are not on `main` yet, so **until compose
+ * lands, this is the only filter** between a translated tree and a catalog a deck is built
+ * from. What this refuses is never written to a catalog by `seed`; what it accepts is not
+ * thereby proven safe, and the rules below are kept deliberately coarse for that reason.
  *
  * ## Coarse rules first, context only to refuse more
  *
@@ -30,11 +32,17 @@
  *     cannot decode;
  *   - a `{{ … }}` interpolation or a bare `{{`, spelled literally, with backslash
  *     escapes, or with character references (all decoded before counting);
- *   - a line that is a Slidev slot marker (`::name::`), a slide separator (`---…`) or a
- *     fence opener;
+ *   - a line that is a Slidev slot marker (`::name::`), a slide separator (`---…`), a
+ *     fence opener, a snippet import (`<<<` — reads a local file into the build) or a
+ *     KaTeX block (`$$`), unless the English has the identical line;
+ *   - a `{`, `}` or `$` beyond the English's count, after decoding: every Slidev option
+ *     block (code-block `{lines}{options}`, KaTeX `{…}{options}`, MDC `{attrs}`) is a
+ *     brace pair that becomes a live `v-bind`, and a single `$` switches KaTeX on;
  *   - a Unicode format character (general category Cf: zero-width characters, the soft
  *     hyphen, the byte-order mark, bidirectional controls), literal or as a character
- *     reference, which can hide text from a linkifier or a reviewer;
+ *     reference, which can hide text from a linkifier or a reviewer — and the invisibles
+ *     outside Cf that do the same (combining grapheme joiner, variation selectors, Hangul
+ *     fillers);
  *   - a `javascript:`, `vbscript:`, `file:` or `data:<type>/` URL, found anywhere in the
  *     decoded unit, whitespace removed.
  *
@@ -68,6 +76,22 @@ const LINK_TARGET = /\]\(\s*([^)\s]+)/g
 const ACTIVE_SCHEME = /(?:javascript|vbscript|file):|data:[a-z-]+\//g
 /** Unicode format characters. */
 const FORMAT_CHARACTER = /\p{Cf}/gu
+/**
+ * Invisible characters outside Cf that can still hide text from a reviewer: the combining
+ * grapheme joiner, variation selectors (both blocks) and the Hangul fillers.
+ */
+function isInvisible(char: string): boolean {
+  const code = char.codePointAt(0) ?? 0
+  return (
+    code === 0x034f ||
+    code === 0x115f ||
+    code === 0x1160 ||
+    code === 0x3164 ||
+    code === 0xffa0 ||
+    (code >= 0xfe00 && code <= 0xfe0f) ||
+    (code >= 0xe0100 && code <= 0xe01ef)
+  )
+}
 /** A Slidev slot marker line, as `@slidev/parser`'s slot sugar matches it (trimmed here). */
 const SLOT_MARKER = /^::\s*[\w.\-:]+\s*::$/
 /**
@@ -80,6 +104,8 @@ const SLOT_MARKER = /^::\s*[\w.\-:]+\s*::$/
  * outside every span the scanner found, so looking for starts there is enough.
  */
 const BACKTICK_EATER = /\[|<\S|:\/\/|www\.|\$|\{/
+/** The characters that open Slidev option blocks and KaTeX. */
+const BRACE_OR_DOLLAR = /[{}$]/g
 /** Joins sorted tokens into one comparable string; a character no token contains. */
 const SEPARATOR = String.fromCharCode(0)
 
@@ -231,7 +257,12 @@ function structuralLines(text: string): string[] {
       SLOT_MARKER.test(line) ||
       line.startsWith('---') ||
       line.startsWith('```') ||
-      line.startsWith('~~~')
+      line.startsWith('~~~') ||
+      // Slidev snippet import (`<<< @/file lang {lines}{options}`): reads a local file into
+      // the build, and its options become a live `v-bind` on the code block wrapper.
+      line.startsWith('<<<') ||
+      // A KaTeX block, whose `$$ {…}{options}` opener also becomes a live `v-bind`.
+      line.startsWith('$$')
     return structural ? [collapse(line)] : []
   })
 }
@@ -261,8 +292,19 @@ export function hasMarkupDivergence(source: string, translation: string): boolea
   if (theirs.openers > ours.openers) return true
   if (!isSubMultiset(structuralLines(translation), structuralLines(source))) return true
   // Decoded, so `&#8203;` counts as the zero-width space it renders as.
-  const format = (text: string) => [...text.matchAll(FORMAT_CHARACTER)].map((match) => match[0])
-  if (!isSubMultiset(format(theirDecoded), format(ourDecoded))) return true
+  const chars = (text: string, pattern: RegExp) => [...text.matchAll(pattern)].map((m) => m[0])
+  if (!isSubMultiset(chars(theirDecoded, FORMAT_CHARACTER), chars(ourDecoded, FORMAT_CHARACTER))) {
+    return true
+  }
+  const invisibles = (text: string) => [...text].filter(isInvisible)
+  if (!isSubMultiset(invisibles(theirDecoded), invisibles(ourDecoded))) return true
+  // Braces and dollars, counted after decoding. Every Slidev option block — code-block
+  // `{lines}{options}`, KaTeX `$$ {…}{options}`, MDC `{attrs}` — is a brace pair that
+  // becomes a live `v-bind`, and a single `$` is enough for Slidev to switch KaTeX on. A
+  // translation needs neither beyond what its English already has.
+  if (!isSubMultiset(chars(theirDecoded, BRACE_OR_DOLLAR), chars(ourDecoded, BRACE_OR_DOLLAR))) {
+    return true
+  }
   if (!isSubMultiset(activeSchemes(theirDecoded), activeSchemes(ourDecoded))) return true
 
   // Context, to refuse more. The English side counts only what is certainly live — outside

@@ -268,6 +268,79 @@ describe('checkTranslation', () => {
     expect(check('See [x](https://k8s.io).', translation).miss).toBe('markup-divergence')
   })
 
+  describe('Slidev syntax that runs or reads files', () => {
+    const english = 'Kubernetes schedules Pods onto Nodes.'
+    it.each([
+      [
+        'a snippet import with a hook',
+        'O Kubernetes agenda Pods.\n<<< @/probe.json json {1}{onVnodeMounted: () => $slidev.nav.go(9)}',
+      ],
+      [
+        'a snippet import into a writable Monaco editor',
+        'O Kubernetes agenda Pods.\n<<< @/probe.json json {monaco-write}',
+      ],
+      ['a snippet import of a local file', 'O Kubernetes agenda Pods.\n<<< @/.env txt'],
+      ['an indented snippet import', 'O Kubernetes agenda Pods.\n   <<< @/.env'],
+      [
+        'a KaTeX block with options',
+        'O Kubernetes agenda Pods.\n$$ {1}{onVnodeMounted: () => $slidev.nav.go(3)}\nx\n$$',
+      ],
+      ['a bare KaTeX block', 'O Kubernetes agenda Pods.\n$$\nx\n$$'],
+      ['inline math, which alone switches KaTeX on', 'O Kubernetes agenda $x$ Pods.'],
+      ['a single dollar sign', 'O Kubernetes custa $5.'],
+      ['a dollar sign spelled as a reference', 'O Kubernetes custa &#36;5.'],
+      ['an MDC attribute block', 'O Kubernetes agenda [Pods]{onclick="x"}.'],
+      ['a brace spelled with a backslash escape', 'O Kubernetes \\{agenda\\} Pods.'],
+      ['one more brace than the English', 'O Kubernetes agenda Pods {'],
+    ])('refuses %s', (_label, translation) => {
+      expect(check(english, translation).miss).toBe('markup-divergence')
+    })
+
+    it('accepts dollars and braces the English already carries, in any order', () => {
+      expect(
+        check('Set ${VAR} and {a} costs $5.', 'Defina {a} e ${VAR}, custa $5.').miss,
+      ).toBeUndefined()
+    })
+
+    it('accepts a snippet line the English carries identically, and no other', () => {
+      expect(check('See:\n<<< @/a.json json', 'Veja:\n<<< @/a.json json').miss).toBeUndefined()
+      expect(check('See:\n<<< @/a.json json', 'Veja:\n<<< @/b.json json').miss).toBe(
+        'markup-divergence',
+      )
+    })
+  })
+
+  it.each([
+    ['a combining grapheme joiner', 0x034f],
+    ['a variation selector', 0xfe0f],
+    ['a supplementary variation selector', 0xe0100],
+    ['a Hangul filler', 0x3164],
+    ['a Hangul choseong filler', 0x115f],
+    ['a Hangul jungseong filler', 0x1160],
+    ['a halfwidth Hangul filler', 0xffa0],
+  ])('refuses %s, an invisible that is not Cf, unless the English has it', (_label, code) => {
+    const hidden = String.fromCodePoint(code)
+    expect(check('See the docs now.', `Veja a doc${hidden} agora.`).miss).toBe('markup-divergence')
+    expect(check(`See ${hidden} now.`, `Veja ${hidden} agora.`).miss).toBeUndefined()
+  })
+
+  // Each of these kills a mutation that survived review.
+  it('refuses a tag inside a code span when the English has none anywhere (whole-unit rule)', () => {
+    expect(check('Use the tool.', 'Use a ferramenta `<b onclick=x>`.').miss).toBe(
+      'markup-divergence',
+    )
+  })
+
+  it('refuses a "<" + non-letter pair the English does not have (two-character rule)', () => {
+    expect(check('Run the template.', 'Rode o template <% x %>.').miss).toBe('markup-divergence')
+  })
+
+  it('compares tag names case-sensitively, even as a straight replacement', () => {
+    expect(check('Press <kbd>Enter</kbd>', 'Pressione <KBD>Enter</KBD>').miss).toBe(
+      'markup-divergence',
+    )
+  })
+
   it('does not mistake the Portuguese word "Data:" for a data URL', () => {
     expect(check('Date: 2026-09-10', 'Data: 2026-09-10').miss).toBeUndefined()
   })

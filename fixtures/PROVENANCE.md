@@ -200,7 +200,7 @@ in `corpus-quiz/` is left whole so the other 48 exercise `question-missing`.
 | `slides/S20-helm.md` | A speaker note whose re-wrapped translation starts a line with `+ `, which Markdown reads as a list item — an accidental structure change, so that slide's note is `structure-diverged` and listed (AS-2) while its body still seeds; a slide whose code span the translator translated inside the backticks, so its fingerprint cannot prove the position pairing (ADR 0016) and it misses whole; the deck's only `{{ }}` mustache |
 | `slides/S24-kubebuilder.md` | The degenerate three-slide deck, with several units left in English (`identical-to-source`, reported and never seeded) |
 | `labs/day-1-08-ingress.md` | In-fence `---` document separators with translated comments around them |
-| `labs/day-2-12-statefulset.solution.md` | The heaviest inline HTML in the lab corpus, translated around `<code>` and `&lt;ns&gt;` |
+| `labs/day-2-12-statefulset.solution.md` | The heaviest inline HTML in the lab corpus, translated around `<code>` and `&lt;ns&gt;`; one paragraph where the translator added a sentence with another `$NS`, which the coarse `$`-count rule refuses (`markup-divergence`) |
 | `labs/day-3-24-kubebuilder.md` | The deferred stub: a multi-line HTML comment and almost no translatable prose |
 | `labs/labs-README.md` | A file in the labs tree that is not a lab |
 | `quiz/questions.json` | Six translated questions whose option ids and answers must match the English |

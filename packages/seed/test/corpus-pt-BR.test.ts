@@ -147,10 +147,11 @@ describe('seeding the PR #55 fixture slice', () => {
           },
         },
         "labs/day-2-12-statefulset.solution.md": {
-          "aligned": 64,
+          "aligned": 63,
           "englishUnits": 73,
           "missReasons": {
             "identical-to-source": 9,
+            "markup-divergence": 1,
           },
         },
         "labs/day-3-24-kubebuilder.md": {
@@ -218,11 +219,11 @@ describe('seeding the PR #55 fixture slice', () => {
   it('matches the golden totals', () => {
     expect(golden(first.report.totals)).toMatchInlineSnapshot(`
       {
-        "aligned": 400,
+        "aligned": 399,
         "englishUnits": 937,
         "missReasons": {
           "identical-to-source": 80,
-          "markup-divergence": 1,
+          "markup-divergence": 2,
           "no-translated-file": 67,
           "question-missing": 384,
           "structure-diverged": 5,
