@@ -70,6 +70,14 @@ are not split out: the paragraph is the unit, as before, and the component rides
 under the markup guard below. Splitting would hand translators sentence fragments; the guard is
 what makes carrying it safe.
 
+A **multi-line opening tag** (`<KwCard` with its props on the lines below) opens no HTML block:
+CommonMark and markdown-it both test the block-start condition against the first line alone, so
+the tag is inline HTML in a paragraph to the renderer, and it is a paragraph unit here too. The
+locator follows the renderer rather than the author's intent; the markup guard keeps the tag, and
+a paragraph that is nothing but an opening tag (possible when a lone `>` line starts a blockquote)
+is not a unit at all. A declared prop inside such a paragraph is not extracted separately — it is
+part of the paragraph's markup.
+
 ### Text props are declared in the manifest
 
 Which component props are text cannot be read off the deck — `heading="ClusterIP — the default"`
@@ -117,8 +125,10 @@ For example `body/h1-1/div.1/v-click.1/kw-card.1/t:1` and `…/kw-card.1/prop:he
 
 A translation of any markdown or HTML unit must carry exactly the HTML tags and `{{ }}`
 interpolations its English carries, as a multiset: a translator may move `<strong>` around a
-different word, but may not edit, add or drop a tag or an interpolation. Composition refuses
-anything else (`markup-changed`), and an HTML-text unit additionally refuses a blank line, which
+different word, but may not edit, add or drop a tag or an interpolation, and markup that nests in
+the English must still nest — a closing tag moved ahead of its opener is a template Vue refuses
+to compile, which fails the whole deck's build. Composition refuses anything else
+(`markup-changed`), and an HTML-text unit additionally refuses a blank line, which
 would end the HTML block and turn the rest of it into markdown. This closes a gap that predates
 this ADR — markdown units already carried inline HTML (`<span class="kw-kicker">…</span>`, 120
 times in the deck) with nothing stopping a TMS from rewriting it — and it is what lets inline
@@ -126,13 +136,16 @@ markup ride along inside HTML runs at all.
 
 ## Consequences
 
-- **Measured on the real deck** (identities planned in memory, declaration `KwCard: [heading]`,
-  `CodeNote: [label]`): slot markers extracted 49 → 0; `prose-in-html-block` warnings and unit
-  counts before and after are recorded in the lane report that introduced this ADR.
-- **Re-keying, once.** Keys after a slot marker gain a `slot-<name>/` segment, and the paragraph
-  counters in the scope a marker used to occupy shift down by one. No consumer has catalogs yet,
-  so this is churn in a first extract, not lost translations; after adoption, ADR 0005's
-  amendment governs exactly as before.
+- **Measured on the real deck** (all 29 sections, identities planned in memory): slot markers
+  extracted 49 → 0; `prose-in-html-block` warnings 235 in 28 sections → 0; units 1592 → 1996
+  with no declaration, 2354 with `KwCard: [heading]` and `CodeNote: [label]` (the 358 extra are
+  exactly the 242 headings and 116 labels). Every section still composes back byte-for-byte from
+  an empty catalog, and re-extracting a fully translated locale gives back every identity.
+- **Re-keying, once.** Of the 1592 identities the deck had before, 1489 are unchanged (same id,
+  same text), 49 were slot markers and are gone, and 54 moved: the prose after a `::right::` or
+  `::notes::` gained a `slot-<name>/` segment, and paragraph counters in the scope a marker used to
+  occupy shifted down by one. No consumer has catalogs yet, so this is churn in a first extract,
+  not lost translations; after adoption, ADR 0005's amendment governs exactly as before.
 - **The manifest change is additive and optional.** Every v1 manifest valid before this ADR is
   valid after it and means the same thing, so `apiVersion` stays `workshop-i18n/v1`. A manifest
   that uses the key is refused by an older tool with `unknown-key` naming the path — the fail-closed
