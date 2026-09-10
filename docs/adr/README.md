@@ -24,6 +24,7 @@ records that decision and its reversal trigger.
 | [0012](0012-offset-splice-skeleton.md) | The skeleton is the source file with holes, not a re-serialized AST | proposed |
 | [0013](0013-own-the-po-codec.md) | Own the PO codec rather than depend on `gettext-parser` | proposed |
 | [0014](0014-catalog-layout-and-status-semantics.md) | One PO catalog per English source file; entries follow their unit; status gates on committed catalogs | proposed |
+| [0015](0015-prose-inside-html-and-components.md) | Prose inside HTML blocks and components is located, and text props are declared | proposed |
 
 **Parked** (from the origin pack, resurrected only if ADR 0003's service trigger fires):
 inbox/outbox idempotent event processing; sandboxed multi-tenant rendering. Until then, "no code
