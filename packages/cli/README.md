@@ -91,6 +91,12 @@ plan can be more lenient than they are. `--policy preview` gates nothing, stale 
 `--locale` narrows the report — and which catalogs are read — to one declared target. A catalog
 directory for a locale the manifest does not declare is warned about and excluded.
 
+**Coverage gaps** are counted too: prose an extractor could not locate safely (for example inside
+a raw HTML block or a Vue component) stays English in *every* locale, and no translation state can
+show that. Status reports the count per section (the `gaps` column, `coverageGaps` in JSON) so a
+locale cannot look fully reviewed while part of its slides silently stays English (ADR 0009). They
+are reported, not gated; `extract` lists each one with its location.
+
 The `--json` document (`schemaVersion: 1`) has a fixed key order and is byte-identical across runs:
 
 ```json
@@ -100,6 +106,7 @@ The `--json` document (`schemaVersion: 1`) has a fixed key order and is byte-ide
   "catalogsCurrent": true,
   "total": 5,
   "totals": { "missing": 3, "fuzzy": 0, "needs-review": 0, "reviewed": 2 },
+  "coverageGaps": { "total": 1, "sections": [{ "section": "pages/S05-pod/index.md", "count": 1 }] },
   "locales": [
     {
       "locale": "pt-BR",

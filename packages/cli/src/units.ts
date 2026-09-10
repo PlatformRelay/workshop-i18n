@@ -26,6 +26,11 @@ export interface ExtractedFile {
   readonly containers: readonly string[]
   /** Units in identity order, each carrying the file path as its reference. */
   readonly units: readonly ExtractedUnit[]
+  /**
+   * Extractor warnings for this file: prose that stays English in every locale because
+   * the extractor could not locate it safely. Counted so `status` can show it (ADR 0009).
+   */
+  readonly coverageGaps: number
 }
 
 /** The whole corpus, extracted. */
@@ -76,10 +81,15 @@ export function extractCorpus(workspace: Workspace, sources: Sources): Extractio
 
   for (const file of sources.files) {
     const located = locate(file, quizSchema)
+    let coverageGaps = 0
     for (const diagnostic of located.diagnostics) {
       const line = formatDiagnostic(file.path, diagnostic)
-      if (diagnostic.severity === 'error') errors.push(line)
-      else warnings.push(line)
+      if (diagnostic.severity === 'error') {
+        errors.push(line)
+      } else {
+        warnings.push(line)
+        coverageGaps += 1
+      }
     }
     for (const container of located.containers) {
       const key = `${file.surface satisfies Surface}:${container}`
@@ -96,6 +106,7 @@ export function extractCorpus(workspace: Workspace, sources: Sources): Extractio
       file,
       containers: located.containers,
       units: located.units.map((unit) => ({ ...unit, reference: file.path })),
+      coverageGaps,
     })
   }
 

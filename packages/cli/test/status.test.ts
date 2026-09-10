@@ -74,6 +74,10 @@ interface StatusJson {
       readonly counts: Record<string, number>
     }[]
   }[]
+  readonly coverageGaps: {
+    readonly total: number
+    readonly sections: readonly { readonly section: string; readonly count: number }[]
+  }
   readonly policy: null | {
     readonly name: string
     readonly satisfied: boolean
@@ -126,6 +130,7 @@ describe('status — the report (spec 002 US-2, FR-006)', () => {
       'catalogsCurrent',
       'total',
       'totals',
+      'coverageGaps',
       'locales',
       'policy',
     ])
@@ -290,6 +295,45 @@ describe('status --policy — stale catalogs (ADR 0014)', () => {
     expect(invoke(reviewedThenEnglishRemoved(), ['status', '--policy', 'preview']).code).toBe(
       EXIT.OK,
     )
+  })
+})
+
+describe('status — coverage gaps (ADR 0009)', () => {
+  function withGap(): MemoryFileSystem {
+    const fs = extracted()
+    fs.put(
+      '/repo/pages/S05-pod/index.md',
+      `${POD_SLIDES}\n<div class="note">\nProse in a block stays English.\n</div>\n`,
+    )
+    invoke(fs, ['extract'])
+    fs.put(SLIDES_PO, translateAll(fs.text(SLIDES_PO)))
+    fs.put(LAB_PO, translateAll(fs.text(LAB_PO)))
+    return fs
+  }
+
+  it('counts prose the extractors left English, per section, in the JSON', () => {
+    const { report } = json(withGap(), ['--locale', 'pt-BR'])
+    expect(report.totals.reviewed).toBe(report.total)
+    expect(report.coverageGaps).toEqual({
+      total: 1,
+      sections: [{ section: 'pages/S05-pod/index.md', count: 1 }],
+    })
+  })
+
+  it('shows them in the human report, so 100% reviewed cannot read as fully translated', () => {
+    const result = invoke(withGap(), ['status', '--locale', 'pt-BR'])
+    expect(result.stdout).toContain(
+      'coverage gaps: 1 block of prose stays English in every locale (extractor warnings; run extract to list them)',
+    )
+    expect(result.stdout).toMatch(
+      /section\s+total\s+missing\s+fuzzy\s+needs-review\s+reviewed\s+gaps/,
+    )
+    expect(result.stdout).toMatch(/pages\/S05-pod\/index\.md\s+3\s+0\s+0\s+0\s+3\s+1/)
+  })
+
+  it('reports zero gaps as zero, not as absent', () => {
+    const { report } = json(extracted())
+    expect(report.coverageGaps).toEqual({ total: 0, sections: [] })
   })
 })
 

@@ -59,6 +59,19 @@ function unitStatuses(plan: ExtractPlan, locale: LocalePlan): readonly UnitStatu
   return statusesForLocale(source, known, locale.locale)
 }
 
+/**
+ * Extractor coverage gaps per section: prose left English in *every* locale, which no
+ * translation state can show (ADR 0009 — a locale must not look fully translated while
+ * part of its slides silently stays English). Reported, not gated.
+ */
+function coverageGaps(plan: ExtractPlan): ReadonlyMap<string, number> {
+  const gaps = new Map<string, number>()
+  for (const file of plan.extraction.files) {
+    if (file.coverageGaps > 0) gaps.set(file.file.path, file.coverageGaps)
+  }
+  return gaps
+}
+
 /** Counts in a fixed key order, so the JSON is byte-stable (SC-003). */
 function orderedCounts(counts: StateCounts): Record<string, number> {
   return Object.fromEntries(UNIT_STATES.map((state) => [state, counts[state]]))
@@ -78,6 +91,7 @@ function jsonDocument(
   report: StateReport,
   evaluation: Verdict | undefined,
   catalogsCurrent: boolean,
+  gaps: ReadonlyMap<string, number>,
 ): unknown {
   return {
     schemaVersion: STATUS_SCHEMA_VERSION,
@@ -85,6 +99,12 @@ function jsonDocument(
     catalogsCurrent,
     total: report.total,
     totals: orderedCounts(report.totals),
+    coverageGaps: {
+      total: [...gaps.values()].reduce((sum, value) => sum + value, 0),
+      sections: [...gaps]
+        .sort(([a], [b]) => compareStrings(a, b))
+        .map(([section, gapCount]) => ({ section, count: gapCount })),
+    },
     locales: report.locales.map((locale) => ({
       locale: locale.locale,
       total: locale.total,
@@ -122,15 +142,20 @@ function countsText(counts: StateCounts): string {
   return UNIT_STATES.map((state) => `${state} ${counts[state]}`).join(', ')
 }
 
-function humanReport(report: StateReport, evaluation: Verdict | undefined): string {
+function humanReport(
+  report: StateReport,
+  evaluation: Verdict | undefined,
+  gaps: ReadonlyMap<string, number>,
+): string {
   const lines: string[] = []
-  const headers = ['section', 'total', ...UNIT_STATES]
+  const headers = ['section', 'total', ...UNIT_STATES, 'gaps']
   for (const locale of report.locales) {
     lines.push(`${locale.locale}  ${count(locale.total, 'unit')}: ${countsText(locale.counts)}`)
     const rows = locale.sections.map((section) => [
       section.section,
       String(section.total),
       ...UNIT_STATES.map((state) => String(section.counts[state])),
+      String(gaps.get(section.section) ?? 0),
     ])
     const widths = headers.map((header, column) =>
       Math.max(header.length, ...rows.map((row) => (row[column] ?? '').length)),
@@ -146,6 +171,12 @@ function humanReport(report: StateReport, evaluation: Verdict | undefined): stri
   lines.push(
     `total  ${count(report.total, 'unit')} in ${count(report.locales.length, 'locale')}: ${countsText(report.totals)}`,
   )
+  const gapTotal = [...gaps.values()].reduce((sum, value) => sum + value, 0)
+  if (gapTotal > 0) {
+    lines.push(
+      `coverage gaps: ${count(gapTotal, 'block')} of prose ${gapTotal === 1 ? 'stays' : 'stay'} English in every locale (extractor warnings; run extract to list them)`,
+    )
+  }
   if (evaluation !== undefined) {
     if (evaluation.satisfied) {
       lines.push(`policy ${evaluation.name}: passed`)
@@ -239,10 +270,10 @@ function execute(context: CommandContext): number {
 
   if (values.json === true) {
     io.stdout(
-      `${JSON.stringify(jsonDocument(plan, report, verdict, stale.length === 0), null, 2)}\n`,
+      `${JSON.stringify(jsonDocument(plan, report, verdict, stale.length === 0, coverageGaps(plan)), null, 2)}\n`,
     )
   } else {
-    io.stdout(humanReport(report, verdict))
+    io.stdout(humanReport(report, verdict, coverageGaps(plan)))
   }
   return verdict === undefined || verdict.satisfied ? EXIT.OK : EXIT.FAILED
 }
