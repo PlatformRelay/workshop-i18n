@@ -229,13 +229,14 @@ function blankMarkers(fragment: string, markers: readonly SlotMarker[]): string 
 
 /**
  * The key segment a slot opens: `slot-<name>` for a plain, first-seen name, otherwise
- * `slot.<ordinal>`. The two spellings cannot collide — a plain name has no `.` — so a
- * repeated or awkward name (`::x..y::` would put `..` in a key) still gets a unique,
- * safe segment.
+ * `slot:<ordinal>`. A repeated or awkward name (`::x..y::` would put `..` in a key) still
+ * gets a unique, safe segment, and neither spelling can be an HTML element's segment:
+ * those are `<name>.<n>`, so a `<slot>` element is `slot.1` and never `slot:1` — the dot
+ * form this fallback used to share with it gave two units one identity.
  */
 function slotSegment(name: string, ordinal: number, used: Set<string>): string {
   const named = `slot-${name}`
-  const segment = PLAIN_SLOT_NAME.test(name) && !used.has(named) ? named : `slot.${ordinal}`
+  const segment = PLAIN_SLOT_NAME.test(name) && !used.has(named) ? named : `slot:${ordinal}`
   used.add(segment)
   return segment
 }

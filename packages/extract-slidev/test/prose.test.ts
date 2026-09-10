@@ -446,6 +446,26 @@ describe('locateProse inside HTML blocks and components (ADR 0015)', () => {
   })
 })
 
+describe('locateProse keeps slot scopes and HTML elements apart', () => {
+  it('never gives a <slot> element and a fallback slot scope the same key', () => {
+    const fragment = [
+      '<slot>',
+      '<div>First words</div>',
+      '</slot>',
+      '',
+      '::x..y::',
+      '',
+      '<div>',
+      'First words',
+      '</div>',
+      '',
+    ].join('\n')
+    const found = keys(fragment)
+    expect(new Set(found).size).toBe(found.length)
+    expect(found).toEqual(['body/slot.1/div.1/t:1', 'body/slot:1/div.1/t:1'])
+  })
+})
+
 describe('locateProse on hostile HTML sizes', () => {
   const timed = (fragment: string) => {
     const started = performance.now()
@@ -562,7 +582,7 @@ describe('locateProse and Slidev slot markers', () => {
       'c',
       '',
     ].join('\n')
-    expect(keys(fragment)).toEqual(['body/slot-right/p-1', 'body/slot.2/p-1', 'body/slot.3/p-1'])
+    expect(keys(fragment)).toEqual(['body/slot-right/p-1', 'body/slot:2/p-1', 'body/slot:3/p-1'])
   })
 })
 

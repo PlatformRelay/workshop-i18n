@@ -40,7 +40,9 @@ marker line.
 Each marker opens a key scope named after its slot: `body/slot-right/p-1`. The slot name is layout
 machinery, not prose, so this is a structural key in ADR 0005's sense, and it means editing the
 left column no longer re-keys the right one. A repeated or unusable name falls back to
-`slot.<ordinal>`, which a plain name cannot collide with.
+`slot:<ordinal>`. That fallback was first spelled `slot.<ordinal>`, which is exactly the key of a
+`<slot>` HTML element (`<name>.<n>`, below) and gave two units one identity; the colon keeps the
+two namespaces disjoint.
 
 ### HTML blocks are scanned for prose runs
 
@@ -115,9 +117,12 @@ Keys continue ADR 0005's amended scheme — a path of structural roles, no prose
   block count in the enclosing heading scope, so an HTML block's position among markdown blocks
   does not enter the key either.
 - A run is `t:<n>` among its parent's runs; a declared prop is `prop:<name>` on its element.
-- The separators are chosen so the three shapes cannot collide with each other or with markdown
-  roles (`p-1`, `l-1`, `t-1`): element names are reduced to `[a-z0-9-]`, so `.` and `:` only ever
-  appear where this scheme puts them.
+- The separators keep every shape in its own namespace: element segments are reduced to
+  `[a-z0-9-]` and end in `.<n>`; runs are `t:<n>`, props `prop:<name>`, slot scopes `slot-<name>`
+  or `slot:<n>`, markdown roles `<role>-<n>`. A `.` therefore only ever ends an element segment and
+  a `:` only ever appears in a run, prop or fallback slot segment, so no two shapes can spell the
+  same segment — the one collision a review found (`slot.1`) is the reason the slot fallback uses
+  a colon.
 
 For example `body/h1-1/div.1/v-click.1/kw-card.1/t:1` and `…/kw-card.1/prop:heading`.
 
