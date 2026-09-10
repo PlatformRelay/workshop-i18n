@@ -18,7 +18,9 @@
  * those entries deliberately.
  *
  * A re-run with the same drafts is a zero-byte change: an entry whose draft already
- * equals the candidate is left exactly as it is (`already-seeded`).
+ * equals the candidate is left exactly as it is (`already-seeded`). An entry that is empty
+ * *but still carries a seed comment* had its draft cleared by a person — a rejection of
+ * that draft — so it is kept empty too (`kept-cleared`).
  */
 
 import {
@@ -48,6 +50,11 @@ export type SeedOutcomeKind =
   | 'kept-human'
   /** The entry holds a different draft, which may be mid-review; kept. */
   | 'kept-draft'
+  /**
+   * The entry is empty but carries a seed comment: an earlier seed was cleared by a
+   * person, which is a decision about that draft, and re-seeding would undo it. Kept.
+   */
+  | 'kept-cleared'
   /** No catalog has a live entry for this unit; run `extract` first. */
   | 'not-in-catalog'
   /** The catalog's English differs from the English the draft was aligned against. */
@@ -59,6 +66,7 @@ export const SEED_OUTCOMES: readonly SeedOutcomeKind[] = Object.freeze([
   'already-seeded',
   'kept-human',
   'kept-draft',
+  'kept-cleared',
   'not-in-catalog',
   'source-changed',
 ])
@@ -113,11 +121,15 @@ export function assertSafeProvenance(label: unknown): string {
   return label
 }
 
+/** True for the `#.` comment a seed run writes. */
+function isSeedComment(comment: PoComment): boolean {
+  return comment.marker === '.' && comment.text.trimStart().startsWith(`${SEED_COMMENT_KEY}:`)
+}
+
 /** The seed comment, replacing an earlier one in place or appended after the others. */
 function withSeedComment(comments: readonly PoComment[], label: string): readonly PoComment[] {
   const fresh: PoComment = { marker: '.', text: ` ${SEED_COMMENT_KEY}: ${label}` }
-  const isSeed = (comment: PoComment) =>
-    comment.marker === '.' && comment.text.trimStart().startsWith(`${SEED_COMMENT_KEY}:`)
+  const isSeed = isSeedComment
   const index = comments.findIndex(isSeed)
   if (index < 0) return [...comments, fresh]
   return comments
@@ -128,7 +140,9 @@ function withSeedComment(comments: readonly PoComment[], label: string): readonl
 function outcomeFor(entry: CatalogEntry, draft: SeedDraft): SeedOutcomeKind | undefined {
   if (entry.source !== draft.source) return 'source-changed'
   if (!isDraftable(entry)) return 'kept-human'
-  if (entry.state === 'missing') return undefined
+  if (entry.state === 'missing') {
+    return entry.po.comments.some(isSeedComment) ? 'kept-cleared' : undefined
+  }
   return entry.translation === draft.translation && entry.state === 'needs-review'
     ? 'already-seeded'
     : 'kept-draft'

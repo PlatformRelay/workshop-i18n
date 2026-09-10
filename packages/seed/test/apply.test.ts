@@ -197,6 +197,26 @@ describe('applySeedDrafts', () => {
     expect(() => applySeedDrafts([fresh()], [unsafe], OPTIONS)).toThrow()
   })
 
+  it.each([
+    ['keeping the draft marker', (block: string) => block.replace('msgstr "Um Pod."', 'msgstr ""')],
+    [
+      'dropping the draft marker too',
+      (block: string) =>
+        block.replace('#, needs-review\n', '').replace('msgstr "Um Pod."', 'msgstr ""'),
+    ],
+  ])(
+    'keeps a seeded draft a human cleared, %s — the seed comment survives as the record',
+    (_label, clear) => {
+      const first = applySeedDrafts([fresh()], [draft('slides:s1:body/p-1', 'Um Pod.')], OPTIONS)
+      const cleared = edit(first.catalogs[0] as Catalog, 'slides:s1:body/p-1', clear)
+      expect(entry(cleared, 'slides:s1:body/p-1')?.state).toBe('missing')
+
+      const second = applySeedDrafts([cleared], [draft('slides:s1:body/p-1', 'Um Pod.')], OPTIONS)
+      expect(second.outcomes).toEqual([{ id: 'slides:s1:body/p-1', outcome: 'kept-cleared' }])
+      expect(serializeCatalog(second.catalogs[0] as Catalog)).toBe(serializeCatalog(cleared))
+    },
+  )
+
   it('refuses two drafts for one unit — the English corpus declared an id twice', () => {
     expect(() =>
       applySeedDrafts(
