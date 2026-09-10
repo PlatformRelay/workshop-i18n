@@ -139,6 +139,16 @@ with no entries — every unit moved away, as on a file rename — is removed. T
 catalogs is a hard error naming both files and lines. The `#.` source reference is the file path
 (not a line number), so an edit elsewhere in a file does not rewrite provenance comments.
 
+### Merge conflicts in catalogs
+
+Entries are sorted by unit id and each catalog covers one source file, so two branches conflict
+only where they touched the same entries. A catalog still carrying conflict markers is refused
+(exit 65, naming the first marker's line) and never rewritten. Resolve it by hand — for each
+conflicted entry keep one side's `msgid`, `msgstr` and flags together, delete the markers — then
+run `workshop-i18n extract`: it re-canonicalizes the file and marks every entry whose `msgid` no
+longer matches the English `fuzzy`, with the kept `msgid` as `#| msgid`. Keeping a side whole is
+what makes that check work; mixing one side's `msgid` with the other side's `msgstr` defeats it.
+
 ## Exit codes
 
 | Code | Meaning |

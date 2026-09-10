@@ -304,6 +304,22 @@ describe('extract — refusing bad input (spec 002 edge cases)', () => {
     expect(fs.writes.length).toBe(writes)
   })
 
+  it('refuses a catalog left with git conflict markers, pointing at the first one', () => {
+    const fs = corpus()
+    invoke(fs, ['extract'])
+    const po = fs.text(SLIDES_PO)
+    const conflicted = po.replace(
+      'msgstr ""\n',
+      'msgstr ""\n<<<<<<< HEAD\nmsgstr "a"\n=======\nmsgstr "b"\n>>>>>>> branch\n',
+    )
+    const line = conflicted.split('\n').indexOf('<<<<<<< HEAD') + 1
+    fs.put(SLIDES_PO, conflicted)
+    const result = invoke(fs, ['extract'])
+    expect(result.code).toBe(EXIT.DATA)
+    expect(result.stderr).toContain(`i18n/pt-BR/pages/S05-pod/index.po:${line}: `)
+    expect(fs.text(SLIDES_PO)).toBe(conflicted)
+  })
+
   it('exits 65 when one unit id lives in two catalogs, naming both', () => {
     const fs = corpus()
     invoke(fs, ['extract'])
