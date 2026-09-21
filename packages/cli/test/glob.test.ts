@@ -396,4 +396,8 @@ describe('compileGlob(...).bases', () => {
     expect(compileGlob('README.md').bases).toEqual([''])
     expect(compileGlob('{labs,docs}/**/*.md').bases).toEqual(['docs', 'labs'])
   })
+
+  it('orders bases by UTF-16 code unit, so uppercase precedes lowercase in every locale', () => {
+    expect(compileGlob('{b,B,a,\u00e9,Z}/**/*.md').bases).toEqual(['B', 'Z', 'a', 'b', '\u00e9'])
+  })
 })

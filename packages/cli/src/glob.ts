@@ -33,6 +33,17 @@
  * 19 bytes.
  */
 
+/**
+ * UTF-16 code-unit order, what a bare `.sort()` does, made explicit (never `localeCompare`:
+ * that would make output depend on the host locale). Local rather than imported from
+ * `@workshop-i18n/core`: this module stays dependency-free, because the timing tests load
+ * it by file URL into a worker where a workspace specifier does not resolve.
+ */
+function compareCodeUnits(a: string, b: string): number {
+  if (a === b) return 0
+  return a < b ? -1 : 1
+}
+
 /** Most alternatives one glob may expand to; `{a,b}{a,b}…` is exponential otherwise. */
 export const MAX_GLOB_ALTERNATIVES = 64
 
@@ -263,7 +274,9 @@ export function compileGlob(pattern: string): Glob {
     }
     return { segments, base: base.join('/') }
   })
-  const bases = [...new Set(alternatives.map((alternative) => alternative.base))].sort()
+  const bases = [...new Set(alternatives.map((alternative) => alternative.base))].sort(
+    compareCodeUnits,
+  )
   return {
     pattern,
     bases,

@@ -26,6 +26,7 @@
  */
 
 import {
+  compareCodeUnits,
   compareUnitIds,
   formatUnitId,
   sourceHash,
@@ -207,11 +208,11 @@ export function updateCatalog(options: UpdateCatalogOptions): UpdateResult {
       obsolete: obsolete.sort(byId),
     },
     summary: {
-      added: added.sort(),
-      unchanged: unchanged.sort(),
-      fuzzied: fuzzied.sort(),
-      resurrected: resurrected.sort(),
-      obsoleted: obsoleted.sort(),
+      added: added.sort(compareCodeUnits),
+      unchanged: unchanged.sort(compareCodeUnits),
+      fuzzied: fuzzied.sort(compareCodeUnits),
+      resurrected: resurrected.sort(compareCodeUnits),
+      obsoleted: obsoleted.sort(compareCodeUnits),
     },
   }
 }

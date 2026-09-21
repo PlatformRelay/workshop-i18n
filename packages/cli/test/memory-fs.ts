@@ -1,4 +1,5 @@
 import { dirname, posix } from 'node:path'
+import { compareCodeUnits } from '@workshop-i18n/core'
 import { run } from '../src/cli.js'
 import type { CliIo, EntryKind, FileSystem } from '../src/io.js'
 
@@ -39,7 +40,7 @@ export class MemoryFileSystem implements FileSystem {
   /** Every file under `prefix`, as `{relative path: text}`. */
   tree(prefix: string): Record<string, string> {
     const out: Record<string, string> = {}
-    for (const path of [...this.files.keys()].sort()) {
+    for (const path of [...this.files.keys()].sort(compareCodeUnits)) {
       if (path.startsWith(`${prefix}/`)) out[path.slice(prefix.length + 1)] = this.text(path)
     }
     return out
