@@ -272,3 +272,51 @@ describe('locateProse', () => {
     expect(located.spans.map((span) => file.slice(span.start, span.end))).toEqual(['the prose'])
   })
 })
+
+describe('the raw-HTML coverage check on hostile markup', () => {
+  // Tag removal used to be `.replace(/<[^>]*>/g, '')`, which rescans to the end of the line
+  // from every `<` that has no `>` after it: quadratic (CodeQL
+  // js/incomplete-multi-character-sanitization also flags the pattern). Only the length of
+  // what is left is ever used, so the results below are pinned to the regex's behaviour.
+  const gaps = (source: string) =>
+    locateProse(source, { start: 0, end: source.length, root: 'body' }).diagnostics.map(
+      (d) => d.code,
+    )
+
+  it('measures a block of 100,000 unclosed "<" in linear time', () => {
+    const source = `<div>\n${'<'.repeat(100_000)}\n</div>\n`
+    const started = performance.now()
+    const codes = gaps(source)
+    expect(performance.now() - started).toBeLessThan(500)
+    expect(codes).toEqual(['prose-in-html-block'])
+  })
+
+  it('measures a summary label of 100,000 unclosed "<" in linear time', () => {
+    const source = `<details><summary>${'<'.repeat(100_000)}</summary>\n`
+    const started = performance.now()
+    const spans = locate(source)
+    expect(performance.now() - started).toBeLessThan(500)
+    expect(spans.map((span) => span.unitKey)).toEqual(['body/html-1/summary-1'])
+  })
+
+  it.each([
+    ['prose between tags', '<p><b>abc</b></p>', ['prose-in-html-block']],
+    ['too little text between tags', '<p><b>ab</b></p>', []],
+    ['tags only', '<K8sIcon kind="sts" />', []],
+    ['a stray "<" in front of a tag', '<<b>>abc', ['prose-in-html-block']],
+    ['a "<" that never closes', '< 5 items', ['prose-in-html-block']],
+    ['text between two tag runs', '<i>a</i> < b > <i>c</i>', ['prose-in-html-block']],
+    ['entities only', '&amp;&nbsp;&#8212;', []],
+  ] as const)('reports %s exactly as before', (_label, line, expected) => {
+    expect(gaps(`<div>\n${line}\n</div>\n`)).toEqual(expected)
+  })
+
+  it.each([
+    ['tags only', '<summary><b></b></summary>', []],
+    ['an entity only', '<summary>&nbsp;</summary>', []],
+    ['a word', '<summary><b>Hint</b></summary>', ['body/html-1/summary-1']],
+    ['a lone "<"', '<summary>a < b</summary>', ['body/html-1/summary-1']],
+  ] as const)('extracts a summary with %s exactly as before', (_label, line, expected) => {
+    expect(keys(`<details>${line}\n`)).toEqual(expected)
+  })
+})
