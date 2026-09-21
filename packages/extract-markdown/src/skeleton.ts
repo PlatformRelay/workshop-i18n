@@ -281,10 +281,10 @@ function rejectReplacement(hole: Hole, replacement: string): CompositionIssue | 
   if (hasControlCharacter(replacement)) {
     return reject('control-byte', 'translation contains a control character')
   }
-  if (/<!--|-->/.test(replacement)) {
+  if (/<!--|-->|--!>/.test(replacement)) {
     return reject(
       'comment-terminator',
-      'translation contains "<!--" or "-->", which would open or close an HTML comment and hide the skeleton after it',
+      'translation contains "<!--", "-->" or "--!>", which would open or close an HTML comment and hide the skeleton after it',
     )
   }
   if (hole.encoding.kind === 'html-inline') {

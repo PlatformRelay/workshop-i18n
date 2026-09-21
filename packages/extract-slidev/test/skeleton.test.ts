@@ -357,6 +357,31 @@ describe('composeSkeleton refuses a replacement that would break out of its hole
     )
   })
 
+  it('rejects a bang comment terminator, which the HTML5 tokenizer treats as "-->"', () => {
+    expect(() => composeSkeleton(skeleton, { 'slides:s1:body/p-1': 'eins --!> zwei' })).toThrow(
+      CompositionError,
+    )
+  })
+
+  it('rejects a speaker-note translation that closes the comment with "--!>"', () => {
+    const note = '<!--\nSpeaker: hello\n-->\n'
+    const noteSkeleton = createSkeleton(note, [
+      hole('slides:s1:note/p-1', 5, 19, 'Speaker: hello', markdown('', 'note')),
+    ])
+    let caught: unknown
+    try {
+      composeSkeleton(noteSkeleton, {
+        'slides:s1:note/p-1': 'Notiz --!> <script>alert(1)</script> Rest',
+      })
+    } catch (error) {
+      caught = error
+    }
+    expect(caught).toBeInstanceOf(CompositionError)
+    expect((caught as CompositionError).issues.map((issue) => issue.reason)).toEqual([
+      'comment-terminator',
+    ])
+  })
+
   it('rejects a speaker-note translation that closes the HTML comment early', () => {
     const note = '<!--\nSpeaker: hello\n-->\n'
     const noteSkeleton = createSkeleton(note, [

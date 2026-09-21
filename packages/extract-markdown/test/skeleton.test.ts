@@ -117,6 +117,8 @@ describe('composeSkeleton', () => {
     ['a tilde fence opener', 'erste\n~~~\nzweite', 'fence-opener'],
     ['an HTML comment opener', 'erste <!-- versteckt', 'comment-terminator'],
     ['an HTML comment terminator', 'erste --> zweite', 'comment-terminator'],
+    // The HTML5 tokenizer ends a comment on `--!>` as well as on `-->`.
+    ['a bang comment terminator', 'erste --!> zweite', 'comment-terminator'],
     ['a control character', 'erste \u0007 zweite', 'control-byte'],
   ] as const)('refuses a translation containing %s', (_label, translation, reason) => {
     let caught: unknown
@@ -365,6 +367,7 @@ describe('composeSkeleton', () => {
       ['a closing summary tag', 'a</summary><script>', 'tag-escape'],
       ['a line break', 'erste\nzweite', 'tag-escape'],
       ['a comment opener', 'a <!-- b', 'comment-terminator'],
+      ['a bang comment terminator', 'a --!> <img src=x onerror=alert(1)>', 'comment-terminator'],
     ] as const)('refuses a summary translation containing %s', (_label, translation, reason) => {
       let caught: unknown
       try {
