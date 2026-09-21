@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { stripTags } from '../src/index.js'
 
-/** The pattern `stripTags` replaced; kept here as the oracle for what it must still return. */
-const reference = (html: string): string => html.replace(/<[^>]*>/g, '')
+/**
+ * The pattern `stripTags` replaced, spelled as split-and-join (same matches, same result),
+ * kept as the oracle for what it must still return.
+ */
+const reference = (html: string): string => html.split(/<[^>]*>/).join('')
 
 describe('stripTags', () => {
   it.each([
