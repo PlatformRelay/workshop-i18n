@@ -201,6 +201,29 @@ function hasTranslatableText(node: Node): boolean {
 }
 
 /**
+ * `html` with every `<...>` run removed.
+ *
+ * A scanner rather than `.replace(/<[^>]*>/g, '')`: the regex is quadratic on a line of
+ * `<`s with no `>` (each `<` rescans to the end), and a lone `.replace` is what
+ * `js/incomplete-multi-character-sanitization` flags, because `<<script>script>` leaves
+ * `<script>` behind. Nothing here renders the result - callers only measure how much text
+ * is left - but the scanner is linear and needs no such argument.
+ */
+function stripTags(html: string): string {
+  let out = ''
+  let at = 0
+  for (;;) {
+    const open = html.indexOf('<', at)
+    if (open === -1) break
+    const close = html.indexOf('>', open + 1)
+    if (close === -1) break
+    out += html.slice(at, open)
+    at = close + 1
+  }
+  return out + html.slice(at)
+}
+
+/**
  * True when a line of a raw HTML block looks like prose a translator should have seen.
  *
  * Deliberately crude: it exists to make a coverage gap visible, not to decide anything.
@@ -213,8 +236,7 @@ function hasTranslatableText(node: Node): boolean {
  */
 function looksLikeProse(line: string): boolean {
   return (
-    line
-      .replace(/<[^>]*>/g, '')
+    stripTags(line)
       .replace(/&[#\w]+;/g, '')
       .trim().length >= 3
   )
@@ -230,8 +252,7 @@ const SUMMARY = /<summary(?:\s[^>\n]*)?>([^\n]*?)<\/summary\s*>/dg
 /** True when a summary's inner HTML carries words rather than only markup. */
 function summaryHasText(inner: string): boolean {
   return (
-    inner
-      .replace(/<[^>]*>/g, '')
+    stripTags(inner)
       .replace(/&[#\w]+;/g, ' ')
       .trim() !== ''
   )
