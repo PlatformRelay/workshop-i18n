@@ -360,12 +360,21 @@ export function planLabId(source: string, options: LabIdPlanOptions): LabIdPlan 
  * line of a file without a trailing one silently lost its final character.
  */
 function headingTextOf(text: string): string | undefined {
-  return (
-    text
-      .replace(/^ {0,3}#{1,6}[ \t]*/, '')
-      .replace(/[ \t]*#*[ \t]*$/, '')
-      .trim() || undefined
-  )
+  return stripClosingRun(text.replace(/^ {0,3}#{1,6}[ \t]*/, '')).trim() || undefined
+}
+
+/**
+ * `text` without its trailing `[ \t]*#*[ \t]*`. Scanned from the end: the regex spelling
+ * of the same thing is cubic on a heading ending in a long run of tabs (4,000 tabs stall
+ * a run for ~10s) because every start position retries both `[ \t]*` splits.
+ */
+function stripClosingRun(text: string): string {
+  const blank = (code: string | undefined): boolean => code === ' ' || code === '\t'
+  let end = text.length
+  while (end > 0 && blank(text[end - 1])) end -= 1
+  while (end > 0 && text[end - 1] === '#') end -= 1
+  while (end > 0 && blank(text[end - 1])) end -= 1
+  return text.slice(0, end)
 }
 
 /**
