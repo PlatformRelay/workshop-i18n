@@ -208,11 +208,11 @@ export function updateCatalog(options: UpdateCatalogOptions): UpdateResult {
       obsolete: obsolete.sort(byId),
     },
     summary: {
-      added: added.sort(compareCodeUnits),
-      unchanged: unchanged.sort(compareCodeUnits),
-      fuzzied: fuzzied.sort(compareCodeUnits),
-      resurrected: resurrected.sort(compareCodeUnits),
-      obsoleted: obsoleted.sort(compareCodeUnits),
+      added: added.toSorted(compareCodeUnits),
+      unchanged: unchanged.toSorted(compareCodeUnits),
+      fuzzied: fuzzied.toSorted(compareCodeUnits),
+      resurrected: resurrected.toSorted(compareCodeUnits),
+      obsoleted: obsoleted.toSorted(compareCodeUnits),
     },
   }
 }
