@@ -329,7 +329,7 @@ function rejectReplacement(
   }
   const composed = context.prefix + replacement + context.suffix
   const current = context.prefix + context.original + context.suffix
-  for (const token of ['<!--', '-->']) {
+  for (const token of ['<!--', '-->', '--!>']) {
     // Not `>`: **removing** a delimiter is exactly as fatal as adding one. A unit spans a
     // whole paragraph, inline comments included, so a translator can simply not carry a
     // `-->` across — and the comment then stays open and swallows every slide after it.
