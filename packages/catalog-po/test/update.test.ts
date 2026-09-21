@@ -50,6 +50,21 @@ function reviewedCatalog(): Catalog {
   return translated
 }
 
+describe('updateCatalog — summary ordering', () => {
+  it('lists ids by UTF-16 code unit, so uppercase container ids precede lowercase ones', () => {
+    const units = ['slides:b:body/1', 'slides:B:body/1', 'slides:a:body/1', 'slides:Z:body/1'].map(
+      (id) => unit(id, `text of ${id}`),
+    )
+    const { summary } = updateCatalog({ identity: IDENTITY, units })
+    expect(summary.added).toEqual([
+      'slides:B:body/1',
+      'slides:Z:body/1',
+      'slides:a:body/1',
+      'slides:b:body/1',
+    ])
+  })
+})
+
 describe('updateCatalog — a catalog that does not exist yet', () => {
   const result = updateCatalog({ identity: IDENTITY, units: BASE })
 

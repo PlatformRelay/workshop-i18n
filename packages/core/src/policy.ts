@@ -8,6 +8,7 @@
  * returns or implies one.
  */
 
+import { compareCodeUnits } from './compare.js'
 import { isUnitState, UNIT_STATES, type UnitState } from './unit.js'
 import { compareUnitIds, formatUnitId, type UnitId } from './unit-id.js'
 
@@ -457,7 +458,7 @@ export function resolvePolicy(policy: Policy | PolicyName): Policy {
     if (!isPolicyName(policy)) {
       throw new Error(
         `unknown policy ${JSON.stringify(policy)}: known policies are ` +
-          `${Object.keys(POLICIES).sort().join(', ')}`,
+          `${Object.keys(POLICIES).sort(compareCodeUnits).join(', ')}`,
       )
     }
     return POLICIES[policy]

@@ -9,6 +9,7 @@
  * frontmatter; units are addressed as `<surface>:<containerId>:<unitKey>`.
  */
 
+export { compareCodeUnits } from './compare.js'
 export {
   assertSafeLocale,
   isLocaleTag,
