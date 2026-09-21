@@ -37,6 +37,7 @@ export {
   type SurfaceSpec,
   surfaceSpec,
 } from './manifest.js'
+export { stripTags } from './markup.js'
 export {
   DuplicateUnitError,
   definePolicy,

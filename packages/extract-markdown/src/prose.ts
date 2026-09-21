@@ -52,6 +52,7 @@
  * is reported as a coverage gap rather than silently dropped.
  */
 
+import { stripTags } from '@workshop-i18n/core'
 import type { Definition, Node, Nodes, Parent, RootContent } from 'mdast'
 import { fromMarkdown } from 'mdast-util-from-markdown'
 import { gfmFootnoteFromMarkdown } from 'mdast-util-gfm-footnote'
@@ -198,29 +199,6 @@ function hasTranslatableText(node: Node): boolean {
     return false
   }
   return isParent(node) && node.children.some(hasTranslatableText)
-}
-
-/**
- * `html` with every `<...>` run removed.
- *
- * A scanner rather than `.replace(/<[^>]*>/g, '')`: the regex is quadratic on a line of
- * `<`s with no `>` (each `<` rescans to the end), and a lone `.replace` is what
- * `js/incomplete-multi-character-sanitization` flags, because `<<script>script>` leaves
- * `<script>` behind. Nothing here renders the result - callers only measure how much text
- * is left - but the scanner is linear and needs no such argument.
- */
-function stripTags(html: string): string {
-  let out = ''
-  let at = 0
-  for (;;) {
-    const open = html.indexOf('<', at)
-    if (open === -1) break
-    const close = html.indexOf('>', open + 1)
-    if (close === -1) break
-    out += html.slice(at, open)
-    at = close + 1
-  }
-  return out + html.slice(at)
 }
 
 /**
