@@ -89,6 +89,31 @@ describe('planLabId', () => {
     expect(plan.text).toBe('﻿<!-- labId: notes -->\n\nJust prose.\n')
   })
 
+  describe('a heading ending in a long run of blanks', () => {
+    // `headingTextOf` used to strip the closing `[ \t]*#*[ \t]*` with a regex, which is
+    // cubic on a heading that ends in blanks followed by any other character (CodeQL
+    // js/polynomial-redos). A lab in a contributor PR reaches it through `init-ids --check`.
+    it('is planned in linear time, not cubic', () => {
+      const hostile = `# a${'\t'.repeat(4_000)}x\n`
+      const started = performance.now()
+      const plan = planLabId(hostile, { pathStem: 'labs/a' })
+      expect(performance.now() - started).toBeLessThan(500)
+      expect(plan.labId).toBe('labs-a')
+    })
+
+    // With no path stem the title is what names the lab, so the derived id shows the
+    // heading text came through the strip unchanged.
+    it.each([
+      ['a closing hash run', '# Title ##   \n', 'title'],
+      ['a closing hash run after tabs', '# Title\t#\t\n', 'title'],
+      ['no closing run', '# Title\n', 'title'],
+      ['hashes that are part of the text', '# C# Basics\n', 'c-basics'],
+      ['blanks only after the hashes', '#\tTitle \t \n', 'title'],
+    ] as const)('still derives the title from a heading with %s', (_label, heading, labId) => {
+      expect(planLabId(`${heading}\nProse.\n`, { pathStem: '' }).labId).toBe(labId)
+    })
+  })
+
   // A marker this run writes but the next run cannot read is worse than no marker: the
   // codemod stops being idempotent, and every re-run leaves another dead comment behind
   // in English source. So what is asserted here is a *second* run and a read-back, not
